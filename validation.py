@@ -273,27 +273,24 @@ def validate_extraction_output(raw: Any, world_state: Optional[Dict] = None) -> 
             logger.debug(f"state_updates is not a dict (got {type(su_raw).__name__}) — dropped.")
 
     # ── requires_roll ─────────────────────────────────────────────────────────
+    # requires_roll — WHITELIST ONLY. Do not pass rr through unfiltered.
+    # Any hallucinated 'dc', 'bonus', or other stray key from the LLM is
+    # silently discarded here. Python owns DC via DIFFICULTY_TO_DC in state_manager.
     if "requires_roll" in raw:
         rr = raw["requires_roll"]
-        VALID_DIFFICULTIES = {"easy", "medium", "hard", "very_hard"}
-        VALID_STATS = {"STR", "DEX", "CON", "INT", "WIS", "CHA"}
+        VALID_D = {"easy", "medium", "hard", "very_hard"}
+        VALID_S = {"STR", "DEX", "CON", "INT", "WIS", "CHA"}
         if isinstance(rr, dict):
-            difficulty = rr.get("difficulty")
-            stat = rr.get("stat")
-            if difficulty not in VALID_DIFFICULTIES:
-                logger.debug(
-                    f"requires_roll.difficulty '{difficulty}' is not a valid enum "
-                    f"({VALID_DIFFICULTIES}) — dropping entire requires_roll."
-                )
-            elif stat not in VALID_STATS:
-                logger.debug(
-                    f"requires_roll.stat '{stat}' is not a valid stat — dropping entire requires_roll."
-                )
+            d, s = rr.get("difficulty"), rr.get("stat")
+            if d not in VALID_D:
+                logger.debug(f"requires_roll.difficulty '{d}' invalid — dropped.")
+            elif s not in VALID_S:
+                logger.debug(f"requires_roll.stat '{s}' invalid — dropped.")
             else:
-                # Keep the whole block if core fields are valid
-                cleaned["requires_roll"] = rr
+                # Reconstruct from only the two validated fields — never pass rr as-is
+                cleaned["requires_roll"] = {"difficulty": d, "stat": s}
         else:
-            logger.debug(f"requires_roll is not a dict — dropped.")
+            logger.debug("requires_roll not a dict — dropped.")
 
     # ── combat_start ──────────────────────────────────────────────────────────
     if "combat_start" in raw:
