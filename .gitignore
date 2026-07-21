@@ -1,0 +1,22 @@
+# Save files — runtime generated, never committed (spec Section 3)
+saves/
+world_saves/
+save_backups/
+player_state.json
+
+# ChromaDB storage — runtime generated
+db/
+
+# Python artifacts
+*.pyc
+__pycache__/
+
+# Virtual environment
+.venv/
+venv/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
