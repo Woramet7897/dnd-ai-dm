@@ -1,0 +1,120 @@
+{
+  "town_riverside": {
+    "id": "town_riverside",
+    "name": "Riverside Village",
+    "type": "town",
+    "description": "A lively riverside settlement nestled between the Thornwood forest and the Silver River. The smell of fresh bread and forge-smoke mingles in the air.",
+    "exits": {
+      "north": "forest_edge",
+      "east": "old_bridge",
+      "south": null,
+      "west": null
+    },
+    "shops": ["general_store", "blacksmith"],
+    "npcs": ["innkeeper_mira", "captain_valdis"],
+    "is_safe": true,
+    "loot": []
+  },
+  "forest_edge": {
+    "id": "forest_edge",
+    "name": "Edge of Thornwood Forest",
+    "type": "wilderness",
+    "description": "Tall oaks crowd together here. The village path behind you gives way to a carpet of fallen leaves. Shadows shift between the trunks.",
+    "exits": {
+      "north": "forest_clearing",
+      "south": "town_riverside",
+      "east": null,
+      "west": null
+    },
+    "shops": [],
+    "npcs": [],
+    "is_safe": false,
+    "loot": [],
+    "encounter_table": ["goblin_scout", "wolf"]
+  },
+  "forest_clearing": {
+    "id": "forest_clearing",
+    "name": "Forest Clearing",
+    "type": "wilderness",
+    "description": "A wide clearing breaks through the tree canopy. The ruins of a stone shrine stand at its centre, draped in moss. Something has been here recently — claw marks on the bark.",
+    "exits": {
+      "north": "goblin_camp",
+      "south": "forest_edge",
+      "east": "ruined_mill",
+      "west": null
+    },
+    "shops": [],
+    "npcs": [],
+    "is_safe": false,
+    "loot": [{"item_id": "torch", "quantity": 2}],
+    "encounter_table": ["goblin_scout", "goblin_warrior", "wolf"]
+  },
+  "old_bridge": {
+    "id": "old_bridge",
+    "name": "Old Stone Bridge",
+    "type": "wilderness",
+    "description": "A crumbling stone bridge spans the Silver River. The water runs fast and cold below. A toll collector's booth stands abandoned on the far bank.",
+    "exits": {
+      "west": "town_riverside",
+      "east": "crossroads",
+      "north": null,
+      "south": null
+    },
+    "shops": [],
+    "npcs": [],
+    "is_safe": false,
+    "loot": [],
+    "encounter_table": ["bandit", "cultist"]
+  },
+  "crossroads": {
+    "id": "crossroads",
+    "name": "Dusty Crossroads",
+    "type": "wilderness",
+    "description": "Four roads meet here. A weathered signpost points in each direction, though wind and time have worn the names away. A merchant's wagon sits abandoned nearby.",
+    "exits": {
+      "west": "old_bridge",
+      "north": "ruined_mill",
+      "south": null,
+      "east": null
+    },
+    "shops": ["market_stall"],
+    "npcs": ["travelling_merchant"],
+    "is_safe": false,
+    "loot": [{"item_id": "rope", "quantity": 1}, {"item_id": "dagger", "quantity": 1}],
+    "encounter_table": ["bandit", "bandit_captain"]
+  },
+  "ruined_mill": {
+    "id": "ruined_mill",
+    "name": "Ruined Riverside Mill",
+    "type": "dungeon",
+    "description": "The old mill's waterwheel has long since rotted away. Inside, cobwebs fill every corner and the floorboards creak ominously. Something large moved across the ceiling above you.",
+    "exits": {
+      "west": "forest_clearing",
+      "south": "crossroads",
+      "north": null,
+      "east": null
+    },
+    "shops": [],
+    "npcs": [],
+    "is_safe": false,
+    "loot": [{"item_id": "healing_potion", "quantity": 1}],
+    "encounter_table": ["giant_spider", "skeleton", "zombie"]
+  },
+  "goblin_camp": {
+    "id": "goblin_camp",
+    "name": "Goblin War Camp",
+    "type": "dungeon",
+    "description": "A crude camp of hide tents and sharpened stakes. Goblins chatter and argue over scraps of food. A larger tent at the centre must belong to their leader.",
+    "exits": {
+      "south": "forest_clearing",
+      "north": null,
+      "east": null,
+      "west": null
+    },
+    "shops": [],
+    "npcs": [],
+    "is_safe": false,
+    "loot": [{"item_id": "gold", "amount_min": 10, "amount_max": 30}, {"item_id": "dagger", "quantity": 1}],
+    "encounter_table": ["goblin_scout", "goblin_warrior", "orc"]
+  }
+}

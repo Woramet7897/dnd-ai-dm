@@ -1,0 +1,51 @@
+{
+  "acolyte": {
+    "name": "Acolyte",
+    "skill_proficiencies": ["Insight", "Religion"],
+    "background_hook": "You have spent your life in service of a temple, learning its rites and dogma.",
+    "starting_gold": 15,
+    "equipment_note": "Holy symbol, prayer book, incense, vestments"
+  },
+  "criminal": {
+    "name": "Criminal",
+    "skill_proficiencies": ["Deception", "Stealth"],
+    "background_hook": "You once worked as a hired muscle or thief in an underground organization.",
+    "starting_gold": 25,
+    "equipment_note": "Crowbar, dark common clothes, belt pouch"
+  },
+  "entertainer": {
+    "name": "Entertainer",
+    "skill_proficiencies": ["Acrobatics", "Performance"],
+    "background_hook": "You have performed before audiences ranging from street corners to noble courts.",
+    "starting_gold": 15,
+    "equipment_note": "Musical instrument, costume, belt pouch"
+  },
+  "folk_hero": {
+    "name": "Folk Hero",
+    "skill_proficiencies": ["Animal Handling", "Survival"],
+    "background_hook": "You come from a humble social rank, but you are destined for so much more.",
+    "starting_gold": 10,
+    "equipment_note": "Craftsman's tools, shovel, iron pot, common clothes"
+  },
+  "noble": {
+    "name": "Noble",
+    "skill_proficiencies": ["History", "Persuasion"],
+    "background_hook": "You were born into wealth and privilege, though you have chosen an unusual path.",
+    "starting_gold": 40,
+    "equipment_note": "Fine clothes, signet ring, scroll of pedigree, purse"
+  },
+  "sage": {
+    "name": "Sage",
+    "skill_proficiencies": ["Arcana", "History"],
+    "background_hook": "You spent years learning the lore of the multiverse in academic institutions.",
+    "starting_gold": 10,
+    "equipment_note": "Ink, quill, small knife, notebook, common clothes"
+  },
+  "soldier": {
+    "name": "Soldier",
+    "skill_proficiencies": ["Athletics", "Intimidation"],
+    "background_hook": "War has been your life since you were old enough to hold a blade.",
+    "starting_gold": 20,
+    "equipment_note": "Insignia of rank, trophy from a fallen enemy, dice set, common clothes"
+  }
+}

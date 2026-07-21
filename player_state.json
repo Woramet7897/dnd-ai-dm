@@ -1,0 +1,16 @@
+{
+  "name": "Star",
+  "class_name": "Bard",
+  "level": 1,
+  "hp": 100,
+  "inventory": [
+    "Wooden Lute",
+    "Dagger",
+    "Health Potion 50HP"
+  ],
+  "location": "A lively tavern in the starting village.",
+  "active_quests": [
+    "Perform for the tavern crowd",
+    "Find the missing blacksmith"
+  ]
+}

@@ -1,0 +1,130 @@
+{
+  "healing_potion": {
+    "name": "Healing Potion",
+    "type": "consumable",
+    "effects": {"heal": "2d4+2"},
+    "rarity": "common",
+    "value_gold": 15,
+    "description": "A vial of red liquid that magically heals wounds when drunk."
+  },
+  "greater_healing_potion": {
+    "name": "Greater Healing Potion",
+    "type": "consumable",
+    "effects": {"heal": "4d4+4"},
+    "rarity": "uncommon",
+    "value_gold": 50,
+    "description": "A more potent healing draught."
+  },
+  "cloak_of_protection": {
+    "name": "Cloak of Protection",
+    "type": "wearable",
+    "slot": "cloak",
+    "effects": {"ac_bonus": 1, "saving_throw_bonus": 1},
+    "rarity": "uncommon",
+    "value_gold": 25,
+    "description": "A shimmering cloak that subtly deflects harm."
+  },
+  "longsword": {
+    "name": "Longsword",
+    "type": "weapon",
+    "slot": "main_hand",
+    "effects": {"attack_bonus": 0, "damage": "1d8", "damage_type": "slashing"},
+    "rarity": "common",
+    "value_gold": 15,
+    "description": "A standard steel longsword."
+  },
+  "rapier": {
+    "name": "Rapier",
+    "type": "weapon",
+    "slot": "main_hand",
+    "effects": {"attack_bonus": 0, "damage": "1d8", "damage_type": "piercing"},
+    "rarity": "common",
+    "value_gold": 25,
+    "description": "A slender, elegant thrusting sword favored by duelists."
+  },
+  "dagger": {
+    "name": "Dagger",
+    "type": "weapon",
+    "slot": "off_hand",
+    "effects": {"attack_bonus": 0, "damage": "1d4", "damage_type": "piercing"},
+    "rarity": "common",
+    "value_gold": 5,
+    "description": "A short blade, useful for close work."
+  },
+  "leather_armor": {
+    "name": "Leather Armor",
+    "type": "wearable",
+    "slot": "chest",
+    "effects": {"ac_base": 11, "stat_mod": "DEX"},
+    "rarity": "common",
+    "value_gold": 10,
+    "description": "Supple, lightweight armor made from tanned hide."
+  },
+  "chain_mail": {
+    "name": "Chain Mail",
+    "type": "wearable",
+    "slot": "chest",
+    "effects": {"ac_base": 16, "stat_mod": null},
+    "rarity": "common",
+    "value_gold": 75,
+    "description": "Interlocked metal rings providing solid protection."
+  },
+  "torch": {
+    "name": "Torch",
+    "type": "consumable",
+    "effects": {"light_radius": 20},
+    "rarity": "common",
+    "value_gold": 1,
+    "description": "Burns for 1 hour, casting bright light in a 20-foot radius."
+  },
+  "rope": {
+    "name": "Rope (50 ft)",
+    "type": "tool",
+    "effects": {},
+    "rarity": "common",
+    "value_gold": 1,
+    "description": "Fifty feet of hempen rope."
+  },
+  "thieves_tools": {
+    "name": "Thieves' Tools",
+    "type": "tool",
+    "effects": {"skill_bonus": {"Sleight of Hand": 2}},
+    "rarity": "common",
+    "value_gold": 25,
+    "description": "A set of lockpicks and other tools for bypassing locks."
+  },
+  "lute": {
+    "name": "Lute",
+    "type": "instrument",
+    "effects": {},
+    "rarity": "common",
+    "value_gold": 35,
+    "description": "A finely crafted stringed instrument favored by bards."
+  },
+  "shield": {
+    "name": "Shield",
+    "type": "wearable",
+    "slot": "off_hand",
+    "effects": {"ac_bonus": 2},
+    "rarity": "common",
+    "value_gold": 10,
+    "description": "A wooden or metal shield that adds +2 to AC."
+  },
+  "component_pouch": {
+    "name": "Component Pouch",
+    "type": "tool",
+    "effects": {"enables_spellcasting": true},
+    "rarity": "common",
+    "value_gold": 25,
+    "description": "A belt pouch containing material components for spells."
+  },
+  "mace": {
+    "name": "Mace",
+    "type": "weapon",
+    "slot": "main_hand",
+    "effects": {"attack_bonus": 0, "damage": "1d6", "damage_type": "bludgeoning"},
+    "rarity": "common",
+    "value_gold": 5,
+    "description": "A flanged metal weapon favored by clerics."
+  }
+}

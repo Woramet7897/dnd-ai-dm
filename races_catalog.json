@@ -1,0 +1,61 @@
+{
+  "human": {
+    "name": "Human",
+    "stat_bonuses": {"STR": 1, "DEX": 1, "CON": 1, "INT": 1, "WIS": 1, "CHA": 1},
+    "trait": "Versatile",
+    "trait_description": "Gain proficiency in one additional skill of your choice.",
+    "speed": 30,
+    "size": "Medium"
+  },
+  "elf": {
+    "name": "Elf",
+    "stat_bonuses": {"DEX": 2, "INT": 1},
+    "trait": "Fey Ancestry",
+    "trait_description": "Advantage on saving throws against being charmed, and magic can't put you to sleep.",
+    "speed": 30,
+    "size": "Medium",
+    "extra_proficiency": "Perception"
+  },
+  "dwarf": {
+    "name": "Dwarf",
+    "stat_bonuses": {"CON": 2, "WIS": 1},
+    "trait": "Dwarven Resilience",
+    "trait_description": "Advantage on saving throws against poison, and resistance to poison damage.",
+    "speed": 25,
+    "size": "Medium"
+  },
+  "halfling": {
+    "name": "Halfling",
+    "stat_bonuses": {"DEX": 2, "CHA": 1},
+    "trait": "Lucky",
+    "trait_description": "When you roll a 1 on an attack, ability check, or saving throw, reroll the die and use the new roll.",
+    "speed": 25,
+    "size": "Small"
+  },
+  "tiefling": {
+    "name": "Tiefling",
+    "stat_bonuses": {"INT": 1, "CHA": 2},
+    "trait": "Hellish Resistance",
+    "trait_description": "You have resistance to fire damage.",
+    "speed": 30,
+    "size": "Medium",
+    "innate_spell": "thaumaturgy"
+  },
+  "half_orc": {
+    "name": "Half-Orc",
+    "stat_bonuses": {"STR": 2, "CON": 1},
+    "trait": "Relentless Endurance",
+    "trait_description": "When reduced to 0 HP but not killed outright, drop to 1 HP instead. Usable once per long rest.",
+    "speed": 30,
+    "size": "Medium"
+  },
+  "dragonborn": {
+    "name": "Dragonborn",
+    "stat_bonuses": {"STR": 2, "CHA": 1},
+    "trait": "Draconic Ancestry",
+    "trait_description": "Choose a dragon type. You have resistance to that damage type, and can use Breath Weapon once per short rest.",
+    "speed": 30,
+    "size": "Medium",
+    "breath_weapon_damage": "2d6"
+  }
+}

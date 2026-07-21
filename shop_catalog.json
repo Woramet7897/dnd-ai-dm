@@ -1,0 +1,30 @@
+{
+  "general_store": {
+    "name": "Riverside General Store",
+    "description": "A cluttered shop selling everyday adventuring supplies.",
+    "sell_items": ["healing_potion", "torch", "rope", "dagger"],
+    "buy_multiplier": 0.5,
+    "sell_multiplier": 1.0
+  },
+  "blacksmith": {
+    "name": "Ironforge Smithy",
+    "description": "The ring of hammer on anvil echoes from within. The smith sells quality arms and armor.",
+    "sell_items": ["longsword", "rapier", "mace", "shield", "leather_armor", "chain_mail"],
+    "buy_multiplier": 0.5,
+    "sell_multiplier": 1.0
+  },
+  "alchemist": {
+    "name": "Mirela's Elixirs",
+    "description": "Shelves of coloured vials line the walls. The proprietor peers at you over thick spectacles.",
+    "sell_items": ["healing_potion", "greater_healing_potion"],
+    "buy_multiplier": 0.4,
+    "sell_multiplier": 1.1
+  },
+  "market_stall": {
+    "name": "Travelling Merchant Stall",
+    "description": "A colourful wagon with goods piled high. The merchant haggles eagerly.",
+    "sell_items": ["rope", "torch", "thieves_tools", "component_pouch"],
+    "buy_multiplier": 0.5,
+    "sell_multiplier": 1.0
+  }
+}

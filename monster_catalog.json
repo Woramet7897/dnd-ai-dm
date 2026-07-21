@@ -1,0 +1,139 @@
+{
+  "goblin_scout": {
+    "name": "Goblin Scout",
+    "hp": {"current": 7, "max": 7},
+    "ac": 13,
+    "stats": {"STR": 8, "DEX": 14, "CON": 10, "INT": 10, "WIS": 8, "CHA": 8},
+    "attacks": [
+      {"name": "Scimitar", "attack_bonus": 4, "damage": "1d6+2", "damage_type": "slashing", "applies_condition": null}
+    ],
+    "xp_value": 50,
+    "gold_drop": {"min": 0, "max": 5},
+    "challenge_rating": 0.25,
+    "active_conditions": []
+  },
+  "goblin_warrior": {
+    "name": "Goblin Warrior",
+    "hp": {"current": 12, "max": 12},
+    "ac": 14,
+    "stats": {"STR": 10, "DEX": 14, "CON": 10, "INT": 8, "WIS": 8, "CHA": 8},
+    "attacks": [
+      {"name": "Shortsword", "attack_bonus": 4, "damage": "1d6+2", "damage_type": "piercing", "applies_condition": null},
+      {"name": "Shortbow", "attack_bonus": 4, "damage": "1d6+2", "damage_type": "piercing", "applies_condition": null}
+    ],
+    "xp_value": 100,
+    "gold_drop": {"min": 1, "max": 8},
+    "challenge_rating": 0.5,
+    "active_conditions": []
+  },
+  "skeleton": {
+    "name": "Skeleton",
+    "hp": {"current": 13, "max": 13},
+    "ac": 13,
+    "stats": {"STR": 10, "DEX": 14, "CON": 15, "INT": 6, "WIS": 8, "CHA": 5},
+    "attacks": [
+      {"name": "Shortsword", "attack_bonus": 4, "damage": "1d6+2", "damage_type": "piercing", "applies_condition": null}
+    ],
+    "xp_value": 50,
+    "gold_drop": {"min": 0, "max": 3},
+    "challenge_rating": 0.25,
+    "active_conditions": [],
+    "immunities": ["poison", "exhaustion"],
+    "resistances": ["piercing"]
+  },
+  "bandit": {
+    "name": "Bandit",
+    "hp": {"current": 11, "max": 11},
+    "ac": 12,
+    "stats": {"STR": 11, "DEX": 12, "CON": 12, "INT": 10, "WIS": 10, "CHA": 10},
+    "attacks": [
+      {"name": "Scimitar", "attack_bonus": 3, "damage": "1d6+1", "damage_type": "slashing", "applies_condition": null},
+      {"name": "Crossbow", "attack_bonus": 3, "damage": "1d8+1", "damage_type": "piercing", "applies_condition": null}
+    ],
+    "xp_value": 25,
+    "gold_drop": {"min": 2, "max": 12},
+    "challenge_rating": 0.125,
+    "active_conditions": []
+  },
+  "bandit_captain": {
+    "name": "Bandit Captain",
+    "hp": {"current": 65, "max": 65},
+    "ac": 15,
+    "stats": {"STR": 15, "DEX": 16, "CON": 14, "INT": 14, "WIS": 11, "CHA": 14},
+    "attacks": [
+      {"name": "Shortsword", "attack_bonus": 5, "damage": "1d6+3", "damage_type": "piercing", "applies_condition": null},
+      {"name": "Dagger", "attack_bonus": 5, "damage": "1d4+3", "damage_type": "piercing", "applies_condition": null}
+    ],
+    "xp_value": 450,
+    "gold_drop": {"min": 10, "max": 50},
+    "challenge_rating": 2,
+    "active_conditions": []
+  },
+  "giant_spider": {
+    "name": "Giant Spider",
+    "hp": {"current": 26, "max": 26},
+    "ac": 14,
+    "stats": {"STR": 14, "DEX": 16, "CON": 12, "INT": 2, "WIS": 11, "CHA": 4},
+    "attacks": [
+      {"name": "Bite", "attack_bonus": 5, "damage": "1d8+3", "damage_type": "piercing", "applies_condition": "poisoned"}
+    ],
+    "xp_value": 200,
+    "gold_drop": {"min": 0, "max": 0},
+    "challenge_rating": 1,
+    "active_conditions": []
+  },
+  "wolf": {
+    "name": "Wolf",
+    "hp": {"current": 11, "max": 11},
+    "ac": 13,
+    "stats": {"STR": 12, "DEX": 15, "CON": 12, "INT": 3, "WIS": 12, "CHA": 6},
+    "attacks": [
+      {"name": "Bite", "attack_bonus": 4, "damage": "2d4+2", "damage_type": "piercing", "applies_condition": "prone"}
+    ],
+    "xp_value": 50,
+    "gold_drop": {"min": 0, "max": 0},
+    "challenge_rating": 0.25,
+    "active_conditions": []
+  },
+  "orc": {
+    "name": "Orc",
+    "hp": {"current": 15, "max": 15},
+    "ac": 13,
+    "stats": {"STR": 16, "DEX": 12, "CON": 16, "INT": 7, "WIS": 11, "CHA": 10},
+    "attacks": [
+      {"name": "Greataxe", "attack_bonus": 5, "damage": "1d12+3", "damage_type": "slashing", "applies_condition": null},
+      {"name": "Javelin", "attack_bonus": 5, "damage": "1d6+3", "damage_type": "piercing", "applies_condition": null}
+    ],
+    "xp_value": 100,
+    "gold_drop": {"min": 0, "max": 10},
+    "challenge_rating": 0.5,
+    "active_conditions": []
+  },
+  "zombie": {
+    "name": "Zombie",
+    "hp": {"current": 22, "max": 22},
+    "ac": 8,
+    "stats": {"STR": 13, "DEX": 6, "CON": 16, "INT": 3, "WIS": 6, "CHA": 5},
+    "attacks": [
+      {"name": "Slam", "attack_bonus": 3, "damage": "1d6+1", "damage_type": "bludgeoning", "applies_condition": null}
+    ],
+    "xp_value": 50,
+    "gold_drop": {"min": 0, "max": 0},
+    "challenge_rating": 0.25,
+    "immunities": ["poison"],
+    "active_conditions": []
+  },
+  "cultist": {
+    "name": "Cultist",
+    "hp": {"current": 9, "max": 9},
+    "ac": 12,
+    "stats": {"STR": 11, "DEX": 12, "CON": 10, "INT": 10, "WIS": 11, "CHA": 10},
+    "attacks": [
+      {"name": "Scimitar", "attack_bonus": 3, "damage": "1d6+1", "damage_type": "slashing", "applies_condition": null}
+    ],
+    "xp_value": 25,
+    "gold_drop": {"min": 0, "max": 8},
+    "challenge_rating": 0.125,
+    "active_conditions": []
+  }
+}

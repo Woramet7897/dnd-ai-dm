@@ -1,0 +1,121 @@
+{
+  "vicious_mockery": {
+    "name": "Vicious Mockery",
+    "level": 0,
+    "class": ["Bard"],
+    "type": "attack_save",
+    "save_stat": "WIS",
+    "effect": {"damage": "1d4", "damage_type": "psychic"},
+    "on_fail_extra": "disadvantage_next_attack",
+    "slot_cost": 0,
+    "description": "You unleash a string of insults laced with subtle enchantments."
+  },
+  "healing_word": {
+    "name": "Healing Word",
+    "level": 1,
+    "class": ["Bard", "Cleric"],
+    "type": "heal",
+    "effect": {"heal": "1d4+3"},
+    "slot_cost": 1,
+    "description": "A creature of your choice that you can see regains HP equal to 1d4 + spellcasting modifier."
+  },
+  "cure_wounds": {
+    "name": "Cure Wounds",
+    "level": 1,
+    "class": ["Bard", "Cleric"],
+    "type": "heal",
+    "effect": {"heal": "1d8+3"},
+    "slot_cost": 1,
+    "description": "A creature you touch regains 1d8 + spellcasting modifier HP."
+  },
+  "sacred_flame": {
+    "name": "Sacred Flame",
+    "level": 0,
+    "class": ["Cleric"],
+    "type": "attack_save",
+    "save_stat": "DEX",
+    "effect": {"damage": "1d8", "damage_type": "radiant"},
+    "on_fail_extra": null,
+    "slot_cost": 0,
+    "description": "Flame-like radiance descends on a creature, which must succeed on a DEX save or take 1d8 radiant damage."
+  },
+  "magic_missile": {
+    "name": "Magic Missile",
+    "level": 1,
+    "class": ["Wizard"],
+    "type": "attack_roll",
+    "effect": {"damage": "1d4+1", "damage_type": "force", "auto_hit": true},
+    "slot_cost": 1,
+    "description": "Three darts of magical force automatically hit a target for 1d4+1 force damage each."
+  },
+  "shield_spell": {
+    "name": "Shield",
+    "level": 1,
+    "class": ["Wizard"],
+    "type": "buff",
+    "effect": {"ac_bonus": 5, "duration_rounds": 1},
+    "slot_cost": 1,
+    "description": "An invisible barrier of magical force appears to deflect attacks. +5 AC until start of next turn."
+  },
+  "detect_magic": {
+    "name": "Detect Magic",
+    "level": 1,
+    "class": ["Wizard", "Cleric", "Bard"],
+    "type": "utility",
+    "effect": {"flag": "detect_magic_active", "duration_rounds": 10},
+    "slot_cost": 1,
+    "description": "For the duration, you sense the presence of magic within 30 feet of you."
+  },
+  "bless": {
+    "name": "Bless",
+    "level": 1,
+    "class": ["Cleric"],
+    "type": "buff",
+    "effect": {"bonus_die": "1d4", "applies_to": "attacks_and_saves", "duration_rounds": 10},
+    "slot_cost": 1,
+    "concentration": true,
+    "description": "Up to three creatures add 1d4 to attack rolls and saving throws."
+  },
+  "thunderwave": {
+    "name": "Thunderwave",
+    "level": 1,
+    "class": ["Wizard", "Bard"],
+    "type": "attack_save",
+    "save_stat": "CON",
+    "effect": {"damage": "2d8", "damage_type": "thunder"},
+    "on_fail_extra": "pushed_10ft",
+    "slot_cost": 1,
+    "description": "A wave of thunderous force sweeps out from you. Creatures must CON save or take 2d8 thunder damage."
+  },
+  "guiding_bolt": {
+    "name": "Guiding Bolt",
+    "level": 1,
+    "class": ["Cleric"],
+    "type": "attack_roll",
+    "effect": {"damage": "4d6", "damage_type": "radiant"},
+    "on_hit_extra": "advantage_next_attack_against_target",
+    "slot_cost": 1,
+    "description": "A flash of light streaks toward a creature. Make a ranged spell attack. On a hit, 4d6 radiant damage, and the next attack against it has advantage."
+  },
+  "charm_person": {
+    "name": "Charm Person",
+    "level": 1,
+    "class": ["Bard", "Wizard"],
+    "type": "attack_save",
+    "save_stat": "WIS",
+    "effect": {"condition": "charmed", "duration_rounds": 100},
+    "on_fail_extra": null,
+    "slot_cost": 1,
+    "concentration": true,
+    "description": "You attempt to charm a humanoid you can see. It must succeed on a WIS save or be charmed for 1 hour."
+  },
+  "fire_bolt": {
+    "name": "Fire Bolt",
+    "level": 0,
+    "class": ["Wizard"],
+    "type": "attack_roll",
+    "effect": {"damage": "1d10", "damage_type": "fire"},
+    "slot_cost": 0,
+    "description": "You hurl a mote of fire at a creature. Make a ranged spell attack. On a hit, 1d10 fire damage."
+  }
+}
