@@ -104,6 +104,61 @@ def validate_action_tags(tags: Any) -> List[str]:
     return valid
 
 
+# ─── Quest-status enum ───────────────────────────────────────────────────────
+VALID_QUEST_STATUSES: set = {"active", "completed", "failed", "abandoned"}
+
+def validate_quest_updates(quest_updates: Any) -> Optional[Dict]:
+    """
+    Validate and whitelist the quest_updates block from LLM extraction output.
+    DEV-3 RESOLVED (Phase 3+): this is a validation.py responsibility, not dungeon_manager's.
+
+    Accepted top-level keys (all optional):
+      quest_id        (str)  — identifies which quest is being updated
+      status          (str)  — must be one of VALID_QUEST_STATUSES
+      objective_update (str) — free-text string describing the new objective state
+      notes           (str)  — any additional narrative note (passed through for memory_manager)
+
+    Any other key is silently dropped.
+    Returns cleaned dict, or None if nothing valid survived.
+    """
+    if not isinstance(quest_updates, dict):
+        logger.debug(f"quest_updates is not a dict ({type(quest_updates).__name__}) — dropped.")
+        return None
+
+    cleaned: Dict = {}
+
+    if "quest_id" in quest_updates:
+        qid = quest_updates["quest_id"]
+        if isinstance(qid, str) and qid.strip():
+            cleaned["quest_id"] = qid.strip()
+        else:
+            logger.debug(f"quest_updates.quest_id not a non-empty string ({qid!r}) — dropped.")
+
+    if "status" in quest_updates:
+        st = quest_updates["status"]
+        if st in VALID_QUEST_STATUSES:
+            cleaned["status"] = st
+        else:
+            logger.debug(
+                f"quest_updates.status '{st}' not in {VALID_QUEST_STATUSES} — dropped."
+            )
+
+    for str_field in ("objective_update", "notes"):
+        if str_field in quest_updates:
+            val = quest_updates[str_field]
+            if isinstance(val, str):
+                cleaned[str_field] = val
+            else:
+                logger.debug(
+                    f"quest_updates.{str_field} not a string ({type(val).__name__}) — dropped."
+                )
+
+    if not cleaned:
+        logger.debug("quest_updates had no valid fields after filtering — dropped.")
+        return None
+
+    return cleaned
+
 def validate_item_id(item_id: Any) -> bool:
     """
     Return True if item_id exists in item_catalog.json.
@@ -338,13 +393,13 @@ def validate_extraction_output(raw: Any, world_state: Optional[Dict] = None) -> 
         else:
             logger.debug("world_updates is not a dict — dropped.")
 
-    # ── quest_updates ─────────────────────────────────────────────────────────
+    # ── quest_updates — DEV-3 RESOLVED ────────────────────────────────────────
+    # validate_quest_updates() enforces a field whitelist + status enum.
+    # Owner: validation.py (always was — dungeon_manager has no quest functions).
     if "quest_updates" in raw:
-        qu = raw["quest_updates"]
-        if isinstance(qu, dict):
-            cleaned["quest_updates"] = qu
-        else:
-            logger.debug(f"quest_updates is not a dict — dropped.")
+        qu_clean = validate_quest_updates(raw["quest_updates"])
+        if qu_clean is not None:
+            cleaned["quest_updates"] = qu_clean
 
     # ── action_tags ───────────────────────────────────────────────────────────
     if "action_tags" in raw:

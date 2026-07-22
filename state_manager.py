@@ -479,9 +479,25 @@ def apply_state_updates(updates: Dict[str, Any], state: Dict[str, Any],
         quest_log = world_state.setdefault("quest_log", {"main": [], "side": []})
 
         if "add_quest" in updates:
-            # New side quests default to side unless caller specifies otherwise
-            new_q = {"title": updates["add_quest"], "status": "active", "objectives": []}
-            quest_log.setdefault("side", []).append(new_q)
+            # Phase 2 DEV-1 RESOLVED: respect quest_type key ('main' | 'side').
+            # add_quest can be either a plain string (title) or a dict with
+            # {title, quest_type}. Defaults to 'side' when quest_type is absent.
+            aq = updates["add_quest"]
+            if isinstance(aq, dict):
+                quest_title = aq.get("title", str(aq))
+                quest_type  = aq.get("quest_type", "side")
+            else:
+                quest_title = str(aq)
+                quest_type  = "side"
+
+            if quest_type not in ("main", "side"):
+                logger.debug(
+                    f"add_quest.quest_type '{quest_type}' invalid — defaulting to 'side'."
+                )
+                quest_type = "side"
+
+            new_q = {"title": quest_title, "status": "active", "objectives": []}
+            quest_log.setdefault(quest_type, []).append(new_q)
 
         if "remove_quest" in updates:
             title = updates["remove_quest"]
