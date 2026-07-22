@@ -15,6 +15,17 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+# dungeon_manager imported lazily below to avoid circular imports at module load
+_dungeon_manager = None
+
+def _get_dungeon_manager():
+    global _dungeon_manager
+    if _dungeon_manager is None:
+        import dungeon_manager as dm
+        _dungeon_manager = dm
+    return _dungeon_manager
+
+
 # ─── Logger (debug-level, not shown to the player) ───────────────────────────
 logger = logging.getLogger("validation")
 logger.setLevel(logging.DEBUG)
@@ -304,13 +315,28 @@ def validate_extraction_output(raw: Any, world_state: Optional[Dict] = None) -> 
         else:
             logger.debug(f"combat_start malformed (no 'enemies' key or not a dict) — dropped.")
 
-    # ── world_updates ─────────────────────────────────────────────────────────
+    # ── world_updates — DEV-2 RESOLVED (Phase 3) ──────────────────────────────
+    # new_location is now validated via dungeon_manager.validate_new_location().
+    # Other world_updates keys (flags, event triggers) pass through structurally;
+    # deep validation of those is deferred to dungeon_manager's write path.
     if "world_updates" in raw:
         wu = raw["world_updates"]
         if isinstance(wu, dict):
-            cleaned["world_updates"] = wu  # structural validation deferred to dungeon_manager
+            wu_clean = dict(wu)  # shallow copy — we may strip new_location
+            if "new_location" in wu_clean:
+                nl = wu_clean["new_location"]
+                dm = _get_dungeon_manager()
+                ok, reason = dm.validate_new_location(nl, world_state)
+                if not ok:
+                    logger.debug(
+                        f"world_updates.new_location failed validation — stripped from world_updates. "
+                        f"Reason: {reason}"
+                    )
+                    del wu_clean["new_location"]
+            if wu_clean:
+                cleaned["world_updates"] = wu_clean
         else:
-            logger.debug(f"world_updates is not a dict — dropped.")
+            logger.debug("world_updates is not a dict — dropped.")
 
     # ── quest_updates ─────────────────────────────────────────────────────────
     if "quest_updates" in raw:
