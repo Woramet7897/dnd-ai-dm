@@ -1,6 +1,6 @@
 # PROGRESS.md — do not delete, read this first every session
 
-Last updated: 2026-07-23 (Phase 3 DONE + pre-Phase 4 Issues A/B/C fixed)
+Last updated: 2026-07-23 (Phase 3 DONE + pre-Phase 4 Issues A/B/C fixed + docstring/quest-id polish)
 
 | Phase | Status | Files written | Notes/deviations |
 |---|---|---|---|

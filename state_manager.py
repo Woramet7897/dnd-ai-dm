@@ -421,7 +421,8 @@ def apply_state_updates(updates: Dict[str, Any], state: Dict[str, Any],
     validate_extraction_output() in validation.py — never with raw LLM output.
 
     Handles: hp_change (with auto concentration check), gold_change, add_item_id,
-             remove_item_id, add_quest, remove_quest, new_location.
+             remove_item_id, move_to_location_id.
+    Quest logic lives exclusively in apply_quest_updates() — not here.
 
     Returns: (updated state, concentration_check_result | None)
     """
@@ -506,14 +507,19 @@ def apply_quest_updates(
     if "new_quest" in quest_updates:
         nq = quest_updates["new_quest"]
         quest_type = nq.get("quest_type", "side")
+        # Generate a stable slug id so objective_update can match by id (not just title).
+        # Format: "q_" + lowercase alphanumeric slug of the title.
+        import re as _re
+        quest_id = "q_" + _re.sub(r"[^a-z0-9]+", "_", nq["title"].lower()).strip("_")
         new_entry = {
+            "id":          quest_id,
             "title":       nq["title"],
             "status":      "active",
             "description": nq.get("description", ""),
             "objectives":  [],
         }
         quest_log.setdefault(quest_type, []).append(new_entry)
-        logger.debug(f"apply_quest_updates: added '{nq['title']}' to {quest_type} log.")
+        logger.debug(f"apply_quest_updates: added '{nq['title']}' (id='{quest_id}') to {quest_type} log.")
 
     if "objective_update" in quest_updates:
         ou = quest_updates["objective_update"]
