@@ -157,16 +157,25 @@ def roll_dice(dice_str: str) -> int:
         ValueError if the expression cannot be parsed.
     """
     dice_str = dice_str.strip().replace(" ", "")
+
+    # Path 1: standard NdX±M form (e.g. '1d6+2', '2d8', '1d4-1')
     m = re.match(r"^(\d+)d(\d+)([+-]\d+)?$", dice_str, re.IGNORECASE)
-    if not m:
-        raise ValueError(f"Cannot parse dice expression: '{dice_str}'")
+    if m:
+        num_dice  = int(m.group(1))
+        die_size  = int(m.group(2))
+        modifier  = int(m.group(3)) if m.group(3) else 0
+        total = sum(random.randint(1, die_size) for _ in range(num_dice)) + modifier
+        return max(1, total)
 
-    num_dice  = int(m.group(1))
-    die_size  = int(m.group(2))
-    modifier  = int(m.group(3)) if m.group(3) else 0
+    # Path 2: flat integer with optional modifier (e.g. '1', '1+0', '5', '3-1').
+    # Used by Unarmed Strike and any catalog entry that deals a fixed flat amount.
+    m2 = re.match(r"^(\d+)([+-]\d+)?$", dice_str)
+    if m2:
+        base     = int(m2.group(1))
+        modifier = int(m2.group(2)) if m2.group(2) else 0
+        return max(1, base + modifier)
 
-    total = sum(random.randint(1, die_size) for _ in range(num_dice)) + modifier
-    return max(1, total)
+    raise ValueError(f"Cannot parse dice expression: '{dice_str}'")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -767,3 +776,130 @@ def check_combat_end(combat_state: Dict[str, Any]) -> Optional[str]:
         return "player_defeat"
 
     return None
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# ROUND ORCHESTRATION (spec Section 9b-3)
+# ════════════════════════════════════════════════════════════════════════════════
+
+def resolve_round(
+    combat_state: Dict[str, Any],
+    player_attack_result: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Orchestrate a full combat round in initiative order and return a complete
+    round summary dict for the narrative LLM.
+
+    Design (spec Section 9b-3):
+    - Python resolves the WHOLE round first, then assembles ONE combined result block.
+    - The player's action is supplied by the caller via `player_attack_result` (driven
+      by human input upstream); the player slot in turn_order is skipped by this function.
+    - Enemy / companion actions are resolved by resolve_enemy_turn / resolve_companion_turn.
+    - Live list references are used directly (no copies) so HP changes from earlier turns
+      in the same round affect target selection for later turns.
+    - Results are appended to combat_state["round_log"] before returning.
+    - Conditions are ticked at end of round.
+    - round counter increments AFTER resolution (so the narration block correctly names
+      the round that just happened).
+    - check_combat_end() is called last; its outcome is included in the return dict.
+
+    Args:
+        combat_state:        live combat_state dict from world_state.
+        player_attack_result: result dict from resolve_attack() for the player's chosen
+                              action, or None if the player did not attack this turn
+                              (e.g. used an item, cast a non-attack spell, etc.).
+
+    Returns:
+        {
+          "round_num":      int,   # the round that was just resolved
+          "significant":    list,  # significant events (spec 9b-4)
+          "routine":        list,  # routine hits/misses
+          "routine_summary": str,  # canned-template summary of routine events
+          "narration_block": str,  # '[System: Round Result]' block for narrative LLM
+          "combat_outcome": str | None,  # 'player_victory' | 'player_defeat' | None
+        }
+    """
+    round_num      = combat_state["round"]
+    turn_order     = combat_state["turn_order"]
+    player_c       = combat_state["player_combatant"]
+    enemies        = combat_state["enemies"]     # live reference — mutated in place
+    companions     = combat_state["companions"]  # live reference — mutated in place
+
+    round_results: List[Dict[str, Any]] = []
+
+    # ── Include player's action (supplied by caller) ───────────────────────────
+    if player_attack_result is not None:
+        round_results.append(player_attack_result)
+
+    # ── Resolve all non-player combatants in initiative order ─────────────────
+    for cid in turn_order:
+        if cid == "player":
+            continue  # player already handled above
+
+        # Identify the combatant by id
+        combatant = None
+        for e in enemies:
+            if e["id"] == cid:
+                combatant = e
+                break
+        if combatant is None:
+            for comp in companions:
+                if comp["id"] == cid:
+                    combatant = comp
+                    break
+
+        if combatant is None:
+            logger.debug(f"resolve_round: combatant '{cid}' not found in enemies or companions — skipped.")
+            continue
+
+        # Skip already-downed combatants
+        if combatant.get("hp", {}).get("current", 0) <= 0:
+            continue
+
+        if combatant["side"] == "enemy":
+            # Targets: living player + companions
+            player_alive = player_c.get("hp", {}).get("current", 0) > 0
+            living_targets = ([player_c] if player_alive else []) + [
+                comp for comp in companions if comp.get("hp", {}).get("current", 0) > 0
+            ]
+            result = resolve_enemy_turn(combatant, living_targets)
+        else:
+            # companion side — targets living enemies
+            result = resolve_companion_turn(combatant, enemies)
+
+        round_results.append(result)
+
+    # ── Persist round results into round_log ──────────────────────────────────
+    combat_state["round_log"].append(round_results)
+
+    # ── Classify significance ─────────────────────────────────────────────────
+    classified   = classify_round_significance(round_results, combat_state)
+    significant  = classified["significant"]
+    routine      = classified["routine"]
+
+    # ── Tick conditions (end of round) ────────────────────────────────────────
+    tick_conditions(combat_state)
+
+    # ── Increment round counter ───────────────────────────────────────────────
+    combat_state["round"] += 1
+
+    # ── Build narration artefacts ─────────────────────────────────────────────
+    routine_summary = build_routine_summary(routine)
+    narration_block = build_round_narration_block(round_num, significant, routine_summary)
+
+    # ── Check for combat end ──────────────────────────────────────────────────
+    combat_outcome = check_combat_end(combat_state)
+
+    logger.debug(
+        f"resolve_round: round {round_num} done. "
+        f"sig={len(significant)}, routine={len(routine)}, outcome={combat_outcome}"
+    )
+
+    return {
+        "round_num":       round_num,
+        "significant":     significant,
+        "routine":         routine,
+        "routine_summary": routine_summary,
+        "narration_block": narration_block,
+        "combat_outcome":  combat_outcome,
+    }

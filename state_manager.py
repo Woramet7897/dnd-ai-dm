@@ -509,8 +509,20 @@ def apply_quest_updates(
         quest_type = nq.get("quest_type", "side")
         # Generate a stable slug id so objective_update can match by id (not just title).
         # Format: "q_" + lowercase alphanumeric slug of the title.
+        # Collision-safe: if the same slug already exists in quest_log, append _2, _3, etc.
         import re as _re
-        quest_id = "q_" + _re.sub(r"[^a-z0-9]+", "_", nq["title"].lower()).strip("_")
+        base_slug = "q_" + _re.sub(r"[^a-z0-9]+", "_", nq["title"].lower()).strip("_")
+        existing_ids = {
+            q.get("id")
+            for cat in ("main", "side")
+            for q in quest_log.get(cat, [])
+            if q.get("id")
+        }
+        quest_id = base_slug
+        suffix = 2
+        while quest_id in existing_ids:
+            quest_id = f"{base_slug}_{suffix}"
+            suffix += 1
         new_entry = {
             "id":          quest_id,
             "title":       nq["title"],

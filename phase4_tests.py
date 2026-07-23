@@ -589,6 +589,207 @@ check("Player without dagger gets Unarmed Strike",
 print()
 
 
+
+# =============================================================================
+print("=" * 65)
+print("TEST 14 — Fix 1: quest slug id collision deduplication (state_manager)")
+print("=" * 65)
+
+import state_manager
+
+world_slug = {
+    "schema_version": 4,
+    "current_location": "town_riverside",
+    "visited_rooms": [],
+    "dynamic_rooms": {},
+    "cleared_rooms": [],
+    "collected_loot": [],
+    "npc_relationships": {},
+    "party": {"companions": []},
+    "quest_log": {"main": [], "side": []},
+}
+
+state_manager.apply_quest_updates(
+    {"new_quest": {"title": "Find the Blacksmith", "quest_type": "side"}},
+    world_slug,
+)
+state_manager.apply_quest_updates(
+    {"new_quest": {"title": "Find the Blacksmith", "quest_type": "side"}},
+    world_slug,
+)
+
+q1 = world_slug["quest_log"]["side"][0]
+q2 = world_slug["quest_log"]["side"][1]
+print(f"\n  Quest 1 id: '{q1['id']}',  Quest 2 id: '{q2['id']}'")
+check("First quest gets base slug 'q_find_the_blacksmith'",
+      q1["id"] == "q_find_the_blacksmith")
+check("Second quest gets deduplicated id 'q_find_the_blacksmith_2'",
+      q2["id"] == "q_find_the_blacksmith_2")
+check("Both quests have distinct ids", q1["id"] != q2["id"])
+
+state_manager.apply_quest_updates(
+    {"objective_update": {"quest_id": q2["id"], "objective_index": 0, "done": True}},
+    world_slug,
+)
+q1_obj = q1.get("objectives", [])
+q2_obj = q2.get("objectives", [])
+print(f"  q1 objectives after update on q2: {q1_obj}")
+print(f"  q2 objectives after update on q2: {q2_obj}")
+check("objective_update on q2 id: q1 objectives unchanged (empty)",
+      len(q1_obj) == 0)
+check("objective_update on q2 id: q2 objective[0].done is True",
+      len(q2_obj) >= 1 and q2_obj[0]["done"] is True)
+
+state_manager.apply_quest_updates(
+    {"new_quest": {"title": "Find the Blacksmith", "quest_type": "side"}},
+    world_slug,
+)
+q3 = world_slug["quest_log"]["side"][2]
+print(f"  Quest 3 id: '{q3['id']}'")
+check("Third duplicate gets 'q_find_the_blacksmith_3'",
+      q3["id"] == "q_find_the_blacksmith_3")
+print()
+
+
+# =============================================================================
+print("=" * 65)
+print("TEST 15 — Fix 2: roll_dice() flat-number support + Unarmed Strike real path")
+print("=" * 65)
+
+check("roll_dice('1+0') == 1",  cm.roll_dice("1+0") == 1)
+check("roll_dice('5') == 5",    cm.roll_dice("5") == 5)
+check("roll_dice('3-1') == 2",  cm.roll_dice("3-1") == 2)
+check("roll_dice('10+0') == 10", cm.roll_dice("10+0") == 10)
+check("roll_dice('1-1') floors at 1", cm.roll_dice("1-1") == 1)
+
+results_d6 = [cm.roll_dice("1d6") for _ in range(50)]
+check("roll_dice('1d6') still works (1-6)",
+      all(1 <= r <= 6 for r in results_d6))
+
+original_roll = cm._roll_d20
+cm._roll_d20 = lambda: 20  # guaranteed crit
+
+unarmed_attacker = player_combatant()
+unarmed_attacker["attacks"] = [
+    {"name": "Unarmed Strike", "attack_bonus": 0, "damage": "1+0",
+     "damage_type": "bludgeoning", "applies_condition": None}
+]
+unarmed_target = goblin_combatant()
+r_unarmed = cm.resolve_attack(unarmed_attacker, unarmed_target,
+                               unarmed_attacker["attacks"][0])
+check("Unarmed Strike resolve_attack succeeds (no exception)", r_unarmed is not None)
+check("Unarmed Strike hit=True on crit", r_unarmed["hit"] is True)
+check("Unarmed Strike crit damage = 2 (1+0 doubled)", r_unarmed["damage"] == 2)
+
+cm._roll_d20 = lambda: 15
+unarmed_target2 = goblin_combatant()
+r_unarmed2 = cm.resolve_attack(unarmed_attacker, unarmed_target2,
+                                unarmed_attacker["attacks"][0])
+check("Unarmed Strike normal hit damage = 1",
+      r_unarmed2["hit"] and r_unarmed2["damage"] == 1)
+cm._roll_d20 = original_roll
+print()
+
+
+# =============================================================================
+print("=" * 65)
+print("TEST 16 — Fix 3: resolve_round() full multi-round integration")
+print("=" * 65)
+
+def mk_companion(cid, name, hp=8, ac=12, atk_bonus=3, dmg="1d6+1"):
+    return {
+        "id": cid, "name": name, "side": "player",
+        "hp": {"current": hp, "max": hp}, "ac": ac,
+        "stats": {"STR": 12, "DEX": 12, "CON": 10, "INT": 10, "WIS": 10, "CHA": 10},
+        "attacks": [{"name": "Sword", "attack_bonus": atk_bonus, "damage": dmg,
+                     "damage_type": "slashing", "applies_condition": None}],
+        "initiative": None, "active_conditions": [],
+    }
+
+original_roll = cm._roll_d20
+initiative_rolls = iter([18, 15, 12, 10, 8])
+cm._roll_d20 = lambda: next(initiative_rolls)
+
+world_rr  = fresh_world()
+player_rr = fresh_player()
+comp1 = mk_companion("comp_gale", "Gale")
+comp2 = mk_companion("comp_lae", "Lae'zel")
+
+cs_rr = cm.start_combat(["goblin_scout", "goblin_scout"], player_rr, world_rr,
+                         companion_states=[comp1, comp2])
+cs_rr["enemies"][0]["hp"] = {"current": 6, "max": 6}
+cs_rr["enemies"][1]["hp"] = {"current": 6, "max": 6}
+
+check("resolve_round setup: 2 enemies, 2 companions",
+      len(cs_rr["enemies"]) == 2 and len(cs_rr["companions"]) == 2)
+check("Turn order has 5 entries",
+      len(cs_rr["turn_order"]) == 5)
+
+cm.apply_condition(cs_rr["enemies"][0], "poisoned", 2)
+check("Goblin1 starts poisoned (duration=2)",
+      any(e["condition"] == "poisoned"
+          for e in cs_rr["enemies"][0]["active_conditions"]))
+
+# --- Round 1: player pre-attack, then resolve_round for the rest ---
+r1_player_roll = iter([15])
+cm._roll_d20 = lambda: next(r1_player_roll)
+goblin1 = cs_rr["enemies"][0]
+p_attack = cs_rr["player_combatant"]["attacks"][0]
+player_r1 = cm.resolve_attack(cs_rr["player_combatant"], goblin1, p_attack)
+check("Round 1 player hits goblin1 (roll=15+2 vs AC13)", player_r1["hit"] is True)
+
+r1_other_rolls = iter([14, 3, 4, 3])
+cm._roll_d20 = lambda: next(r1_other_rolls)
+rr1 = cm.resolve_round(cs_rr, player_attack_result=player_r1)
+
+check("Round 1 round_num == 1", rr1["round_num"] == 1)
+check("Round 1 has all required keys",
+      all(k in rr1 for k in ("round_num","significant","routine",
+                              "routine_summary","narration_block","combat_outcome")))
+check("Narration block correct format",
+      rr1["narration_block"].startswith("[System: Round Result]"))
+check("After Round 1, cs round == 2", cs_rr["round"] == 2)
+check("round_log has 1 entry after round 1", len(cs_rr["round_log"]) == 1)
+check("round_log[0] contains player's result",
+      any(r.get("attacker_id") == "player" for r in cs_rr["round_log"][0]))
+check("Round 1 combat not ended", rr1["combat_outcome"] is None)
+
+goblin1_conds_r1 = {e["condition"]: e["duration"]
+                    for e in cs_rr["enemies"][0]["active_conditions"]}
+print(f"\n  Goblin1 conditions after Round 1 tick: {goblin1_conds_r1}")
+check("Goblin1 poisoned ticked to duration=1",
+      goblin1_conds_r1.get("poisoned") == 1)
+
+# --- Round 2: player crits goblin1 (kills), companions kill goblin2 ---
+cm._roll_d20 = lambda: 20  # everything crits
+goblin1_hp_before_r2 = cs_rr["enemies"][0]["hp"]["current"]
+player_r2 = cm.resolve_attack(cs_rr["player_combatant"], goblin1, p_attack)
+check(f"Round 2 player crits goblin1 (was {goblin1_hp_before_r2} HP)",
+      player_r2["crit"] is True)
+
+cs_rr["enemies"][1]["hp"]["current"] = 1  # one hit kills goblin2
+r2_other_rolls = iter([15, 15, 15, 15])
+cm._roll_d20 = lambda: next(r2_other_rolls)
+rr2 = cm.resolve_round(cs_rr, player_attack_result=player_r2)
+
+print(f"\n  Round 2 combat_outcome: {rr2['combat_outcome']}")
+check("After Round 2, cs round == 3", cs_rr["round"] == 3)
+check("round_log has 2 entries after round 2", len(cs_rr["round_log"]) == 2)
+check("Round 2 combat_outcome == 'player_victory'",
+      rr2["combat_outcome"] == "player_victory")
+check("combat_state status == 'ended'", cs_rr["status"] == "ended")
+
+goblin1_conds_r2 = cs_rr["enemies"][0]["active_conditions"]
+print(f"  Goblin1 conditions after Round 2 tick: {goblin1_conds_r2}")
+check("Goblin1 poisoned expired (duration 1→0) after round 2",
+      len(goblin1_conds_r2) == 0)
+check("round_log has exactly 2 entries (no phantom round 3)",
+      len(cs_rr["round_log"]) == 2)
+
+cm._roll_d20 = original_roll
+print()
+
+
 # =============================================================================
 print("=" * 65)
 print(f"RESULTS:  {PASS} passed,  {FAIL} failed")
