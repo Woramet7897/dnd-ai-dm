@@ -126,6 +126,31 @@ line of context when they later visit. No simulation loop. Cut without regret if
 ```
 `equip_item`, `unequip_item`, `get_active_effects`, `use_consumable` — unchanged.
 
+**Sizing: aim for ~18–20 entries, not the bare minimum.** This file is static and referenced by ID — it costs
+zero runtime context (unlike RAG lore, which is resent every turn), so there's no reason to keep it thin.
+Cover at least one weapon per class in `classes_catalog.json`, 2–3 armor options, 2–3 consumables, and a spread
+across common/uncommon/rare.
+
+### 4a-ii. [NEW] Lazy Item Generation — supplements the static catalog, never replaces it
+Beyond the starting hub, loot can be generated during play instead of requiring everything pre-authored —
+same reasoning as lazy-generated locations (PART 3), with a stricter guard since items affect combat balance.
+
+- **Storage:** generated items go into `world_saves/<name>_world.json["generated_items"]` — `item_catalog.json`
+  itself is never written to at runtime, staying static and shared across all characters.
+- **Lookup:** `resolve_item(item_id, world_state) -> dict` checks the static catalog first, falls back to
+  `generated_items`. This is the only function anything else (inventory, `get_active_effects`, combat) may
+  call — nothing reads either source directly.
+- **Generation flow — LLM signals an event, never invents stats:** extraction call may emit
+  `{"loot_generated": {"rarity": "uncommon"}}` (rarity is a small fixed enum: `common | uncommon | rare` — same
+  pattern as the `difficulty` enum for skill checks, a coarse category is fine, a stat number or item name from
+  the LLM is not). Python's `generate_item(rarity) -> dict` rolls the effect from a fixed table per rarity and
+  assigns a name from a small procedural name-bank — fully deterministic, no LLM call for this step. Store the
+  result under a `gen_<uuid4>` id in `generated_items`; the narrative call then describes it however it likes,
+  since the mechanical numbers are already locked in before any prose is written.
+- **`validate_item_id()` (PART 5) must check both `item_catalog.json` and `generated_items`** — extend the
+  existing function, don't replace it. The extraction call is never allowed to supply an `item_id`, `name`, or
+  `effects` dict directly for new loot — its only lever is the `rarity` enum above.
+
 ### 4b. NEW: `spell_catalog.json` (8–12 spells per casting class, single-target only, no AoE for v1)
 ```json
 {"vicious_mockery": {"name": "Vicious Mockery", "level": 0, "class": ["Bard"], "type": "attack_save", "save_stat": "WIS", "effect": {"damage": "1d4", "damage_type": "psychic"}}}
@@ -175,7 +200,7 @@ rewards. UI: shop panel replaces chat input when entering a location with a shop
 ### 5b. NEW FILE: `validation.py`
 Every extraction call output passes through here before `apply_state_updates` ever sees it:
 - `validate_action_tags(tags) -> list` — drop anything outside the fixed `ACTION_TAGS` vocabulary, keep the rest.
-- `validate_item_id(item_id) -> bool` — must exist in `item_catalog.json`; unknown IDs logged and dropped.
+- `validate_item_id(item_id) -> bool` — must exist in `item_catalog.json` **or** `generated_items` (PART 4a-ii); unknown IDs logged and dropped.
 - `validate_monster_ids(enemy_ids) -> list` — same pattern against `monster_catalog.json`.
 - `validate_npc_id(npc_id, world_state) -> bool` — must exist in `npc_relationships` or `party.companions`.
 - `validate_numeric_range(field_name, value, min_val, max_val) -> int | None` — drop out-of-bounds values

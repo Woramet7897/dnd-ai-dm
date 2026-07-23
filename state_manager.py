@@ -473,48 +473,71 @@ def apply_state_updates(updates: Dict[str, Any], state: Dict[str, Any],
                     inventory.pop(i)
                 break
 
-    # ── Quest updates ─────────────────────────────────────────────────────────
-    # These arrive via world_state — handled here if world_state is provided
-    if world_state is not None:
-        quest_log = world_state.setdefault("quest_log", {"main": [], "side": []})
-
-        if "add_quest" in updates:
-            # Phase 2 DEV-1 RESOLVED: respect quest_type key ('main' | 'side').
-            # add_quest can be either a plain string (title) or a dict with
-            # {title, quest_type}. Defaults to 'side' when quest_type is absent.
-            aq = updates["add_quest"]
-            if isinstance(aq, dict):
-                quest_title = aq.get("title", str(aq))
-                quest_type  = aq.get("quest_type", "side")
-            else:
-                quest_title = str(aq)
-                quest_type  = "side"
-
-            if quest_type not in ("main", "side"):
-                logger.debug(
-                    f"add_quest.quest_type '{quest_type}' invalid — defaulting to 'side'."
-                )
-                quest_type = "side"
-
-            new_q = {"title": quest_title, "status": "active", "objectives": []}
-            quest_log.setdefault(quest_type, []).append(new_q)
-
-        if "remove_quest" in updates:
-            title = updates["remove_quest"]
-            for category in ("main", "side"):
-                quest_log[category] = [
-                    q for q in quest_log.get(category, [])
-                    if q.get("title") != title
-                ]
-
-        # ── Location change ───────────────────────────────────────────────────
-        if "new_location" in updates:
-            world_state["current_location"] = updates["new_location"]
-            visited = world_state.setdefault("visited_rooms", [])
-            if updates["new_location"] not in visited:
-                visited.append(updates["new_location"])
+    # ── Location change (move_to_location_id) ─────────────────────────────────
+    # Renamed from 'new_location' to avoid collision with world_updates.new_location
+    # (which registers a brand-new room). Validation.py already verified the room exists.
+    if world_state is not None and "move_to_location_id" in updates:
+        dest_id = updates["move_to_location_id"]
+        world_state["current_location"] = dest_id
+        visited = world_state.setdefault("visited_rooms", [])
+        if dest_id not in visited:
+            visited.append(dest_id)
 
     return state, concentration_result
+
+
+def apply_quest_updates(
+    quest_updates: Dict[str, Any],
+    world_state: Dict[str, Any],
+) -> None:
+    """
+    Apply a validated quest_updates dict (from validate_quest_updates()) to world_state.
+    This is the ONLY code path that writes to quest_log — not apply_state_updates().
+
+    quest_updates shape (spec Section 12b):
+      new_quest        (dict, optional) — {title, quest_type ('main'|'side'), description}
+      objective_update (dict, optional) — {quest_id, objective_index, done}
+
+    Caller: app.py game loop (Phase 7) calls this AFTER apply_state_updates().
+    Must only be called with output from validate_quest_updates() — never raw LLM output.
+    """
+    quest_log = world_state.setdefault("quest_log", {"main": [], "side": []})
+
+    if "new_quest" in quest_updates:
+        nq = quest_updates["new_quest"]
+        quest_type = nq.get("quest_type", "side")
+        new_entry = {
+            "title":       nq["title"],
+            "status":      "active",
+            "description": nq.get("description", ""),
+            "objectives":  [],
+        }
+        quest_log.setdefault(quest_type, []).append(new_entry)
+        logger.debug(f"apply_quest_updates: added '{nq['title']}' to {quest_type} log.")
+
+    if "objective_update" in quest_updates:
+        ou = quest_updates["objective_update"]
+        qid       = ou["quest_id"]
+        obj_idx   = ou["objective_index"]
+        done      = ou["done"]
+        found = False
+        for category in ("main", "side"):
+            for quest in quest_log.get(category, []):
+                if quest.get("title") == qid or quest.get("id") == qid:
+                    objectives = quest.setdefault("objectives", [])
+                    # Extend list if objective_index is beyond current length
+                    while len(objectives) <= obj_idx:
+                        objectives.append({"description": "", "done": False})
+                    objectives[obj_idx]["done"] = done
+                    found = True
+                    logger.debug(
+                        f"apply_quest_updates: objective[{obj_idx}] of '{qid}' set done={done}."
+                    )
+                    break
+            if found:
+                break
+        if not found:
+            logger.debug(f"apply_quest_updates: quest_id '{qid}' not found in quest_log — no-op.")
 
 
 # ════════════════════════════════════════════════════════════════════════════════

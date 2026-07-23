@@ -110,13 +110,10 @@ VALID_QUEST_STATUSES: set = {"active", "completed", "failed", "abandoned"}
 def validate_quest_updates(quest_updates: Any) -> Optional[Dict]:
     """
     Validate and whitelist the quest_updates block from LLM extraction output.
-    DEV-3 RESOLVED (Phase 3+): this is a validation.py responsibility, not dungeon_manager's.
-
-    Accepted top-level keys (all optional):
-      quest_id        (str)  — identifies which quest is being updated
-      status          (str)  — must be one of VALID_QUEST_STATUSES
-      objective_update (str) — free-text string describing the new objective state
-      notes           (str)  — any additional narrative note (passed through for memory_manager)
+    Shape matches spec Section 12b:
+      new_quest        (dict, optional) — quest to create: {title (str), quest_type ('main'|'side'),
+                                          description (str, optional)}
+      objective_update (dict, optional) — {quest_id (str), objective_index (int), done (bool)}
 
     Any other key is silently dropped.
     Returns cleaned dict, or None if nothing valid survived.
@@ -127,31 +124,57 @@ def validate_quest_updates(quest_updates: Any) -> Optional[Dict]:
 
     cleaned: Dict = {}
 
-    if "quest_id" in quest_updates:
-        qid = quest_updates["quest_id"]
-        if isinstance(qid, str) and qid.strip():
-            cleaned["quest_id"] = qid.strip()
-        else:
-            logger.debug(f"quest_updates.quest_id not a non-empty string ({qid!r}) — dropped.")
-
-    if "status" in quest_updates:
-        st = quest_updates["status"]
-        if st in VALID_QUEST_STATUSES:
-            cleaned["status"] = st
-        else:
-            logger.debug(
-                f"quest_updates.status '{st}' not in {VALID_QUEST_STATUSES} — dropped."
-            )
-
-    for str_field in ("objective_update", "notes"):
-        if str_field in quest_updates:
-            val = quest_updates[str_field]
-            if isinstance(val, str):
-                cleaned[str_field] = val
+    # new_quest — create a brand-new quest entry
+    if "new_quest" in quest_updates:
+        nq = quest_updates["new_quest"]
+        if isinstance(nq, dict):
+            nq_clean: Dict = {}
+            title = nq.get("title")
+            if isinstance(title, str) and title.strip():
+                nq_clean["title"] = title.strip()
             else:
-                logger.debug(
-                    f"quest_updates.{str_field} not a string ({type(val).__name__}) — dropped."
-                )
+                logger.debug(f"quest_updates.new_quest.title missing or not a string — dropped.")
+            quest_type = nq.get("quest_type", "side")
+            if quest_type not in ("main", "side"):
+                logger.debug(f"quest_updates.new_quest.quest_type '{quest_type}' invalid — defaulting to 'side'.")
+                quest_type = "side"
+            nq_clean["quest_type"] = quest_type
+            desc = nq.get("description")
+            if isinstance(desc, str):
+                nq_clean["description"] = desc
+            if "title" in nq_clean:
+                cleaned["new_quest"] = nq_clean
+            else:
+                logger.debug("quest_updates.new_quest had no valid title — dropped.")
+        else:
+            logger.debug(f"quest_updates.new_quest not a dict ({type(nq).__name__}) — dropped.")
+
+    # objective_update — mark a quest objective done/undone
+    if "objective_update" in quest_updates:
+        ou = quest_updates["objective_update"]
+        if isinstance(ou, dict):
+            ou_clean: Dict = {}
+            qid = ou.get("quest_id")
+            if isinstance(qid, str) and qid.strip():
+                ou_clean["quest_id"] = qid.strip()
+            else:
+                logger.debug("quest_updates.objective_update.quest_id missing or not a string — dropped.")
+            obj_idx = ou.get("objective_index")
+            if isinstance(obj_idx, int) and obj_idx >= 0:
+                ou_clean["objective_index"] = obj_idx
+            else:
+                logger.debug(f"quest_updates.objective_update.objective_index invalid ({obj_idx!r}) — dropped.")
+            done = ou.get("done")
+            if isinstance(done, bool):
+                ou_clean["done"] = done
+            else:
+                logger.debug(f"quest_updates.objective_update.done not a bool ({done!r}) — dropped.")
+            if "quest_id" in ou_clean and "objective_index" in ou_clean and "done" in ou_clean:
+                cleaned["objective_update"] = ou_clean
+            else:
+                logger.debug("quest_updates.objective_update missing required fields — dropped.")
+        else:
+            logger.debug(f"quest_updates.objective_update not a dict ({type(ou).__name__}) — dropped.")
 
     if not cleaned:
         logger.debug("quest_updates had no valid fields after filtering — dropped.")
@@ -328,10 +351,22 @@ def validate_extraction_output(raw: Any, world_state: Optional[Dict] = None) -> 
                 if result is not None:
                     su_clean["gold_change"] = result
 
-            # Pass through other string fields directly (location, quest updates etc.)
-            for str_field in ("new_location", "add_quest", "remove_quest"):
-                if str_field in su_raw and isinstance(su_raw[str_field], str):
-                    su_clean[str_field] = su_raw[str_field]
+            # move_to_location_id — relocate player to an EXISTING room (Issue C fix).
+            # Renamed from 'new_location' to avoid collision with world_updates.new_location
+            # (which registers a brand-new room). Must be validated against known room IDs.
+            if "move_to_location_id" in su_raw:
+                dest_id = su_raw["move_to_location_id"]
+                if isinstance(dest_id, str) and dest_id.strip():
+                    dm = _get_dungeon_manager()
+                    known = dm._all_known_room_ids(world_state if world_state else {})
+                    if dest_id in known:
+                        su_clean["move_to_location_id"] = dest_id
+                    else:
+                        logger.debug(
+                            f"state_updates.move_to_location_id '{dest_id}' not in known rooms — dropped."
+                        )
+                else:
+                    logger.debug("state_updates.move_to_location_id not a non-empty string — dropped.")
 
             if su_clean:
                 cleaned["state_updates"] = su_clean

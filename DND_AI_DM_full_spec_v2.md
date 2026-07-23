@@ -222,9 +222,14 @@ Not required for v1 — build only if time allows, cut without regret if not.
 ---
 
 ## 7. Item System
-Unchanged from v1, plus one addition:
+Unchanged from v1, plus two additions: richer starting catalog sizing, and a new lazy generation subsystem.
 
-### 7a. `item_catalog.json`
+### 7a. `item_catalog.json` — starting size: don't be stingy
+This is a static file written once and referenced by ID — it costs no runtime context budget (unlike RAG lore,
+which is re-sent every turn). There is no reason to keep it minimal. Aim for **~18–20 items**, not 12–15:
+at least one weapon per class represented in `classes_catalog.json`, 2–3 armor options, 2–3 consumables, and
+a small spread across common/uncommon/rare so the starting hub has some texture. Cheap now, expensive to
+retrofit once code depends on the catalog's shape.
 ```json
 {
   "cloak_of_protection": {"name": "Cloak of Protection", "type": "wearable", "slot": "cloak", "effects": {"ac_bonus": 1, "saving_throw_bonus": 1}, "rarity": "uncommon", "value_gold": 25},
@@ -235,6 +240,36 @@ Unchanged from v1, plus one addition:
 
 ### 7b. Required functions — unchanged from v1
 `equip_item`, `unequip_item`, `get_active_effects`, `use_consumable`.
+
+### 7c. [v2 NEW] Lazy Item Generation — supplements the catalog, does not replace it
+The hand-authored catalog (7a) covers the starting hub. Once the story moves beyond it, loot needs to be able
+to appear without every possible item being pre-written — same reasoning as lazy-generated locations (Section 6b),
+but item generation needs a stricter guard since items affect combat balance directly, while locations only
+affect narrative framing.
+
+**Storage — never written into `item_catalog.json`:**
+Generated items live in a new per-save key, `world_saves/<name>_world.json["generated_items"]` — the static
+catalog file stays untouched and shared across every character, exactly like `locations` in Section 6b keeps
+`dungeon_data.json`'s hub clean. `resolve_item(item_id, world_state) -> dict` checks the static catalog first,
+falls back to `generated_items`, and is the **only** function anything else (inventory display, `get_active_effects`,
+combat) is allowed to call — nothing reads either source directly.
+
+**Generation flow — the LLM never invents mechanical stats, only signals that loot occurred:**
+1. Extraction call may emit `{"loot_generated": {"rarity": "uncommon"}}` — `rarity` is a small fixed enum
+   (`common | uncommon | rare`), the same pattern already used for `difficulty` on skill checks (PART 10b/11b) —
+   a coarse categorical choice is fine, a stat number or item name chosen by the LLM is not.
+2. Python's `generate_item(rarity: str) -> dict` (new function in `state_manager.py` or a small `item_generator.py`)
+   rolls the effect from a fixed table keyed by rarity (e.g. `common` = +0, `uncommon` = +1 to a single stat,
+   `rare` = +2/+3 or one resistance) and assigns a name from a small procedural name-bank keyed by rarity/slot —
+   fully deterministic, no LLM call for this step at all.
+3. The generated item is written to `generated_items` with a unique id (`gen_<uuid4>`), then the narrative call
+   is free to describe it however it likes — the DM's prose is flavor only, Python already decided the numbers
+   before any text was written.
+
+**Validation update required:** `validate_item_id()` (Section 8) must check both `item_catalog.json`
+and `generated_items`, not just the static file — extend it, don't replace it. The extraction call is still
+never allowed to supply an `item_id`, `name`, or `effects` dict directly for a newly-found item; the only
+lever it has is the `rarity` enum in step 1.
 
 ---
 
@@ -470,7 +505,7 @@ the extraction call is trusted or applied without passing through here first.**
 
 - `validate_action_tags(tags: list) -> list` — drops any tag not in the fixed `ACTION_TAGS` vocabulary
   (Section 11); keeps the valid ones. Field-level filtering, not all-or-nothing rejection.
-- `validate_item_id(item_id: str) -> bool` — checks against `item_catalog.json` keys; unknown IDs are logged
+- `validate_item_id(item_id: str) -> bool` — checks against `item_catalog.json` keys **and** `generated_items` (Section 7c); unknown IDs are logged
   and dropped, never applied (an LLM narrating "a Ring of Fire" that doesn't exist in the catalog must not
   be able to grant it).
 - `validate_monster_ids(enemy_ids: list) -> list` — same pattern against `monster_catalog.json`, used for

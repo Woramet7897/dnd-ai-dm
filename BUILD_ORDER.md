@@ -202,6 +202,11 @@ other. Do them one at a time, one Definition of Done per system, in whatever ord
   condition in a test affects the very next roll as expected and expires exactly on schedule.
 - **Companion dismissal** (`dismiss_companion` + dismiss button UI). Done when: a dismissed companion appears
   in `former_companions`, not deleted, and is recruitable again at their last location in a test.
+- **Lazy Item Generation** (`resolve_item`, `generated_items` write path in `state_manager.py` — see Section
+  7c of the full spec / 4a-ii of the upgrade prompt, added after the original v2 spec). Done when: a
+  generated item is written to `generated_items` (not `item_catalog.json`), `resolve_item()` correctly falls
+  back from the static catalog to `generated_items`, `validate_item_id()` accepts both sources, and the
+  extraction call is confirmed to never invent a full item spec — only a `rarity` tag that Python resolves.
 
 ---
 
@@ -235,6 +240,7 @@ Last updated: <date/time you finish updating this>
 | 9 - Spellcasting | NOT_STARTED | | |
 | 9 - Status effects | NOT_STARTED | | |
 | 9 - Companion dismissal | NOT_STARTED | | |
+| 9 - Lazy item generation | NOT_STARTED | | |
 | 10 - World events (optional) | NOT_STARTED | | |
 | 10 - Session recap (optional) | NOT_STARTED | | |
 
