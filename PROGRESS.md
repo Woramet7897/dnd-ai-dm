@@ -1,6 +1,6 @@
 # PROGRESS.md — do not delete, read this first every session
 
-Last updated: 2026-07-23 (Phase 3 DONE + pre-Phase 4 Issues A/B/C fixed + docstring/quest-id polish)
+Last updated: 2026-07-23 (Phase 4 DONE — combat_manager.py)
 
 | Phase | Status | Files written | Notes/deviations |
 |---|---|---|---|
@@ -8,7 +8,7 @@ Last updated: 2026-07-23 (Phase 3 DONE + pre-Phase 4 Issues A/B/C fixed + docstr
 | 1 - character_creator + validation | DONE | character_creator.py, validation.py | DEV-1: derive_stats() hardcodes Persuasion+Performance for classes with "Any" skill pool — fix at Phase 7 (app.py multiselect). DEV-2: world_updates.new_location pass-through — RESOLVED Phase 3: validation.py calls dungeon_manager.validate_new_location(). DEV-3: quest_updates pass-through — RESOLVED pre-Phase 4: validate_quest_updates() now enforces spec Section 12b shape (new_quest/objective_update); old quest_id/status/notes shape removed. Issue C also resolved: state_updates.new_location renamed to move_to_location_id; existence check via dungeon_manager._all_known_room_ids() added before it reaches state_manager. DoD: 39/39 issue-fix tests + 45/45 phase3 regression tests passed. |
 | 2 - state_manager core | DONE | state_manager.py (overwrote v1) | DEV-1: add_quest defaulted all quests to side — RESOLVED pre-Phase 4 (Issues A/B/C): apply_state_updates() no longer handles quest logic at all. Quest updates now go exclusively through validate_quest_updates() → apply_quest_updates() per spec Section 12b. move_to_location_id (renamed from new_location) replaces the old add_quest/remove_quest/new_location trifecta in state_updates. DEV-2: _roll_d20 is a module-level function for test monkeypatching. DoD: 73/73 + 39/39 fix tests passed. |
 | 3 - dungeon_manager | DONE | dungeon_manager.py; validation.py updated (DEV-2 resolved) | DEV-2 resolved: validation.py calls dungeon_manager.validate_new_location() for world_updates.new_location. _all_known_room_ids() also now used by validation.py to verify move_to_location_id. No world-event flag injection (Phase 10, optional). DoD: 45/45 tests + 45/45 regression tests passed. |
-| 4 - combat_manager | NOT_STARTED | | |
+| 4 - combat_manager | DONE | combat_manager.py | Conditions (5): apply_condition/tick_conditions per Section 20. Initiative with DEX-mod + tiebreak. start_combat idempotency guard (spec 9b-iv). resolve_attack with adv/disadv from conditions, crit (double dice), fumble, applies_condition from static catalog only. resolve_enemy_turn (first living target), resolve_companion_turn (lowest-HP target), both skip when stunned. classify_round_significance, build_routine_summary (template bank), build_round_narration_block (spec 9b-iii format). check_combat_end (victory/defeat). _player_attacks: Phase 4 placeholder — dagger or unarmed strike; Phase 6 item catalog integration deferred. DoD: 90/90 tests + 45/45 Phase 3 regression. |
 | 5 - memory_manager | NOT_STARTED | | |
 | 6 - llm_handler | NOT_STARTED | | |
 | 7 - app.py core loop (MVP milestone) | NOT_STARTED | | |
@@ -24,7 +24,7 @@ Last updated: 2026-07-23 (Phase 3 DONE + pre-Phase 4 Issues A/B/C fixed + docstr
 Status values to use: NOT_STARTED / IN_PROGRESS / DONE
 
 ## If IN_PROGRESS when a session ends, note exactly what's left here:
-All phases up to 3 are DONE (+ pre-Phase 4 Issues A/B/C fixed). Next: Phase 4 (combat_manager.py).
+All phases up to 4 are DONE. Next: Phase 5 (memory_manager.py — ChromaDB/SentenceTransformer RAG).
 
 ## Pre-Phase 4 cleanup notes (for future sessions)
 - Issue A: app.py, llm_handler.py, memory_manager.py, player_state.json are in _deprecated_v1/ — v1 originals, NOT completed Phase 6/7 work. Rewrite from spec in Phase 6 (llm_handler), Phase 7 (app.py). memory_manager goes to Phase 5.
