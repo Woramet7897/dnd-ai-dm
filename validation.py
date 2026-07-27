@@ -13,7 +13,12 @@ Design principles (per spec Section 13b / PART 5b):
 
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
+
+# Catalog directory — resolved relative to this file so loading succeeds
+# regardless of the cwd when the process was launched (spec bug-fix, Phase 4).
+_CATALOG_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # dungeon_manager imported lazily below to avoid circular imports at module load
 _dungeon_manager = None
@@ -56,7 +61,8 @@ def _get_item_catalog() -> Dict:
     global _item_catalog
     if _item_catalog is None:
         try:
-            with open("item_catalog.json", "r", encoding="utf-8") as f:
+            path = os.path.join(_CATALOG_DIR, "item_catalog.json")
+            with open(path, "r", encoding="utf-8") as f:
                 _item_catalog = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             logger.error(f"Failed to load item_catalog.json: {e}")
@@ -67,7 +73,8 @@ def _get_monster_catalog() -> Dict:
     global _monster_catalog
     if _monster_catalog is None:
         try:
-            with open("monster_catalog.json", "r", encoding="utf-8") as f:
+            path = os.path.join(_CATALOG_DIR, "monster_catalog.json")
+            with open(path, "r", encoding="utf-8") as f:
                 _monster_catalog = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             logger.error(f"Failed to load monster_catalog.json: {e}")

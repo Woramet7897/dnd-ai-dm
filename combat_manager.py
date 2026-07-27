@@ -17,9 +17,14 @@ Design principles (spec Section 9):
 import copy
 import json
 import logging
+import os
 import random
 import re
 from typing import Any, Dict, List, Optional, Tuple
+
+# Catalog directory — resolved relative to this file so loading succeeds
+# regardless of the cwd when the process was launched (spec bug-fix, Phase 4).
+_CATALOG_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ── Logger ────────────────────────────────────────────────────────────────────
 logger = logging.getLogger("combat_manager")
@@ -37,7 +42,8 @@ def _get_monster_catalog() -> Dict:
     global _monster_catalog
     if _monster_catalog is None:
         try:
-            with open("monster_catalog.json", "r", encoding="utf-8") as f:
+            path = os.path.join(_CATALOG_DIR, "monster_catalog.json")
+            with open(path, "r", encoding="utf-8") as f:
                 _monster_catalog = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             logger.error(f"Failed to load monster_catalog.json: {e}")
@@ -296,7 +302,10 @@ def start_combat(
         "name":             player_state.get("name", "Adventurer"),
         "side":             "player",
         "hp":               dict(player_state.get("hp", {"current": 10, "max": 10})),
-        "ac":               10 + (player_state.get("stats", {}).get("DEX", 10) - 10) // 2,
+        "ac":               player_state.get(
+            "ac",
+            10 + (player_state.get("stats", {}).get("DEX", 10) - 10) // 2,
+        ),
         "stats":            player_state.get("stats", {}),
         "attacks":          _player_attacks(player_state),
         "initiative":       None,

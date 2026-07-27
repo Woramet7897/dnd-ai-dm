@@ -790,8 +790,129 @@ cm._roll_d20 = original_roll
 print()
 
 
+
+# =============================================================================
+print("=" * 65)
+print("TEST 17 — Bug 1: start_combat() uses stored player AC, not recomputed")
+print("=" * 65)
+
+# Fighter in chain mail: DEX 10 (mod +0), but ac=16 from compute_ac().
+# Before fix: 10 + (10-10)//2 = 10  →  combat AC wrong.
+# After fix:  player_state["ac"] = 16 is used directly.
+fighter_player = {
+    "schema_version": 4,
+    "name": "Aldric",
+    "class_name": "Fighter",
+    "level": 1,
+    "hp": {"current": 12, "max": 12},
+    "ac": 16,   # chain mail — compute_ac() already stored this
+    "stats": {"STR": 16, "DEX": 10, "CON": 14, "INT": 10, "WIS": 10, "CHA": 10},
+    "proficiency_bonus": 2,
+    "proficient_skills": [],
+    "proficient_saves": [],
+    "concentration": None,
+    "death_saves": {"success": 0, "fail": 0},
+    "status": "normal",
+    "gold": 0,
+    "inventory": [],
+    "active_conditions": [],
+    "roll_log": [],
+}
+
+original_roll = cm._roll_d20
+initiative_seq = iter([10, 8])
+cm._roll_d20 = lambda: next(initiative_seq)
+
+world_bug1 = fresh_world()
+cs_bug1 = cm.start_combat(["goblin_scout"], fighter_player, world_bug1)
+stored_ac = cs_bug1["player_combatant"]["ac"]
+recomputed_ac = 10 + (fighter_player["stats"]["DEX"] - 10) // 2  # = 10
+
+print(f"\n  player_state['ac'] = 16,  DEX mod = +0,  recomputed = {recomputed_ac}")
+print(f"  combat_state player_combatant['ac'] = {stored_ac}")
+check("Bug 1: stored AC (16) used, not recomputed unarmored AC (10)",
+      stored_ac == 16)
+check("Bug 1: recomputed formula would have been wrong (10 != 16)",
+      recomputed_ac != 16)
+
+# Also confirm normal case: if "ac" key is missing, fallback formula still works
+no_ac_player = dict(fighter_player)
+del no_ac_player["ac"]  # remove stored ac
+initiative_seq2 = iter([10, 8])
+cm._roll_d20 = lambda: next(initiative_seq2)
+world_bug1b = fresh_world()
+cs_bug1b = cm.start_combat(["goblin_scout"], no_ac_player, world_bug1b)
+fallback_ac = cs_bug1b["player_combatant"]["ac"]
+expected_fallback = 10 + (no_ac_player["stats"]["DEX"] - 10) // 2  # = 10
+print(f"\n  No stored AC: fallback formula gives {fallback_ac}, expected {expected_fallback}")
+check("Bug 1 fallback: missing 'ac' key uses unarmored formula correctly",
+      fallback_ac == expected_fallback)
+
+cm._roll_d20 = original_roll
+print()
+
+
+# =============================================================================
+print("=" * 65)
+print("TEST 18 — Bug 2: catalog loading succeeds from non-root cwd")
+print("=" * 65)
+
+import os
+import importlib
+
+# Cache-bust both modules so they reload fresh with the new _CATALOG_DIR
+import combat_manager as _cm_fresh
+import validation as _val_fresh
+
+# Force catalog caches to None so they'll reload
+_cm_fresh._monster_catalog = None
+_val_fresh._item_catalog    = None
+_val_fresh._monster_catalog = None
+
+# Change to a directory that is definitely NOT C:\DnD
+original_cwd = os.getcwd()
+os.chdir(os.path.expanduser("~"))  # user home — guaranteed non-project dir
+print(f"\n  Changed cwd to: {os.getcwd()}")
+
+try:
+    # combat_manager: loading should still find monster_catalog.json via _CATALOG_DIR
+    catalog_cm = _cm_fresh._get_monster_catalog()
+    check("Bug 2a: combat_manager._get_monster_catalog() loads from non-root cwd",
+          isinstance(catalog_cm, dict) and len(catalog_cm) > 0)
+    check("Bug 2a: 'goblin_scout' present in loaded catalog",
+          "goblin_scout" in catalog_cm)
+
+    # validation: item catalog loads correctly
+    catalog_item = _val_fresh._get_item_catalog()
+    check("Bug 2b: validation._get_item_catalog() loads from non-root cwd",
+          isinstance(catalog_item, dict) and len(catalog_item) > 0)
+
+    # validation: monster catalog loads correctly
+    catalog_val_m = _val_fresh._get_monster_catalog()
+    check("Bug 2b: validation._get_monster_catalog() loads from non-root cwd",
+          isinstance(catalog_val_m, dict) and len(catalog_val_m) > 0)
+    check("Bug 2b: 'goblin_scout' present in validation monster catalog",
+          "goblin_scout" in catalog_val_m)
+
+except Exception as e:
+    check("Bug 2: catalog loading should not raise from non-root cwd", False, str(e))
+
+finally:
+    os.chdir(original_cwd)
+    print(f"  Restored cwd to: {os.getcwd()}")
+
+# Confirm _CATALOG_DIR points to the project dir (contains this script)
+project_dir = os.path.dirname(os.path.abspath(__file__))
+check("Bug 2: combat_manager._CATALOG_DIR == project dir",
+      _cm_fresh._CATALOG_DIR == project_dir)
+check("Bug 2: validation._CATALOG_DIR == project dir",
+      _val_fresh._CATALOG_DIR == project_dir)
+print()
+
+
 # =============================================================================
 print("=" * 65)
 print(f"RESULTS:  {PASS} passed,  {FAIL} failed")
 print("=" * 65)
 sys.exit(0 if FAIL == 0 else 1)
+
