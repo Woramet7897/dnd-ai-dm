@@ -1,6 +1,6 @@
 # PROGRESS.md — do not delete, read this first every session
 
-Last updated: 2026-07-27 (Phase 4 bugfixes — stored AC, __file__-relative catalog paths)
+Last updated: 2026-07-29 (Phase 5 complete — memory_manager.py, 53/53 tests)
 
 | Phase | Status | Files written | Notes/deviations |
 |---|---|---|---|
@@ -9,7 +9,7 @@ Last updated: 2026-07-27 (Phase 4 bugfixes — stored AC, __file__-relative cata
 | 2 - state_manager core | DONE | state_manager.py (overwrote v1) | DEV-1: add_quest defaulted all quests to side — RESOLVED pre-Phase 4 (Issues A/B/C): apply_state_updates() no longer handles quest logic at all. Quest updates now go exclusively through validate_quest_updates() → apply_quest_updates() per spec Section 12b. move_to_location_id (renamed from new_location) replaces the old add_quest/remove_quest/new_location trifecta in state_updates. DEV-2: _roll_d20 is a module-level function for test monkeypatching. DoD: 73/73 + 39/39 fix tests passed. |
 | 3 - dungeon_manager | DONE | dungeon_manager.py; validation.py updated (DEV-2 resolved) | DEV-2 resolved: validation.py calls dungeon_manager.validate_new_location() for world_updates.new_location. _all_known_room_ids() also now used by validation.py to verify move_to_location_id. No world-event flag injection (Phase 10, optional). DoD: 45/45 tests + 45/45 regression tests passed. |
 | 4 - combat_manager | DONE | combat_manager.py (+ validation.py path fix) | Conditions (5): apply_condition/tick_conditions per Section 20. Initiative with DEX-mod + tiebreak. start_combat idempotency guard (spec 9b-iv). resolve_attack with adv/disadv from conditions, crit (double dice), fumble, applies_condition from static catalog only. resolve_enemy_turn (first living target), resolve_companion_turn (lowest-HP target), both skip when stunned. classify_round_significance, build_routine_summary (template bank), build_round_narration_block (spec 9b-iii format). check_combat_end (victory/defeat). resolve_round(): full round orchestration in turn_order sequence, appends to round_log, ticks conditions, increments round, returns narration_block + combat_outcome. Polish fixes: (a) quest slug id collision deduplication in state_manager.apply_quest_updates; (b) roll_dice() extended to accept flat-integer expressions like "1+0"; (c) _player_attacks Unarmed Strike now takes real code path. Bugfixes: (d) start_combat() now reads player_state["ac"] directly (falls back to unarmored formula only if key absent) — previously recomputed AC from DEX every time, ignoring armor stored by compute_ac(); (e) combat_manager and validation catalog loaders now resolve paths via os.path.join(_CATALOG_DIR, filename) where _CATALOG_DIR = os.path.dirname(os.path.abspath(__file__)) — previously used cwd-relative open() which silently caches {} if the process is launched from a non-project directory. DoD: 135/135 tests + 45/45 Phase 3 regression. |
-| 5 - memory_manager | NOT_STARTED | | |
+| 5 - memory_manager | DONE | memory_manager.py | ChromaDB PersistentClient(path="./db") — real disk persistence verified by singleton reset + re-open test. Embedding model: sentence-transformers/all-MiniLM-L6-v2 (exact spec string). Short-term: last 6 turns in plain Python list. Overflow policy: when len >= 6 before add_turn(), OLDEST 2 are auto-summarized into one minor_lore entry in ChromaDB then removed from short_term. Consolidation: every 20 active (non-archived) minor_lore entries → 1 major_lore chapter; contributing 20 minors marked archived=true (not deleted — still exist in collection, excluded from future queries via metadata filter). get_relevant_lore(): returns AT MOST 3 total (combined major + minor), respects n_results param; minor queries use local cosine re-ranking to avoid ChromaDB n_results > collection-size errors. st.cache_resource: get_chroma_client() and get_embedding_model() decorated when Streamlit is present, fall back to plain module-level singleton when called outside Streamlit context. Phase 10 (session recap on load, Section 14a) explicitly NOT implemented — flagged below. Deviation DEV-1: minor_lore active-document re-ranking is done locally (cosine via numpy) rather than a second ChromaDB query because ChromaDB raises when n_results > collection size; functionally identical to a vector query, just defensive. DoD: 53/53 tests. |
 | 6 - llm_handler | NOT_STARTED | | |
 | 7 - app.py core loop (MVP milestone) | NOT_STARTED | | |
 | 8 - Death/downed outcome | NOT_STARTED | | |
@@ -24,7 +24,10 @@ Last updated: 2026-07-27 (Phase 4 bugfixes — stored AC, __file__-relative cata
 Status values to use: NOT_STARTED / IN_PROGRESS / DONE
 
 ## If IN_PROGRESS when a session ends, note exactly what's left here:
-All phases up to 4 are DONE. Next: Phase 5 (memory_manager.py — ChromaDB/SentenceTransformer RAG).
+All phases up to 5 are DONE. Next: Phase 6 (llm_handler.py — Ollama narrative + extraction calls, system prompt tiers, token budget).
+
+## Phase 10 deferred items (explicitly out of scope until Phase 10)
+- Session recap on load (Section 14a / BUILD_ORDER.md Phase 10): generate a "previously in your story…" paragraph from recent major_lore entries on save load. NOT implemented in Phase 5. Owner: Phase 10 (optional polish).
 
 ## Pre-Phase 4 cleanup notes (for future sessions)
 - Issue A: app.py, llm_handler.py, memory_manager.py, player_state.json are in _deprecated_v1/ — v1 originals, NOT completed Phase 6/7 work. Rewrite from spec in Phase 6 (llm_handler), Phase 7 (app.py). memory_manager goes to Phase 5.
