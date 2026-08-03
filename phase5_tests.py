@@ -12,6 +12,8 @@ Tests cover every explicit spec requirement from Part 12 / Section 14:
   TEST 8  — Archived minors survive (not deleted) but excluded from queries
   TEST 9  — get_relevant_lore() returns combined major+minor, AT MOST 3 total
   TEST 10 — Module-level helper wrappers work correctly
+  TEST 11 — Embedding model pinned to CPU (Issue 1 Regression)
+  TEST 12 — _unique_id() chronological timestamp & consolidation order (Issue 2 Regression)
 
 Strategy for DB isolation:
   Each test section uses its own unique DB subdirectory so shutil.rmtree never
@@ -34,7 +36,7 @@ PASS = 0
 FAIL = 0
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB = {n: os.path.join(BASE_DIR, f"db_test_p5_t{n}") for n in range(1, 11)}
+DB = {n: os.path.join(BASE_DIR, f"db_test_p5_t{n}") for n in range(1, 13)}
 ALL_TEST_DBS = list(DB.values())
 
 # ── Pre-clean: wipe any leftover test DBs from a previous run.
@@ -426,6 +428,71 @@ check("Module-level get_relevant_lore respects 3-entry cap",
       len(lore10) <= memory_manager.MAX_RELEVANT_LORE_RESULTS)
 check("MAX_RELEVANT_LORE_RESULTS == 3 (spec)",
       memory_manager.MAX_RELEVANT_LORE_RESULTS == 3)
+print()
+
+
+# =============================================================================
+print("=" * 65)
+print("TEST 11 — Embedding model pinned to CPU (Issue 1 Regression)")
+print("=" * 65)
+
+switch_test(11)
+model11 = memory_manager.get_embedding_model(memory_manager.EMBEDDING_MODEL_NAME)
+dev_str = str(getattr(model11, "device", "cpu"))
+dev_type = getattr(getattr(model11, "device", None), "type", dev_str)
+check("Embedding model device is cpu (Issue 1)",
+      dev_type == "cpu" or dev_str == "cpu",
+      f"device={getattr(model11, 'device', 'unknown')}")
+print()
+
+
+# =============================================================================
+print("=" * 65)
+print("TEST 12 — _unique_id() chronological timestamp & consolidation order (Issue 2 Regression)")
+print("=" * 65)
+
+switch_test(12)
+mm12 = fresh_mm("ChronoHero", 12)
+id1 = mm12._unique_id("minor")
+parts = id1.split("_")
+check("_unique_id has chronological timestamp component (Issue 2)",
+      len(parts) >= 4 and parts[2].isdigit(),
+      f"id={id1}")
+
+# Test creation order vs lexicographic sort order
+ids_in_order = []
+for i in range(5):
+    doc_id = mm12._store_minor_lore(f"Chrono item {i+1}")
+    ids_in_order.append(doc_id)
+    time.sleep(0.01)
+
+col12 = mm12._get_minor_collection()
+res12 = col12.get(where={"character": {"$eq": "ChronoHero"}}, include=["documents"])
+ids_docs12 = list(zip(res12["ids"], res12["documents"]))
+ids_docs12.sort(key=lambda x: x[0])
+sorted_ids12 = [x[0] for x in ids_docs12]
+check("Lexicographic sorting of _unique_id preserves exact creation order (Issue 2)",
+      sorted_ids12 == ids_in_order,
+      f"expected={ids_in_order}, got={sorted_ids12}")
+
+# Test consolidation batch ordering
+summarized_batches = []
+def spy_summarizer(texts):
+    summarized_batches.append(list(texts))
+    return " | ".join(texts)
+
+mm12b = memory_manager.MemoryManager("ChronoHero20", db_path=DB[12], summarizer=spy_summarizer)
+expected_texts = []
+for i in range(20):
+    t = f"Event {i+1:02d}"
+    expected_texts.append(t)
+    mm12b._store_minor_lore(t)
+    time.sleep(0.005)
+
+mm12b._maybe_consolidate()
+check("Consolidation batch is passed to summarizer in exact chronological creation order (Issue 2)",
+      len(summarized_batches) == 1 and summarized_batches[0] == expected_texts,
+      f"expected first 3={expected_texts[:3]}, got first 3={summarized_batches[0][:3] if summarized_batches else 'None'}")
 print()
 
 

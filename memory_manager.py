@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import logging
 import os
+import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 # ── Logger ────────────────────────────────────────────────────────────────────
@@ -64,13 +66,13 @@ def _load_chroma_client(db_path: str = DB_PATH):
 
 def _load_embedding_model(model_name: str = EMBEDDING_MODEL_NAME):
     """
-    Return a SentenceTransformer embedding model.
+    Return a SentenceTransformer embedding model on CPU.
     Must be called via get_embedding_model() (cached), not directly.
     Spec Part 12: 'sentence-transformers/all-MiniLM-L6-v2 embeddings'.
     """
     from sentence_transformers import SentenceTransformer  # type: ignore
-    model = SentenceTransformer(model_name)
-    logger.debug(f"SentenceTransformer model '{model_name}' loaded.")
+    model = SentenceTransformer(model_name, device="cpu")
+    logger.debug(f"SentenceTransformer model '{model_name}' loaded on CPU.")
     return model
 
 
@@ -204,9 +206,8 @@ class MemoryManager:
         return model.encode(text).tolist()
 
     def _unique_id(self, prefix: str) -> str:
-        """Generate a unique document ID using a counter stored in metadata."""
-        import uuid
-        return f"{prefix}_{self._name}_{uuid.uuid4().hex[:12]}"
+        """Generate a unique document ID using a chronological timestamp prefix."""
+        return f"{prefix}_{self._name}_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
 
     # ── Short-term window management ─────────────────────────────────────────
 
@@ -325,12 +326,10 @@ class MemoryManager:
         )
 
         # Take exactly MINOR_LORE_CONSOLIDATE_AT oldest entries.
-        # ChromaDB returns them in insertion order (IDs are UUIDs with a
-        # timestamp prefix via _unique_id, but we sort lexicographically as
-        # a best-effort proxy; the spec says every 20 accumulated, not
-        # strictly the 20 oldest by wall clock).
+        # IDs are UUIDs with a chronological millisecond timestamp prefix via
+        # _unique_id, so sorting lexicographically orders them oldest-first.
         ids_docs  = list(zip(result["ids"], result["documents"]))
-        ids_docs.sort(key=lambda x: x[0])  # lexicographic ≈ insertion order
+        ids_docs.sort(key=lambda x: x[0])  # lexicographic == chronological order
         batch     = ids_docs[:MINOR_LORE_CONSOLIDATE_AT]
         batch_ids = [b[0] for b in batch]
         batch_docs= [b[1] for b in batch]

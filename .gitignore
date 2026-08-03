@@ -6,6 +6,7 @@ player_state.json
 
 # ChromaDB storage — runtime generated
 db/
+db_test_*/
 
 # Python artifacts
 *.pyc
