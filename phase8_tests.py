@@ -154,13 +154,15 @@ class TestPhase8DownedOutcome(unittest.TestCase):
         cs["player_combatant"]["hp"]["current"] = 0
         cs["player_combatant"]["death_saves"]["fail"] = 3
 
-        # Check combat end triggers player_defeat and resolve_downed_outcome without crashing
-        outcome = combat_manager.check_combat_end(cs, self.world_state)
+        # Force 'captured' outcome
+        with patch("random.choices", return_value=["captured"]):
+            outcome = combat_manager.check_combat_end(cs, self.world_state)
+
         self.assertEqual(outcome, "player_defeat")
         self.assertIn("downed_outcome", cs)
-        self.assertIn(cs["downed_outcome"]["outcome"], ["robbed_and_left", "captured", "rescued_by_npc"])
-        # Assert directly on ORIGINAL character_state object identity
-        self.assertIn(self.character_state["status"], ["normal", "captive"])
+        self.assertEqual(cs["downed_outcome"]["outcome"], "captured")
+        # Assert directly on ORIGINAL character_state object identity BEFORE end_combat() is called
+        self.assertEqual(self.character_state["status"], "captive")
 
     def test_multi_round_death_save_accumulation_integration(self):
         # Reset character HP to 0 and death_saves to 0 fails

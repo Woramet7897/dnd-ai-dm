@@ -886,6 +886,7 @@ def check_combat_end(combat_state: Dict[str, Any], world_state: Optional[Dict[st
             import state_manager
             downed_res = state_manager.resolve_downed_outcome(player_c, combat_state, world_state)
             combat_state["downed_outcome"] = downed_res
+        sync_player_state(player_c)
         logger.debug("check_combat_end: player_defeat — player death save fails >= 3 or downed_outcome present.")
         return "player_defeat"
 
