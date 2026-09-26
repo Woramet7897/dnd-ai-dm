@@ -189,13 +189,14 @@ def validate_quest_updates(quest_updates: Any) -> Optional[Dict]:
 
     return cleaned
 
-def validate_item_id(item_id: Any) -> bool:
+def validate_item_id(item_id: Any, world_state: Optional[Dict] = None) -> bool:
     """
-    Return True if item_id exists in item_catalog.json.
+    Return True if item_id exists in item_catalog.json OR generated_items in world_state.
     Unknown IDs are logged and must be dropped by the caller — never applied.
 
     Args:
         item_id: raw value from extraction output (should be a string).
+        world_state: optional world save dict.
 
     Returns:
         True if valid, False if unknown.
@@ -205,10 +206,16 @@ def validate_item_id(item_id: Any) -> bool:
         return False
 
     catalog = _get_item_catalog()
-    if item_id not in catalog:
-        logger.debug(f"Unknown item_id '{item_id}' — not in item_catalog.json, dropped.")
-        return False
-    return True
+    if item_id in catalog:
+        return True
+
+    if world_state and isinstance(world_state, dict):
+        gen_items = world_state.get("generated_items", {})
+        if item_id in gen_items:
+            return True
+
+    logger.debug(f"Unknown item_id '{item_id}' — not in item_catalog.json or generated_items, dropped.")
+    return False
 
 
 def validate_monster_ids(enemy_ids: Any) -> List[str]:
@@ -344,12 +351,12 @@ def validate_extraction_output(raw: Any, world_state: Optional[Dict] = None) -> 
 
             # add_item_id
             if "add_item_id" in su_raw:
-                if validate_item_id(su_raw["add_item_id"]):
+                if validate_item_id(su_raw["add_item_id"], world_state):
                     su_clean["add_item_id"] = su_raw["add_item_id"]
 
             # remove_item_id
             if "remove_item_id" in su_raw:
-                if validate_item_id(su_raw["remove_item_id"]):
+                if validate_item_id(su_raw["remove_item_id"], world_state):
                     su_clean["remove_item_id"] = su_raw["remove_item_id"]
 
             # gold_change — allow any int within reason

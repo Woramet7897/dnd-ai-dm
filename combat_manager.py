@@ -89,6 +89,11 @@ def apply_condition(combatant: Dict[str, Any], condition: str, duration: int) ->
         logger.debug(f"apply_condition: invalid duration {duration!r} — rejected.")
         return
 
+    immunities = combatant.get("immunities", [])
+    if condition in immunities:
+        logger.debug(f"apply_condition: combatant '{combatant.get('id')}' is immune to '{condition}' — rejected.")
+        return
+
     active = combatant.setdefault("active_conditions", [])
     for entry in active:
         if entry["condition"] == condition:
@@ -806,6 +811,21 @@ def check_combat_end(combat_state: Dict[str, Any], world_state: Optional[Dict[st
         combat_state["status"]  = "ended"
         combat_state["outcome"] = "player_victory"
         logger.debug("check_combat_end: player_victory — all enemies downed.")
+
+        # Award XP for defeated enemies (spec Section 17b)
+        import state_manager
+        total_xp = sum(e.get("xp_value", 50) for e in enemies)
+        p_state = world_state.get("player_state") if (world_state and isinstance(world_state, dict) and "player_state" in world_state) else player_c
+
+        state_manager.award_xp(total_xp, p_state)
+        combat_state["xp_gained"] = total_xp
+
+        leveled_up = False
+        while state_manager.check_level_up(p_state):
+            state_manager.apply_level_up(p_state)
+            leveled_up = True
+        combat_state["leveled_up"] = leveled_up
+
         return "player_victory"
 
     player_fails = player_c.get("death_saves", {}).get("fail", 0)

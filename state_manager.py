@@ -819,17 +819,93 @@ def apply_quest_updates(
 # STUB FUNCTIONS — implemented in later phases
 # ════════════════════════════════════════════════════════════════════════════════
 
-def award_xp(amount: int, state: Dict[str, Any]) -> Dict[str, Any]:
-    # PHASE 6+ (XP/Leveling system, spec Section 17b / PART 8)
-    raise NotImplementedError("award_xp — PHASE 6+")
+LEVEL_THRESHOLDS: Dict[int, int] = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
+
+def award_xp(amount: int, state: Dict[str, Any]) -> int:
+    """
+    Add XP to state["xp_current"]. Idempotent-safety (no double-award) is caller's responsibility.
+    Negative or zero amounts are clean no-ops.
+    """
+    if amount <= 0:
+        return state.get("xp_current", 0)
+    current_xp = state.get("xp_current", 0)
+    new_xp = current_xp + amount
+    state["xp_current"] = new_xp
+    logger.debug(f"award_xp: awarded {amount} XP. Total now: {new_xp}")
+    return new_xp
+
 
 def check_level_up(state: Dict[str, Any]) -> bool:
-    # PHASE 6+ (XP/Leveling system)
-    raise NotImplementedError("check_level_up — PHASE 6+")
+    """
+    Check if state["xp_current"] crosses threshold for level + 1 (capped at level 5).
+    """
+    lvl = state.get("level", 1)
+    if lvl >= 5:
+        return False
+    threshold = LEVEL_THRESHOLDS.get(lvl + 1, 999999)
+    return state.get("xp_current", 0) >= threshold
+
 
 def apply_level_up(state: Dict[str, Any]) -> Dict[str, Any]:
-    # PHASE 6+ (XP/Leveling system)
-    raise NotImplementedError("apply_level_up — PHASE 6+")
+    """
+    Increments level, updates proficiency_bonus, hit points (max and current),
+    and spell slots for spellcasting classes. Safely callable in a loop.
+    """
+    if not check_level_up(state):
+        return {"leveled_up": False, "level": state.get("level", 1)}
+
+    old_lvl = state.get("level", 1)
+    new_lvl = min(5, old_lvl + 1)
+    state["level"] = new_lvl
+
+    # Update proficiency bonus
+    state["proficiency_bonus"] = 3 if new_lvl == 5 else 2
+
+    # Update Hit Points
+    cls_name = state.get("class", state.get("class_name", "Fighter"))
+    if cls_name in ("Fighter", "Paladin"):
+        hit_die_avg = 6
+    elif cls_name == "Barbarian":
+        hit_die_avg = 7
+    elif cls_name == "Wizard":
+        hit_die_avg = 4
+    else:  # Rogue, Bard, Cleric, Monk, Druid, Ranger, etc.
+        hit_die_avg = 5
+
+    con_mod = get_modifier(state.get("stats", {}).get("CON", 10))
+    hp_gain = max(1, hit_die_avg + con_mod)
+
+    hp = state.setdefault("hp", {"current": 10, "max": 10})
+    hp["max"] = hp.get("max", 10) + hp_gain
+    hp["current"] = hp.get("current", 10) + hp_gain
+
+    # Update spell slots for casters
+    if cls_name in ("Bard", "Cleric", "Wizard"):
+        slots = state.setdefault("spell_slots", {})
+        target_slots_table = {
+            1: {"1": 2},
+            2: {"1": 3},
+            3: {"1": 4, "2": 2},
+            4: {"1": 4, "2": 3},
+            5: {"1": 4, "2": 3, "3": 2},
+        }
+        target_cfg = target_slots_table.get(new_lvl, {"1": 2})
+        for tier_str, target_max in target_cfg.items():
+            curr_info = slots.setdefault(tier_str, {"max": 0, "current": 0})
+            old_max = curr_info.get("max", 0)
+            delta = max(0, target_max - old_max)
+            curr_info["max"] = target_max
+            curr_info["current"] = curr_info.get("current", 0) + delta
+
+    logger.info(f"apply_level_up: {state.get('name')} reached Level {new_lvl}! HP +{hp_gain} (max={hp['max']}).")
+    return {
+        "leveled_up": True,
+        "old_level":  old_lvl,
+        "new_level":  new_lvl,
+        "hp_gain":    hp_gain,
+        "hp_max":     hp["max"],
+        "proficiency_bonus": state["proficiency_bonus"],
+    }
 
 def handle_period_change(
     world_state: Dict[str, Any],
@@ -1000,12 +1076,213 @@ def sell_item(
     logger.debug(f"sell_item: sold '{item_id}' to '{shop_id}' for {gain} GP. Gold now: {character_state['gold']}.")
     return True, f"Sold {item_info.get('name', item_id)} for {gain} GP."
 
-def resolve_spell_save(caster: Dict, target: Dict, spell: Dict,
-                       state: Dict[str, Any]) -> Dict[str, Any]:
-    # PHASE 6+ (Spellcasting system, spec Section 8b / PART 4b)
-    # DC = 8 + proficiency_bonus + casting_stat_modifier (caster's stats set the DC,
-    # TARGET rolls the save — direction is reversed from a normal check).
-    raise NotImplementedError("resolve_spell_save — PHASE 6+")
+_spell_catalog: Optional[Dict[str, Any]] = None
+
+def _get_spell_catalog() -> Dict[str, Any]:
+    global _spell_catalog
+    if _spell_catalog is None:
+        try:
+            path = os.path.join(_CATALOG_DIR, "spell_catalog.json")
+            with open(path, "r", encoding="utf-8") as f:
+                _spell_catalog = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to load spell_catalog.json: {e}")
+            _spell_catalog = {}
+    return _spell_catalog
+
+
+def resolve_spell_save(
+    caster: Dict[str, Any],
+    target: Dict[str, Any],
+    spell: Dict[str, Any],
+    state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Spec Section 8b / 18b / PART 4b:
+    Resolve a save-forcing spell (e.g. Vicious Mockery, Sacred Flame, Thunderwave).
+    Save DC = 8 + caster's proficiency_bonus + caster's spellcasting ability modifier.
+    Target rolls the d20 save against this DC.
+    """
+    caster_prof = caster.get("proficiency_bonus", 2)
+    c_class = caster.get("class", caster.get("class_name", "Bard"))
+
+    if c_class in ("Wizard",):
+        cast_stat = "INT"
+    elif c_class in ("Cleric", "Druid"):
+        cast_stat = "WIS"
+    else:
+        cast_stat = "CHA"
+
+    cast_mod = get_modifier(caster.get("stats", {}).get(cast_stat, 10))
+    dc = 8 + caster_prof + cast_mod
+
+    save_stat = spell.get("save_stat", "DEX")
+    target_stats = target.get("stats", {})
+    t_mod = get_modifier(target_stats.get(save_stat, 10))
+    t_prof_saves = target.get("proficient_saves", [])
+    t_prof_bonus = target.get("proficiency_bonus", 2) if save_stat in t_prof_saves else 0
+
+    roll = _roll_d20()
+    critical = (roll == 20)
+    fumble   = (roll == 1)
+    total    = roll + t_mod + t_prof_bonus
+
+    if critical:
+        success = True
+    elif fumble:
+        success = False
+    else:
+        success = total >= dc
+
+    damage = 0
+    condition_applied = None
+    if not success:
+        eff = spell.get("effect", {})
+        if "damage" in eff:
+            damage = _roll_dice(eff["damage"])
+            target_hp = target.setdefault("hp", {"current": 10, "max": 10})
+            target_hp["current"] = max(0, target_hp.get("current", 0) - damage)
+        if spell.get("on_fail_extra"):
+            condition_applied = spell["on_fail_extra"]
+
+    return {
+        "caster_name": caster.get("name", "Caster"),
+        "target_name": target.get("name", "Target"),
+        "spell_name":  spell.get("name", "Spell"),
+        "dc":          dc,
+        "roll":        roll,
+        "modifier":    t_mod + t_prof_bonus,
+        "total":       total,
+        "success":     success,
+        "critical":    critical,
+        "fumble":      fumble,
+        "damage":      damage,
+        "condition_applied": condition_applied,
+        "target_hp_after": target.get("hp", {}).get("current", 0),
+    }
+
+
+def resolve_spell_attack(
+    caster: Dict[str, Any],
+    target: Dict[str, Any],
+    spell: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Spec Section 18b / PART 4b:
+    Resolve an attack-roll spell (e.g. Fire Bolt, Guiding Bolt, Magic Missile).
+    Caster rolls d20 + proficiency_bonus + spellcasting_ability_mod vs target AC.
+    Magic Missile has auto_hit: True (bypasses attack roll).
+    """
+    caster_prof = caster.get("proficiency_bonus", 2)
+    c_class = caster.get("class", caster.get("class_name", "Wizard"))
+    if c_class in ("Wizard",):
+        cast_stat = "INT"
+    elif c_class in ("Cleric", "Druid"):
+        cast_stat = "WIS"
+    else:
+        cast_stat = "CHA"
+    cast_mod = get_modifier(caster.get("stats", {}).get(cast_stat, 10))
+    to_hit_bonus = caster_prof + cast_mod
+
+    eff = spell.get("effect", {})
+    target_ac = target.get("ac", 10)
+
+    if eff.get("auto_hit") is True:
+        hit = True
+        crit = False
+        fumble = False
+        raw_roll = 20
+        total_to_hit = 99
+    else:
+        raw_roll = _roll_d20()
+        crit = (raw_roll == 20)
+        fumble = (raw_roll == 1)
+        total_to_hit = raw_roll + to_hit_bonus
+        if crit:
+            hit = True
+        elif fumble:
+            hit = False
+        else:
+            hit = total_to_hit >= target_ac
+
+    damage = 0
+    if hit:
+        dmg_expr = eff.get("damage", "1d6")
+        damage = _roll_dice(dmg_expr)
+        if crit:
+            damage += _roll_dice(dmg_expr)
+        target_hp = target.setdefault("hp", {"current": 10, "max": 10})
+        target_hp["current"] = max(0, target_hp.get("current", 0) - damage)
+
+    return {
+        "caster_name": caster.get("name", "Caster"),
+        "target_name": target.get("name", "Target"),
+        "spell_name":  spell.get("name", "Spell"),
+        "raw_roll":    raw_roll,
+        "to_hit_bonus": to_hit_bonus,
+        "total_to_hit": total_to_hit,
+        "target_ac":   target_ac,
+        "hit":          hit,
+        "crit":         crit,
+        "fumble":       fumble,
+        "damage":       damage,
+        "target_hp_after": target.get("hp", {}).get("current", 0),
+    }
+
+
+def cast_spell(
+    caster: Dict[str, Any],
+    target: Dict[str, Any],
+    spell_id: str,
+    character_state: Dict[str, Any],
+    world_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Cast a spell by spell_id. Validates spell, decrements slots if level > 0, and resolves effect.
+    """
+    catalog = _get_spell_catalog()
+    spell = catalog.get(spell_id)
+    if not spell:
+        return {"success": False, "reason": f"Unknown spell '{spell_id}'."}
+
+    lvl = spell.get("level", 0)
+    if lvl > 0:
+        slots = character_state.setdefault("spell_slots", {})
+        lvl_str = str(lvl)
+        slot_info = slots.get(lvl_str, {"max": 0, "current": 0})
+        if slot_info.get("current", 0) <= 0:
+            return {"success": False, "reason": f"No level {lvl} spell slots remaining."}
+        slot_info["current"] -= 1
+
+    s_type = spell.get("type")
+    if s_type == "attack_save":
+        res = resolve_spell_save(caster, target, spell, character_state)
+    elif s_type == "attack_roll":
+        res = resolve_spell_attack(caster, target, spell)
+    elif s_type == "heal":
+        eff = spell.get("effect", {})
+        heal_val = _roll_dice(eff.get("heal", "1d4+3"))
+        t_hp = target.setdefault("hp", {"current": 10, "max": 10})
+        t_hp["current"] = min(t_hp.get("max", 10), t_hp.get("current", 0) + heal_val)
+        res = {
+            "caster_name": caster.get("name", "Caster"),
+            "target_name": target.get("name", "Target"),
+            "spell_name":  spell.get("name", "Spell"),
+            "healed":      heal_val,
+            "target_hp_after": t_hp["current"],
+            "success":     True,
+        }
+    else:
+        res = {
+            "caster_name": caster.get("name", "Caster"),
+            "spell_name":  spell.get("name", "Spell"),
+            "success":     True,
+            "effect":      spell.get("effect"),
+        }
+
+    res["success"] = True
+    return res
+
 
 def resolve_downed_outcome(
     combatant: Dict[str, Any],
@@ -1016,19 +1293,6 @@ def resolve_downed_outcome(
     Spec Section 17a (Kenshi-lite downed outcome system).
     When a combatant's HP hits 0 and death saves fail 3 times (or player is defeated):
     Selects one of ['robbed_and_left', 'captured', 'rescued_by_npc'] using context-weighted choice.
-
-    Docstring Return Dict Shape:
-      {
-        "outcome": "robbed_and_left" | "captured" | "rescued_by_npc",
-        "penalty": {
-          "gold_lost": int,
-          "items_lost": list[str],
-          "hp_set_to": int | None,
-          "hp_restored": int | None,
-          "status": str,
-          "relocated_to": str | None
-        }
-      }
     """
     import dungeon_manager
 
@@ -1119,6 +1383,126 @@ def resolve_downed_outcome(
     logger.info(f"resolve_downed_outcome: outcome='{outcome}', penalty={penalty}")
     return {"outcome": outcome, "penalty": penalty}
 
-def dismiss_companion(npc_id: str, world_state: Dict[str, Any]) -> None:
-    # PHASE 6+ (Companion dismissal, spec Section 21 / PART 9)
-    raise NotImplementedError("dismiss_companion — PHASE 6+")
+
+def dismiss_companion(npc_id: str, world_state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Spec Section 21 / PART 9:
+    Move companion from party.companions to party.former_companions, recording last_location.
+    Disallowed during active combat.
+    """
+    if world_state.get("combat_state") is not None:
+        raise ValueError("Cannot dismiss companions during active combat.")
+
+    party = world_state.setdefault("party", {"companions": [], "former_companions": []})
+    companions = party.setdefault("companions", [])
+    former = party.setdefault("former_companions", [])
+
+    target_idx = None
+    target_comp = None
+    for idx, comp in enumerate(companions):
+        if comp.get("id") == npc_id or comp.get("name") == npc_id:
+            target_idx = idx
+            target_comp = comp
+            break
+
+    if target_comp is None:
+        raise ValueError(f"Companion '{npc_id}' is not in active party.")
+
+    companions.pop(target_idx)
+    target_comp["last_location"] = world_state.get("current_location", "town_riverside")
+    former.append(target_comp)
+
+    logger.info(f"dismiss_companion: '{npc_id}' moved to former_companions at {target_comp['last_location']}.")
+    return {"npc_id": npc_id, "dismissed_at": target_comp["last_location"]}
+
+
+def resolve_item(
+    item_id: str,
+    world_state: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Spec Section 7c / PART 4a-ii:
+    Single source of truth for resolving item definitions.
+    Checks static item_catalog.json first, falls back to world_state["generated_items"].
+    """
+    catalog = _get_item_catalog()
+    if item_id in catalog:
+        return catalog[item_id]
+
+    if world_state and isinstance(world_state, dict):
+        gen_items = world_state.get("generated_items", {})
+        if item_id in gen_items:
+            return gen_items[item_id]
+
+    return None
+
+
+import uuid
+
+def generate_item(
+    rarity: str,
+    world_state: Dict[str, Any],
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Spec Section 7c / PART 4a-ii:
+    Generate a new item deterministically from a rarity tag ('common', 'uncommon', 'rare').
+    Writes to world_state["generated_items"] (never item_catalog.json).
+    Returns (item_id, item_dict).
+    """
+    rarity = rarity.lower().strip() if isinstance(rarity, str) else "common"
+    if rarity not in ("common", "uncommon", "rare"):
+        rarity = "common"
+
+    rarity_tables = {
+        "common":   {"gold": 15, "ac_bonus": 1, "name_suffix": "of Quality"},
+        "uncommon": {"gold": 50, "ac_bonus": 1, "saving_throw_bonus": 1, "name_suffix": "of Might"},
+        "rare":     {"gold": 200, "ac_bonus": 2, "saving_throw_bonus": 1, "name_suffix": "of Distinction"},
+    }
+    spec_row = rarity_tables[rarity]
+
+    gen_id = f"gen_{uuid.uuid4().hex[:8]}"
+    item_dict = {
+        "item_id": gen_id,
+        "name": f"Item {spec_row['name_suffix']}",
+        "type": "wearable",
+        "slot": "ring",
+        "rarity": rarity,
+        "value_gold": spec_row["gold"],
+        "effects": {
+            "ac_bonus": spec_row["ac_bonus"],
+        }
+    }
+
+    if "saving_throw_bonus" in spec_row:
+        item_dict["effects"]["saving_throw_bonus"] = spec_row["saving_throw_bonus"]
+
+    gen_items = world_state.setdefault("generated_items", {})
+    gen_items[gen_id] = item_dict
+
+    logger.info(f"generate_item: generated item '{gen_id}' ({rarity}) in world_state.")
+    return gen_id, item_dict
+
+
+def apply_condition_to_state(
+    character_state: Dict[str, Any],
+    condition: str,
+    duration_rounds: int = 2,
+) -> bool:
+    """
+    Apply a status condition to character_state. Checks condition immunities.
+    """
+    immunities = character_state.get("immunities", [])
+    if condition in immunities:
+        logger.debug(f"apply_condition_to_state: character is immune to '{condition}'.")
+        return False
+
+    active_conds = character_state.setdefault("active_conditions", [])
+    if isinstance(active_conds, list):
+        for entry in active_conds:
+            if entry == condition:
+                return True
+            if isinstance(entry, dict) and entry.get("name") == condition:
+                entry["duration"] = max(entry.get("duration", 0), duration_rounds)
+                return True
+        active_conds.append({"name": condition, "duration": duration_rounds})
+    return True

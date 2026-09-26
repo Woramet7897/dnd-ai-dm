@@ -219,6 +219,12 @@ def render_sidebar():
     st.sidebar.markdown(f"**HP:** {cur_hp} / {max_hp}")
     st.sidebar.progress(hp_pct)
 
+    # XP & Level Display
+    xp_cur = player.get("xp_current", 0)
+    lvl = player.get("level", 1)
+    next_xp = state_manager.LEVEL_THRESHOLDS.get(lvl + 1, "MAX")
+    st.sidebar.markdown(f"**XP:** {xp_cur} / {next_xp}")
+
     col_ac, col_gold = st.sidebar.columns(2)
     with col_ac:
         st.markdown(f"**AC:** {player.get('ac', 10)}")
@@ -261,8 +267,39 @@ def render_sidebar():
     # Active Conditions & Rations
     active_conds = player.get("active_conditions", [])
     if active_conds:
-        cond_names = [c if isinstance(c, str) else c.get("condition") for c in active_conds]
-        st.sidebar.warning(f"⚠️ Conditions: {', '.join(cond_names)}")
+        formatted_conds = []
+        for c in active_conds:
+            if isinstance(c, str):
+                formatted_conds.append(c)
+            elif isinstance(c, dict):
+                c_name = c.get("name", c.get("condition", "unknown"))
+                dur = c.get("duration")
+                formatted_conds.append(f"{c_name} ({dur} rds)" if dur else c_name)
+        st.sidebar.warning(f"⚠️ Conditions: {', '.join(formatted_conds)}")
+
+    # Party Companions & Dismissal UI
+    party = world.get("party", {})
+    companions = party.get("companions", [])
+    if companions:
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("##### 👥 Party Companions")
+        for comp in companions:
+            c_name = comp.get("name", comp.get("id", "Companion"))
+            c_id = comp.get("id", c_name)
+            col_c_info, col_c_btn = st.sidebar.columns([2, 1])
+            with col_c_info:
+                st.markdown(f"• **{c_name}**")
+            with col_c_btn:
+                with st.popover("Dismiss"):
+                    st.write(f"Dismiss {c_name}?")
+                    if st.button("Confirm Dismiss", key=f"dismiss_{c_id}", use_container_width=True):
+                        try:
+                            state_manager.dismiss_companion(c_id, world)
+                            auto_save()
+                            st.toast(f"{c_name} has left your party.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
 
     # Rations count
     inventory = player.get("inventory", [])

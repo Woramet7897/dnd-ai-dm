@@ -1,6 +1,6 @@
 # PROGRESS.md — do not delete, read this first every session
 
-Last updated: 2026-09-26 (Phase 8 integration bugfixes complete — 9/9 tests)
+Last updated: 2026-09-26 (Phase 9 complete — All 7 Phase 9 systems verified, 15/15 phase9 tests + 81 regression tests passed)
 
 | Phase | Status | Files written | Notes/deviations |
 |---|---|---|---|
@@ -14,18 +14,19 @@ Last updated: 2026-09-26 (Phase 8 integration bugfixes complete — 9/9 tests)
 | 7 - app.py core loop (MVP milestone) | DONE | app.py, dungeon_manager.py, state_manager.py, combat_manager.py, llm_handler.py, item_catalog.json, shop_catalog.json, phase7_tests.py | Wired all modules into MVP Streamlit app. Integrated Time & Supply system (spec_addendum_time_supply.md Sections 22a-22h): game_time in world saves, advance_time() in dungeon_manager, automatic ration consumption outside town, exhausted condition in combat_manager, long_rest in town, shop open_periods gating in state_manager, and Time injection in llm_handler Tier 1 prompt. One-narrative-call-per-round invariant verified. DoD: 6/6 phase7 tests + 32/32 phase6 + 57/57 phase5 + 135/135 phase4 + 45/45 phase3 + 34/34 equipment tests passed (309 total). |
 | 8 - Death/downed outcome | DONE | state_manager.py, combat_manager.py, dungeon_manager.py, app.py, phase8_tests.py | Replaced stubbed resolve_downed_outcome() in state_manager.py with Kenshi-lite downed outcome system (spec Section 17a). (1) Outcome weighting scheme: random.choices() weighted by location room type (`is_safe`/`town`: `[0.20, 0.10, 0.70]`, `dungeon`: `[0.50, 0.35, 0.15]`, `wilderness`: `[0.45, 0.25, 0.30]`); all weights > 0 so all 3 outcomes remain reachable. (2) Nearest safe location algorithm: Breadth-First Search (BFS) in dungeon_manager.find_nearest_visited_safe_room() over known room exit graph filtered by visited safe/town rooms. (3) Captive escape loop: captive status disables standard movement in app.py, replacing it with a single 'Attempt Escape' action rolling DEX vs hard DC 16; escape attempts advance game time by 1 step (turn cost). (4) Bugfixes: Fixed check_combat_end premature defeat on 0 HP (now accumulates death save fails until 3 or downed_outcome set); fixed app.py outcome string checks ('player_victory'/'player_defeat') and added end_combat cleanup guard. (5) Scope confirmation: XP/Leveling (17b) was explicitly left out of Phase 8 scope per BUILD_ORDER.md (belongs to Phase 9). DoD: 9/9 phase8 tests + 6/6 phase7 + 32/32 phase6 + 34/34 equipment tests passed cleanly. |
 | 9 - Equipment & Consumables | DONE | state_manager.py, combat_manager.py, character_creator.py, item_catalog.json, phase_equipment_tests.py | Implemented equip_item, unequip_item, get_active_effects, _compute_ac, use_consumable per spec Section 7b. combat_manager._player_attacks() updated to query equipped weapons from catalog. Bugfix: player attack_bonus was ignoring proficiency_bonus and ability modifier (STR or max(STR, DEX) for finesse weapons like dagger/rapier). Added "finesse": true to rapier/dagger in item_catalog.json and updated _player_attacks() to add prof + stat mod. DoD: 34/34 tests (incl. attack_bonus regression) + 135/135 phase4 tests + 45/45 phase3 tests + 57/57 phase5 tests passed. |
-| 9 - XP/Leveling | NOT_STARTED | | |
+| 9 - XP/Leveling | DONE | state_manager.py, combat_manager.py, app.py, phase9_tests.py | Implemented award_xp, check_level_up, apply_level_up per spec Section 17b. Real combat orchestration integration in combat_manager.check_combat_end() on player_victory awards enemy xp_value sum, triggers level-up loop (updating HP max/current, proficiency_bonus, and caster spell slots), and records xp_gained / leveled_up in combat_state. Level cap enforced at 5. DoD: verified in phase9_tests.py. |
 | 9 - Shop/Economy | DONE | state_manager.py, shop_catalog.json, phase7_tests.py | Implemented buy_item and sell_item per spec Section 19b & Section 22f (open_periods gating, gold multipliers, inventory updates). DoD: verified in phase7_tests.py. |
-| 9 - Spellcasting | NOT_STARTED | | |
-| 9 - Status effects | NOT_STARTED | | |
-| 9 - Companion dismissal | NOT_STARTED | | |
+| 9 - Spellcasting | DONE | state_manager.py, spell_catalog.json, app.py, phase9_tests.py | Implemented resolve_spell_save (DC = 8 + prof + cast_mod, target rolls save), resolve_spell_attack (attack-roll vs AC), and cast_spell (slot deduction & resolution routing) per spec Section 8b / 18. Supports 12 spells across Bard, Cleric, Wizard. DoD: verified in phase9_tests.py. |
+| 9 - Status effects | DONE | combat_manager.py, state_manager.py, app.py, phase9_tests.py | Implemented condition immunity checking in apply_condition (e.g. skeleton immune to poisoned), apply_condition_to_state for out-of-combat hazards, condition expiry tick in combat, and sidebar duration formatting. DoD: verified in phase9_tests.py. |
+| 9 - Companion dismissal | DONE | state_manager.py, app.py, phase9_tests.py | Implemented dismiss_companion per spec Section 21. Moves companion from party.companions to party.former_companions, records last_location, rejects mid-combat dismissal, and adds sidebar popover UI. DoD: verified in phase9_tests.py. |
+| 9 - Lazy item generation | DONE | state_manager.py, validation.py, phase9_tests.py | Implemented resolve_item (checks item_catalog.json then world_state["generated_items"]), generate_item (rarity tag determinism in Python, writes to generated_items), and validate_item_id (accepts static + generated items). DoD: verified in phase9_tests.py. |
 | 10 - World events (optional) | NOT_STARTED | | |
 | 10 - Session recap (optional) | NOT_STARTED | | |
 
 Status values to use: NOT_STARTED / IN_PROGRESS / DONE
 
 ## If IN_PROGRESS when a session ends, note exactly what's left here:
-All phases up to 8 are DONE. Next: Phase 9 (remaining independent systems: XP/Leveling, Spellcasting, Status effects, Companion dismissal, Lazy item generation).
+All Phase 9 systems are DONE. Next: Phase 10 optional polish items (World event flags, Session recap on load).
 
 ## Phase 10 deferred items (explicitly out of scope until Phase 10)
 - Session recap on load (Section 14a / BUILD_ORDER.md Phase 10): generate a "previously in your story…" paragraph from recent major_lore entries on save load. NOT implemented in Phase 5. Owner: Phase 10 (optional polish).
