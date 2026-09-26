@@ -398,9 +398,10 @@ check("All enemies down → 'player_victory'", outcome == "player_victory")
 check("combat_state status set to 'ended'", cs_end["status"] == "ended")
 check("combat_state outcome = 'player_victory'", cs_end["outcome"] == "player_victory")
 
-# Player down → defeat
+# Player down → defeat (death saves exhausted)
 p_down = player_combatant()
 p_down["hp"]["current"] = 0
+p_down["death_saves"] = {"success": 0, "fail": 3}
 cs_def = {
     "player_combatant": p_down,
     "enemies": [{"id": "e1", "hp": {"current": 5, "max": 7}}],

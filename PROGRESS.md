@@ -25,8 +25,13 @@ Last updated: 2026-09-26 (Phase 9 complete — All 7 Phase 9 systems verified, 1
 
 Status values to use: NOT_STARTED / IN_PROGRESS / DONE
 
+## Combat State Desync Fix (Post-Phase 9 Verification):
+- **Root Cause Resolved**: Fixed object copy desync in `combat_manager.start_combat()` where `dict()` and `copy.deepcopy()` created disconnected copies of nested mutable character/companion state (`hp`, `active_conditions`, `death_saves`, `inventory`, `spell_slots`).
+- **Fix Architecture**: Linked nested mutable objects by direct reference identity, stored `_player_state` on `player_c`, updated `start_combat()` to retain original companion dict references, and added scalar synchronization via `sync_player_state(player_c)` across `resolve_round()`, `check_combat_end()`, and `end_combat()`.
+- **Verification**: Added Section 6 real character/companion persistence tests to `phase9_tests.py` asserting directly on original `character_state` and companion dicts. 236/236 tests passing clean across ALL test suites (`phase9_tests.py`: 20/20, `phase8_tests.py`: 9/9, `phase7_tests.py`: 6/6, `phase6_tests.py`: 32/32, `phase_equipment_tests.py`: 34/34, `phase4_tests.py`: 135/135).
+
 ## If IN_PROGRESS when a session ends, note exactly what's left here:
-All Phase 9 systems are DONE. Next: Phase 10 optional polish items (World event flags, Session recap on load).
+All Phase 9 systems & Combat State Desync fixes are DONE and 100% verified. Next: Phase 10 optional polish items (World event flags, Session recap on load).
 
 ## Phase 10 deferred items (explicitly out of scope until Phase 10)
 - Session recap on load (Section 14a / BUILD_ORDER.md Phase 10): generate a "previously in your story…" paragraph from recent major_lore entries on save load. NOT implemented in Phase 5. Owner: Phase 10 (optional polish).

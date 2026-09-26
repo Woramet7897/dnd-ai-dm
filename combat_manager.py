@@ -303,11 +303,23 @@ def start_combat(
         return None
 
     # ── Build player combatant ────────────────────────────────────────────────
+    # Ensure player_state has standard mutable keys initialized
+    player_state.setdefault("hp", {"current": 10, "max": 10})
+    player_state.setdefault("active_conditions", [])
+    player_state.setdefault("death_saves", {"success": 0, "fail": 0})
+    player_state.setdefault("status", "normal")
+    player_state.setdefault("inventory", [])
+    player_state.setdefault("gold", 0)
+    player_state.setdefault("xp_current", 0)
+    player_state.setdefault("level", 1)
+    player_state.setdefault("proficiency_bonus", 2)
+    player_state.setdefault("spell_slots", {})
+
     player_c: Dict[str, Any] = {
         "id":               "player",
         "name":             player_state.get("name", "Adventurer"),
         "side":             "player",
-        "hp":               dict(player_state.get("hp", {"current": 10, "max": 10})),
+        "hp":               player_state["hp"],                 # SHARED BY REFERENCE
         "ac":               player_state.get(
             "ac",
             10 + (player_state.get("stats", {}).get("DEX", 10) - 10) // 2,
@@ -315,18 +327,27 @@ def start_combat(
         "stats":            player_state.get("stats", {}),
         "attacks":          _player_attacks(player_state),
         "initiative":       None,
-        "active_conditions": copy.deepcopy(player_state.get("active_conditions", [])),
-        "death_saves":      copy.deepcopy(player_state.get("death_saves", {"success": 0, "fail": 0})),
+        "active_conditions": player_state["active_conditions"],  # SHARED BY REFERENCE
+        "death_saves":      player_state["death_saves"],         # SHARED BY REFERENCE
+        "inventory":        player_state["inventory"],          # SHARED BY REFERENCE
+        "spell_slots":      player_state["spell_slots"],        # SHARED BY REFERENCE
+        "status":           player_state["status"],
+        "gold":             player_state["gold"],
+        "xp_current":       player_state["xp_current"],
+        "level":            player_state["level"],
+        "proficiency_bonus": player_state["proficiency_bonus"],
+        "_player_state":    player_state,                        # Reference to real character dict
     }
 
     # ── Build companion combatants ────────────────────────────────────────────
     companions: List[Dict[str, Any]] = []
     for comp in (companion_states or []):
-        comp_c = copy.deepcopy(comp)
-        comp_c.setdefault("side", "player")
-        comp_c.setdefault("active_conditions", [])
-        comp_c.setdefault("initiative", None)
-        companions.append(comp_c)
+        comp.setdefault("side", "player")
+        comp.setdefault("active_conditions", [])
+        comp.setdefault("initiative", None)
+        comp.setdefault("death_saves", {"success": 0, "fail": 0})
+        comp.setdefault("hp", {"current": 10, "max": 10})
+        companions.append(comp)  # SHARED BY REFERENCE — NO copy.deepcopy!
 
     # ── Roll initiative for everyone ──────────────────────────────────────────
     all_combatants = [player_c] + companions + enemies
@@ -404,14 +425,37 @@ def _player_attacks(player_state: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 
+def sync_player_state(player_c: Dict[str, Any]) -> None:
+    """
+    Sync scalar primitive fields (gold, status, xp_current, level, proficiency_bonus, ac)
+    from player_c back to underlying real player_state dict.
+    Nested mutable structures (hp, active_conditions, death_saves, inventory, spell_slots)
+    are shared by reference object identity.
+    """
+    real_state = player_c.get("_player_state")
+    if real_state is None or not isinstance(real_state, dict):
+        return
+
+    for key in ("gold", "status", "xp_current", "level", "proficiency_bonus", "ac"):
+        if key in player_c:
+            real_state[key] = player_c[key]
+
+    if "inventory" in player_c:
+        real_state["inventory"] = player_c["inventory"]
+
+
 def end_combat(world_state: Dict[str, Any]) -> None:
     """
     Clear combat_state from world_state, marking combat as over.
     Call after check_combat_end() returns a non-None outcome.
     Does nothing if combat is not active.
     """
-    if world_state.get("combat_state") is None:
+    cs = world_state.get("combat_state")
+    if cs is None:
         return
+    player_c = cs.get("player_combatant")
+    if player_c:
+        sync_player_state(player_c)
     world_state["combat_state"] = None
     logger.debug("end_combat: combat_state cleared.")
 
@@ -815,7 +859,7 @@ def check_combat_end(combat_state: Dict[str, Any], world_state: Optional[Dict[st
         # Award XP for defeated enemies (spec Section 17b)
         import state_manager
         total_xp = sum(e.get("xp_value", 50) for e in enemies)
-        p_state = world_state.get("player_state") if (world_state and isinstance(world_state, dict) and "player_state" in world_state) else player_c
+        p_state = player_c.get("_player_state", player_c)
 
         state_manager.award_xp(total_xp, p_state)
         combat_state["xp_gained"] = total_xp
@@ -825,6 +869,10 @@ def check_combat_end(combat_state: Dict[str, Any], world_state: Optional[Dict[st
             state_manager.apply_level_up(p_state)
             leveled_up = True
         combat_state["leveled_up"] = leveled_up
+        for key in ("gold", "status", "xp_current", "level", "proficiency_bonus", "ac"):
+            if key in p_state:
+                player_c[key] = p_state[key]
+        sync_player_state(player_c)
 
         return "player_victory"
 
@@ -941,6 +989,7 @@ def resolve_round(
 
     # ── Check for combat end ──────────────────────────────────────────────────
     combat_outcome = check_combat_end(combat_state, world_state)
+    sync_player_state(player_c)
 
     logger.debug(
         f"resolve_round: round {round_num} done. "

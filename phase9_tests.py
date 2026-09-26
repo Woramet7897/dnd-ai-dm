@@ -280,6 +280,86 @@ class TestPhase9Systems(unittest.TestCase):
         # Unknown item
         self.assertFalse(validation.validate_item_id("absurd_fake_item_123", self.world_state))
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # 6. REAL CHARACTER & COMPANION PERSISTENCE INTEGRATION TESTS
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def test_downed_outcome_persists_to_original_character_dict(self):
+        # 1. Start combat with original character dict
+        combat_manager.start_combat(["goblin_scout"], self.character_state, self.world_state)
+        cs = self.world_state["combat_state"]
+        
+        # 2. Force player to 0 HP and 3 death save failures through resolve_round
+        self.character_state["hp"]["current"] = 0
+        cs["player_combatant"]["death_saves"] = {"success": 0, "fail": 3}
+        
+        with patch("random.choices", return_value=["robbed_and_left"]), patch("state_manager._roll_d20", return_value=5):
+            res = combat_manager.resolve_round(cs, world_state=self.world_state)
+            self.assertEqual(res["combat_outcome"], "player_defeat")
+
+        # 3. Assert on the ORIGINAL character_state dict (not just cs["player_combatant"])
+        self.assertEqual(self.character_state["hp"]["current"], 1) # HP set to 1
+        self.assertEqual(self.character_state["status"], "normal")
+        self.assertLess(self.character_state["gold"], 100) # Gold reduced
+        self.assertEqual(len(self.character_state["inventory"]), 1) # Un-equipped inventory lost
+
+    def test_victory_xp_and_level_up_persists_to_original_character_dict(self):
+        # Start combat with 2 bandit captains (450 XP each = 900 XP)
+        combat_manager.start_combat(["bandit_captain", "bandit_captain"], self.character_state, self.world_state)
+        cs = self.world_state["combat_state"]
+
+        # Defeat all enemies
+        for e in cs["enemies"]:
+            e["hp"]["current"] = 0
+
+        # Check combat end
+        outcome = combat_manager.check_combat_end(cs, self.world_state)
+        self.assertEqual(outcome, "player_victory")
+
+        # Assert directly on the ORIGINAL character_state dict passed into start_combat
+        self.assertEqual(self.character_state["xp_current"], 900)
+        self.assertEqual(self.character_state["level"], 3) # 900 XP = Level 3
+        self.assertEqual(self.character_state["hp"]["max"], 24) # 10 + 2*(5+2) = 24
+
+    def test_mid_combat_damage_persists_to_original_character_dict(self):
+        combat_manager.start_combat(["goblin_scout"], self.character_state, self.world_state, companion_states=self.world_state["party"]["companions"])
+        cs = self.world_state["combat_state"]
+
+        # Mock attack hitting player for 4 damage
+        goblin = cs["enemies"][0]
+        atk = goblin["attacks"][0]
+        with patch("combat_manager._roll_d20", return_value=15), patch("combat_manager.roll_dice", return_value=4):
+            combat_manager.resolve_attack(goblin, cs["player_combatant"], atk)
+
+        # Assert directly on the ORIGINAL character_state dict
+        self.assertEqual(self.character_state["hp"]["current"], 6) # 10 - 4 = 6
+
+    def test_in_combat_condition_persists_to_original_character_dict(self):
+        combat_manager.start_combat(["goblin_scout"], self.character_state, self.world_state)
+        cs = self.world_state["combat_state"]
+
+        # Apply condition to in-combat player combatant
+        combat_manager.apply_condition(cs["player_combatant"], "poisoned", duration=3)
+
+        # Assert condition appears in ORIGINAL character_state active_conditions
+        cond_names = [c["condition"] if isinstance(c, dict) else c for c in self.character_state["active_conditions"]]
+        self.assertIn("poisoned", cond_names)
+
+    def test_companion_damage_persists_to_original_companion_dict(self):
+        comp_dict = self.world_state["party"]["companions"][0]
+        combat_manager.start_combat(["goblin_scout"], self.character_state, self.world_state, companion_states=self.world_state["party"]["companions"])
+        cs = self.world_state["combat_state"]
+
+        comp_c = cs["companions"][0]
+        goblin = cs["enemies"][0]
+        atk = goblin["attacks"][0]
+
+        with patch("combat_manager._roll_d20", return_value=15), patch("combat_manager.roll_dice", return_value=3):
+            combat_manager.resolve_attack(goblin, comp_c, atk)
+
+        # Assert directly on the ORIGINAL companion dict in world_state["party"]["companions"]
+        self.assertEqual(comp_dict["hp"]["current"], 5) # 8 - 3 = 5
+
 
 if __name__ == "__main__":
     unittest.main()

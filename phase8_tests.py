@@ -159,6 +159,8 @@ class TestPhase8DownedOutcome(unittest.TestCase):
         self.assertEqual(outcome, "player_defeat")
         self.assertIn("downed_outcome", cs)
         self.assertIn(cs["downed_outcome"]["outcome"], ["robbed_and_left", "captured", "rescued_by_npc"])
+        # Assert directly on ORIGINAL character_state object identity
+        self.assertIn(self.character_state["status"], ["normal", "captive"])
 
     def test_multi_round_death_save_accumulation_integration(self):
         # Reset character HP to 0 and death_saves to 0 fails
