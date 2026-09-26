@@ -399,17 +399,33 @@ JSON Schema (all fields optional/nullable):
 """.strip()
 
 
+def is_combat_active(world_state: Optional[Dict[str, Any]], combat_active: Optional[bool] = None) -> bool:
+    """
+    Check if combat is currently active.
+    Spec 9b(6): Extraction call is skipped entirely during active combat.
+    """
+    if combat_active is not None:
+        return combat_active
+    if isinstance(world_state, dict):
+        cs = world_state.get("combat_state")
+        if isinstance(cs, dict) and cs.get("status") == "active":
+            return True
+    return False
+
+
 def extract_state_updates(
     narrative_text: str,
     user_input: str,
     world_state: Optional[Dict[str, Any]] = None,
+    combat_active: Optional[bool] = None,
     model: str = DEFAULT_MODEL,
     num_ctx: int = DEFAULT_NUM_CTX,
     client: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Perform extraction call to parse JSON state updates from narrative + player action.
-    Spec Section 12b, 13b:
+    Spec Section 12b, 13b & 9b(6):
+    - SKIPPED ENTIRELY during combat turns (returns {} without firing Ollama API call).
     - Minimal prompt: narrative text + action + short instruction ONLY (NO system prompt, NO history, NO lore).
     - Format forced to 'json' in Ollama.
     - Retry policy: raw JSON syntax failure -> retry ONCE with stricter reminder -> fallback to {} if retry fails.
@@ -418,6 +434,11 @@ def extract_state_updates(
     Returns:
       Cleaned dict ready for apply_state_updates().
     """
+    # Spec 9b(6): Skip extraction call entirely during active combat
+    if is_combat_active(world_state, combat_active):
+        logger.debug("extract_state_updates: combat is active (spec 9b-6) — skipping extraction API call entirely.")
+        return {}
+
     extraction_prompt = (
         f"{EXTRACTION_INSTRUCTION}\n\n"
         f"Player Action: {user_input}\n"
