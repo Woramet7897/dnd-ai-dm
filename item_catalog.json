@@ -1,4 +1,10 @@
 {
+  "trail_rations": {
+    "name": "Trail Rations",
+    "type": "ration",
+    "value_gold": 2,
+    "description": "Dried meat, hardtack, and a waterskin — enough to keep you going for a day."
+  },
   "healing_potion": {
     "name": "Healing Potion",
     "type": "consumable",

@@ -93,7 +93,7 @@ def build_system_prompt_tiers(
         "Never contradict, recompute, or modify any numerical result or outcome provided by the system."
     )
 
-    # Tier 1: Campaign tone + background hook
+    # Tier 1: Campaign tone + background hook + game time
     char_name = player_state.get("name", "Adventurer")
     char_race = player_state.get("race", "Unknown Race")
     char_class = player_state.get("class_name", player_state.get("class", "Unknown Class"))
@@ -101,9 +101,14 @@ def build_system_prompt_tiers(
     bg_hook = player_state.get("background_hook", player_state.get("background", ""))
     tone = world_state.get("campaign_tone", world_state.get("tone", "High fantasy, responsive RPG adventure."))
 
+    gt = world_state.get("game_time", {})
+    day = gt.get("day", 1)
+    period = gt.get("period", "morning")
+
     tier_1 = (
         f"Campaign Tone: {tone}\n"
         f"Player Character: {char_name} (Level {char_level} {char_race} {char_class}).\n"
+        f"Time: Day {day}, {period}.\n"
         f"Background / Motivation: {bg_hook}"
     )
 

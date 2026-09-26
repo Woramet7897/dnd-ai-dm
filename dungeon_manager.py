@@ -27,6 +27,10 @@ _REQUIRED_ROOM_FIELDS = {"id", "name", "type", "description", "exits", "is_safe"
 _VALID_ROOM_TYPES = {"town", "wilderness", "dungeon"}
 _VALID_DIRECTIONS = {"north", "south", "east", "west"}
 
+# ─── Time & Supply Constants (spec Section 22a) ──────────────────────────────
+DAY_PERIODS = ["morning", "afternoon", "evening", "night"]
+STEPS_PER_PERIOD = 4
+
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Internal catalog helpers
@@ -95,9 +99,42 @@ def get_available_exits(world_state: Dict[str, Any]) -> Dict[str, Optional[str]]
     return room.get("exits", {})
 
 
+def advance_time(world_state: Dict[str, Any], steps: int = 1) -> Dict[str, Any]:
+    """
+    Deterministically advance game_time in world_state by steps (spec Section 22b).
+    Increments steps_since_period_start; when reaching STEPS_PER_PERIOD, resets to 0
+    and advances period to the next in DAY_PERIODS (morning -> afternoon -> evening -> night -> morning).
+    Increments day on night -> morning wrap.
+
+    Returns dict with keys: day, period, steps_since_period_start, period_changed (bool).
+    """
+    gt = world_state.setdefault("game_time", {
+        "day": 1,
+        "period": "morning",
+        "steps_since_period_start": 0
+    })
+
+    period_changed = False
+    for _ in range(steps):
+        gt["steps_since_period_start"] += 1
+        if gt["steps_since_period_start"] >= STEPS_PER_PERIOD:
+            gt["steps_since_period_start"] = 0
+            period_changed = True
+            current_idx = DAY_PERIODS.index(gt["period"]) if gt["period"] in DAY_PERIODS else 0
+            next_idx = (current_idx + 1) % len(DAY_PERIODS)
+            if next_idx == 0:  # wrapped night -> morning
+                gt["day"] += 1
+            gt["period"] = DAY_PERIODS[next_idx]
+
+    res = dict(gt)
+    res["period_changed"] = period_changed
+    return res
+
+
 def move_player(
     direction: str,
     world_state: Dict[str, Any],
+    character_state: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
     """
     Attempt to move the player in the given direction.
@@ -106,10 +143,13 @@ def move_player(
       - direction must be one of north/south/east/west.
       - The exit at that direction must not be None.
       - The destination room must exist (static or dynamic).
+      - On successful move, deterministically advances game_time by 1 step.
+      - If period_changed == True and character_state is passed, triggers ration check (Section 22d).
 
     Args:
         direction: one of 'north', 'south', 'east', 'west'.
         world_state: current world save dict (mutated in place on success).
+        character_state: optional character save dict for ration consumption.
 
     Returns:
         (success: bool, message: str, new_room: dict | None)
@@ -151,6 +191,12 @@ def move_player(
     visited = world_state.setdefault("visited_rooms", [])
     if destination_id not in visited:
         visited.append(destination_id)
+
+    # Advance game time (1 step per successful move)
+    time_info = advance_time(world_state, steps=1)
+    if time_info.get("period_changed") and character_state is not None:
+        import state_manager
+        state_manager.handle_period_change(world_state, character_state)
 
     logger.debug(f"move_player: moved to '{destination_id}' ({destination.get('name')})")
     return True, f"You move {direction} into {destination.get('name', destination_id)}.", destination

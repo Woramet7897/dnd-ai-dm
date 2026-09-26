@@ -65,6 +65,7 @@ CONCENTRATION_DC_FLOOR = 10
 # ─── Item Catalog Loader (spec Section 7b) ────────────────────────────────────
 _CATALOG_DIR = os.path.dirname(os.path.abspath(__file__))
 _item_catalog: Optional[Dict[str, Any]] = None
+_shop_catalog: Optional[Dict[str, Any]] = None
 
 def _get_item_catalog() -> Dict[str, Any]:
     global _item_catalog
@@ -77,6 +78,19 @@ def _get_item_catalog() -> Dict[str, Any]:
             logger.error(f"Failed to load item_catalog.json: {e}")
             _item_catalog = {}
     return _item_catalog
+
+
+def _get_shop_catalog() -> Dict[str, Any]:
+    global _shop_catalog
+    if _shop_catalog is None:
+        try:
+            path = os.path.join(_CATALOG_DIR, "shop_catalog.json")
+            with open(path, "r", encoding="utf-8") as f:
+                _shop_catalog = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to load shop_catalog.json: {e}")
+            _shop_catalog = {}
+    return _shop_catalog
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -817,13 +831,174 @@ def apply_level_up(state: Dict[str, Any]) -> Dict[str, Any]:
     # PHASE 6+ (XP/Leveling system)
     raise NotImplementedError("apply_level_up — PHASE 6+")
 
-def buy_item(item_id: str, shop_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
-    # PHASE 6+ (Economy system, spec Section 19b / PART 4c)
-    raise NotImplementedError("buy_item — PHASE 6+")
+def handle_period_change(
+    world_state: Dict[str, Any],
+    character_state: Dict[str, Any],
+) -> Tuple[bool, str]:
+    """
+    Spec Section 22d:
+    Called when advance_time() triggers period_changed == True.
+    If player is outside town, consumes 1 ration item. If none available, applies 'exhausted'.
+    """
+    import dungeon_manager
+    current_room = dungeon_manager.get_current_room(world_state)
+    if current_room and current_room.get("type") == "town":
+        return True, "In town — no rations consumed."
 
-def sell_item(item_id: str, shop_id: str, state: Dict[str, Any]) -> Dict[str, Any]:
-    # PHASE 6+ (Economy system)
-    raise NotImplementedError("sell_item — PHASE 6+")
+    catalog = _get_item_catalog()
+    inventory = character_state.get("inventory", [])
+    ration_item = None
+    for item in inventory:
+        if isinstance(item, dict):
+            item_id = item.get("item_id")
+            info = catalog.get(item_id, {})
+            if info.get("type") == "ration" and item.get("quantity", 0) > 0:
+                ration_item = item
+                break
+
+    active_conditions = character_state.setdefault("active_conditions", [])
+
+    if ration_item:
+        qty = ration_item.get("quantity", 1)
+        if qty > 1:
+            ration_item["quantity"] = qty - 1
+        else:
+            inventory.remove(ration_item)
+        if "exhausted" in active_conditions:
+            active_conditions.remove("exhausted")
+            logger.debug("Consumed ration — removed exhausted condition.")
+        return True, "Consumed a ration."
+    else:
+        if "exhausted" not in active_conditions:
+            active_conditions.append("exhausted")
+            logger.debug("No rations — applied exhausted condition.")
+        return False, "Out of rations! You are now exhausted."
+
+
+def long_rest(
+    world_state: Dict[str, Any],
+    character_state: Dict[str, Any],
+) -> None:
+    """
+    Spec Section 22c:
+    Hard overwrite game_time to morning of next day, restore HP to max, clear exhausted.
+    """
+    gt = world_state.setdefault("game_time", {"day": 1, "period": "morning", "steps_since_period_start": 0})
+    gt["period"] = "morning"
+    gt["day"] = gt.get("day", 1) + 1
+    gt["steps_since_period_start"] = 0
+
+    hp = character_state.setdefault("hp", {"current": 10, "max": 10})
+    hp["current"] = hp.get("max", 10)
+
+    active_conditions = character_state.setdefault("active_conditions", [])
+    if "exhausted" in active_conditions:
+        active_conditions.remove("exhausted")
+    logger.debug("Long rest completed. HP restored, time advanced to next morning.")
+
+
+def buy_item(
+    item_id: str,
+    shop_id: str,
+    character_state: Dict[str, Any],
+    world_state: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, str]:
+    """
+    Buy an item from a shop (spec Section 19b & Section 22f).
+    Checks shop hours (open_periods against world_state["game_time"]["period"]).
+    Deducts gold (value_gold * sell_multiplier) and adds item to inventory.
+    """
+    shops = _get_shop_catalog()
+    shop = shops.get(shop_id)
+    if not shop:
+        return False, f"Shop '{shop_id}' not found."
+
+    # Shop hours check (spec Section 22f)
+    if world_state and "game_time" in world_state:
+        period = world_state["game_time"].get("period")
+        open_periods = shop.get("open_periods")
+        if open_periods and period not in open_periods:
+            return False, f"The shop '{shop.get('name', shop_id)}' is closed for the {period}."
+
+    sell_items = shop.get("sell_items", [])
+    if item_id not in sell_items:
+        return False, f"Shop '{shop.get('name', shop_id)}' does not sell '{item_id}'."
+
+    catalog = _get_item_catalog()
+    item_info = catalog.get(item_id)
+    if not item_info:
+        return False, f"Item '{item_id}' not found in catalog."
+
+    sell_mult = shop.get("sell_multiplier", 1.0)
+    cost = math.ceil(item_info.get("value_gold", 0) * sell_mult)
+
+    current_gold = character_state.get("gold", 0)
+    if current_gold < cost:
+        return False, f"Not enough gold. Costs {cost} GP, you have {current_gold} GP."
+
+    character_state["gold"] = current_gold - cost
+
+    # Add item to inventory
+    inventory = character_state.setdefault("inventory", [])
+    existing = next((i for i in inventory if isinstance(i, dict) and i.get("item_id") == item_id), None)
+    if existing and existing.get("quantity") is not None:
+        existing["quantity"] = existing.get("quantity", 1) + 1
+    elif not existing:
+        inventory.append({"item_id": item_id, "equipped": False, "quantity": 1})
+
+    logger.debug(f"buy_item: bought '{item_id}' from '{shop_id}' for {cost} GP. Gold remaining: {character_state['gold']}.")
+    return True, f"Bought {item_info.get('name', item_id)} for {cost} GP."
+
+
+def sell_item(
+    item_id: str,
+    shop_id: str,
+    character_state: Dict[str, Any],
+    world_state: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, str]:
+    """
+    Sell an item to a shop (spec Section 19b & Section 22f).
+    Checks shop hours. Adds gold (value_gold * buy_multiplier) and removes item from inventory.
+    """
+    shops = _get_shop_catalog()
+    shop = shops.get(shop_id)
+    if not shop:
+        return False, f"Shop '{shop_id}' not found."
+
+    # Shop hours check (spec Section 22f)
+    if world_state and "game_time" in world_state:
+        period = world_state["game_time"].get("period")
+        open_periods = shop.get("open_periods")
+        if open_periods and period not in open_periods:
+            return False, f"The shop '{shop.get('name', shop_id)}' is closed for the {period}."
+
+    inventory = character_state.get("inventory", [])
+    target_item = None
+    for item in inventory:
+        if isinstance(item, dict) and item.get("item_id") == item_id:
+            target_item = item
+            break
+
+    if target_item is None:
+        return False, f"You don't have '{item_id}' to sell."
+
+    catalog = _get_item_catalog()
+    item_info = catalog.get(item_id, {})
+    buy_mult = shop.get("buy_multiplier", 0.5)
+    gain = math.floor(item_info.get("value_gold", 0) * buy_mult)
+
+    # Decrement/remove item
+    qty = target_item.get("quantity", 1)
+    if qty > 1:
+        target_item["quantity"] = qty - 1
+    else:
+        inventory.remove(target_item)
+
+    character_state["gold"] = character_state.get("gold", 0) + gain
+    character_state["ac"] = _compute_ac(character_state)
+
+    logger.debug(f"sell_item: sold '{item_id}' to '{shop_id}' for {gain} GP. Gold now: {character_state['gold']}.")
+    return True, f"Sold {item_info.get('name', item_id)} for {gain} GP."
 
 def resolve_spell_save(caster: Dict, target: Dict, spell: Dict,
                        state: Dict[str, Any]) -> Dict[str, Any]:

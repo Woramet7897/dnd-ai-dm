@@ -55,7 +55,7 @@ def _get_monster_catalog() -> Dict:
 # CONDITIONS (spec Section 20)
 # ════════════════════════════════════════════════════════════════════════════════
 
-CONDITIONS = {"prone", "poisoned", "stunned", "restrained", "frightened"}
+CONDITIONS = {"prone", "poisoned", "stunned", "restrained", "frightened", "exhausted"}
 
 # Mechanical effect lookup — used by resolve_attack() before rolling.
 CONDITION_EFFECTS: Dict[str, Dict[str, bool]] = {
@@ -64,6 +64,7 @@ CONDITION_EFFECTS: Dict[str, Dict[str, bool]] = {
     "stunned":     {"skip_turn": True},
     "restrained":  {"attack_rolls_disadvantage": True, "attacks_against_have_advantage": True},
     "frightened":  {"cannot_approach_source": True},
+    "exhausted":   {"attack_rolls_disadvantage": True, "ability_checks_disadvantage": True},
 }
 
 
@@ -451,7 +452,7 @@ def resolve_attack(
 
     if "prone" in target_conditions or "restrained" in target_conditions:
         has_advantage = True
-    if "poisoned" in attacker_conditions or "restrained" in attacker_conditions:
+    if "poisoned" in attacker_conditions or "restrained" in attacker_conditions or "exhausted" in attacker_conditions:
         has_disadvantage = True
     if "frightened" in attacker_conditions:
         has_disadvantage = True

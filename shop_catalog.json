@@ -2,7 +2,8 @@
   "general_store": {
     "name": "Riverside General Store",
     "description": "A cluttered shop selling everyday adventuring supplies.",
-    "sell_items": ["healing_potion", "torch", "rope", "dagger"],
+    "sell_items": ["trail_rations", "healing_potion", "torch", "rope", "dagger"],
+    "open_periods": ["morning", "afternoon", "evening"],
     "buy_multiplier": 0.5,
     "sell_multiplier": 1.0
   },
@@ -10,6 +11,7 @@
     "name": "Ironforge Smithy",
     "description": "The ring of hammer on anvil echoes from within. The smith sells quality arms and armor.",
     "sell_items": ["longsword", "rapier", "mace", "shield", "leather_armor", "chain_mail"],
+    "open_periods": ["morning", "afternoon"],
     "buy_multiplier": 0.5,
     "sell_multiplier": 1.0
   },
@@ -23,7 +25,7 @@
   "market_stall": {
     "name": "Travelling Merchant Stall",
     "description": "A colourful wagon with goods piled high. The merchant haggles eagerly.",
-    "sell_items": ["rope", "torch", "thieves_tools", "component_pouch"],
+    "sell_items": ["trail_rations", "rope", "torch", "thieves_tools", "component_pouch"],
     "buy_multiplier": 0.5,
     "sell_multiplier": 1.0
   }
