@@ -367,3 +367,43 @@ def is_room_safe(room_id: str, world_state: Dict[str, Any]) -> bool:
     if room_id in world_state.get("cleared_rooms", []):
         return True
     return False
+
+
+def find_nearest_visited_safe_room(world_state: Dict[str, Any]) -> str:
+    """
+    Find the nearest previously-visited safe location to world_state['current_location'].
+    Uses Breadth-First Search (BFS) over the known room graph (spec Section 17a).
+    Returns room ID string (defaults to 'town_riverside' if no visited safe room found).
+    """
+    visited = world_state.get("visited_rooms", [])
+    current = world_state.get("current_location", "town_riverside")
+
+    safe_visited = [
+        rid for rid in visited
+        if is_room_safe(rid, world_state) or (_get_room(rid, world_state) and _get_room(rid, world_state).get("type") == "town")
+    ]
+
+    if not safe_visited:
+        return "town_riverside"
+
+    if current in safe_visited:
+        return current
+
+    from collections import deque
+    queue = deque([(current, 0)])
+    seen = {current}
+
+    while queue:
+        curr_id, dist = queue.popleft()
+        if curr_id in safe_visited:
+            return curr_id
+
+        room = _get_room(curr_id, world_state)
+        if room:
+            exits = room.get("exits", {})
+            for direction, dest_id in exits.items():
+                if dest_id and dest_id not in seen:
+                    seen.add(dest_id)
+                    queue.append((dest_id, dist + 1))
+
+    return safe_visited[0] if safe_visited else "town_riverside"

@@ -1007,10 +1007,117 @@ def resolve_spell_save(caster: Dict, target: Dict, spell: Dict,
     # TARGET rolls the save — direction is reversed from a normal check).
     raise NotImplementedError("resolve_spell_save — PHASE 6+")
 
-def resolve_downed_outcome(combatant: Dict, combat_state: Dict,
-                           world_state: Dict) -> Dict[str, Any]:
-    # PHASE 8 (Death/downed outcome system, spec Section 17a / PART 7)
-    raise NotImplementedError("resolve_downed_outcome — PHASE 8")
+def resolve_downed_outcome(
+    combatant: Dict[str, Any],
+    combat_state: Optional[Dict[str, Any]] = None,
+    world_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Spec Section 17a (Kenshi-lite downed outcome system).
+    When a combatant's HP hits 0 and death saves fail 3 times (or player is defeated):
+    Selects one of ['robbed_and_left', 'captured', 'rescued_by_npc'] using context-weighted choice.
+
+    Docstring Return Dict Shape:
+      {
+        "outcome": "robbed_and_left" | "captured" | "rescued_by_npc",
+        "penalty": {
+          "gold_lost": int,
+          "items_lost": list[str],
+          "hp_set_to": int | None,
+          "hp_restored": int | None,
+          "status": str,
+          "relocated_to": str | None
+        }
+      }
+    """
+    import dungeon_manager
+
+    outcomes = ["robbed_and_left", "captured", "rescued_by_npc"]
+
+    # Calculate contextual weights (spec 17a)
+    room = dungeon_manager.get_current_room(world_state) if world_state else None
+    room_type = room.get("type", "wilderness") if room else "wilderness"
+    is_safe = room.get("is_safe", False) if room else False
+
+    if is_safe or room_type == "town":
+        weights = [0.20, 0.10, 0.70]
+    elif room_type == "dungeon":
+        weights = [0.50, 0.35, 0.15]
+    else:
+        weights = [0.45, 0.25, 0.30]
+
+    outcome = random.choices(outcomes, weights=weights, k=1)[0]
+    penalty: Dict[str, Any] = {
+        "gold_lost": 0,
+        "items_lost": [],
+        "hp_set_to": None,
+        "hp_restored": None,
+        "status": "normal",
+        "relocated_to": None,
+    }
+
+    # Reset death saves count
+    combatant["death_saves"] = {"success": 0, "fail": 0}
+
+    hp_dict = combatant.setdefault("hp", {"current": 0, "max": 10})
+    max_hp = hp_dict.get("max", 10)
+
+    if outcome == "robbed_and_left":
+        # Lose portion of gold (50-100%) and all unequipped inventory items
+        cur_gold = combatant.get("gold", 0)
+        gold_lost = random.randint(math.ceil(cur_gold * 0.5), cur_gold) if cur_gold > 0 else 0
+        combatant["gold"] = max(0, cur_gold - gold_lost)
+
+        inventory = combatant.get("inventory", [])
+        items_lost = []
+        kept_inventory = []
+        for item in inventory:
+            if isinstance(item, dict) and item.get("equipped") is True:
+                kept_inventory.append(item)
+            else:
+                item_id = item.get("item_id") if isinstance(item, dict) else item
+                items_lost.append(item_id)
+        combatant["inventory"] = kept_inventory
+
+        # HP set to EXACTLY 1
+        hp_dict["current"] = 1
+        combatant["status"] = "normal"
+
+        # Relocate to nearest previously-visited safe location
+        relocated_to = dungeon_manager.find_nearest_visited_safe_room(world_state) if world_state else "town_riverside"
+        if world_state:
+            world_state["current_location"] = relocated_to
+
+        penalty["gold_lost"] = gold_lost
+        penalty["items_lost"] = items_lost
+        penalty["hp_set_to"] = 1
+        penalty["status"] = "normal"
+        penalty["relocated_to"] = relocated_to
+
+    elif outcome == "captured":
+        # Status set to captive (no item loss, no HP change)
+        combatant["status"] = "captive"
+        if hp_dict.get("current", 0) <= 0:
+            hp_dict["current"] = 1  # Consciousness restored at captive location
+        penalty["status"] = "captive"
+        penalty["hp_set_to"] = hp_dict["current"]
+
+    elif outcome == "rescued_by_npc":
+        # Partial HP restored (50% max HP), no item loss
+        hp_restored = max(1, max_hp // 2)
+        hp_dict["current"] = hp_restored
+        combatant["status"] = "normal"
+
+        penalty["hp_restored"] = hp_restored
+        penalty["hp_now"] = hp_restored
+        penalty["status"] = "normal"
+
+    if combat_state:
+        combat_state["status"] = "ended"
+        combat_state["outcome"] = "player_defeat"
+
+    logger.info(f"resolve_downed_outcome: outcome='{outcome}', penalty={penalty}")
+    return {"outcome": outcome, "penalty": penalty}
 
 def dismiss_companion(npc_id: str, world_state: Dict[str, Any]) -> None:
     # PHASE 6+ (Companion dismissal, spec Section 21 / PART 9)

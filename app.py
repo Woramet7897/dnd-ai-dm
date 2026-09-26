@@ -385,11 +385,23 @@ def render_playing_view():
                         "content": "🏆 **Victory!** You defeated your foes and stand triumphant."
                     })
                 elif outcome == "defeat":
+                    out_res = cs.get("downed_outcome") or state_manager.resolve_downed_outcome(player, cs, world)
                     combat_manager.end_combat(world)
-                    st.error("💀 Defeat! You have been fallen in battle.")
+                    
+                    out_name = out_res.get("outcome", "robbed_and_left")
+                    pen = out_res.get("penalty", {})
+
+                    if out_name == "robbed_and_left":
+                        msg = f"⚠️ **Defeat!** You were knocked unconscious, robbed of {pen.get('gold_lost', 0)} GP, and left for dead. You awaken at **{pen.get('relocated_to')}** with 1 HP."
+                    elif out_name == "captured":
+                        msg = "⚠️ **Defeat!** You were captured by your enemies! You are now held captive."
+                    else:  # rescued_by_npc
+                        msg = f"⚠️ **Defeat!** An wanderer rescued you from death! Restored to {pen.get('hp_restored', 1)} HP."
+
+                    st.error(msg)
                     st.session_state["narrative_log"].append({
                         "role": "assistant",
-                        "content": "⚠️ **Defeat!** You are downed. (Outcomes will continue...)"
+                        "content": msg
                     })
 
                 auto_save()
@@ -403,29 +415,59 @@ def render_playing_view():
         col_nav, col_act = st.columns([1, 2])
 
         with col_nav:
-            st.markdown("##### 🧭 Navigation & Movement")
-            exits = dungeon_manager.get_available_exits(world)
-            
-            nav_cols = st.columns(2)
-            directions = [("North ⬆️", "north"), ("South ⬇️", "south"), ("East ➡️", "east"), ("West ⬅️", "west")]
-            
-            for idx, (label, dir_key) in enumerate(directions):
-                col_idx = idx % 2
-                dest_id = exits.get(dir_key)
-                with nav_cols[col_idx]:
-                    if dest_id is not None:
-                        if st.button(label, key=f"move_{dir_key}", use_container_width=True):
-                            ok_m, msg_m, new_room = dungeon_manager.move_player(dir_key, world, player)
-                            if ok_m and new_room:
-                                st.session_state["last_action_msg"] = msg_m
-                                st.session_state["narrative_log"].append({
-                                    "role": "user",
-                                    "content": f"I move {dir_key} into {new_room.get('name')}."
-                                })
-                                auto_save()
-                                st.rerun()
+            if player.get("status") == "captive":
+                st.markdown("##### 🔒 Captive — Attempt Escape")
+                st.info("You are held captive! Normal movement is disabled until you escape.")
+                if st.button("🔓 Attempt Escape", use_container_width=True, type="primary"):
+                    # One resolve_check against hard difficulty (DC 16)
+                    esc_res = state_manager.resolve_check("DEX", "hard", player)
+                    
+                    # Advance time by 1 step (costs a turn)
+                    time_res = dungeon_manager.advance_time(world, steps=1)
+                    if time_res.get("period_changed"):
+                        state_manager.handle_period_change(world, player)
+
+                    if esc_res["success"]:
+                        player["status"] = "normal"
+                        safe_room = dungeon_manager.find_nearest_visited_safe_room(world)
+                        world["current_location"] = safe_room
+                        st.success("🎉 Escape Successful!")
+                        st.session_state["narrative_log"].append({
+                            "role": "assistant",
+                            "content": f"🔓 **Escape Successful!** (Rolled {esc_res['total']} vs DC {esc_res['dc']}). You broke free from your bonds and fled to **{safe_room}**."
+                        })
                     else:
-                        st.button(label, key=f"move_disabled_{dir_key}", disabled=True, use_container_width=True)
+                        st.error("❌ Escape Failed!")
+                        st.session_state["narrative_log"].append({
+                            "role": "assistant",
+                            "content": f"🔒 **Escape Failed!** (Rolled {esc_res['total']} vs DC {esc_res['dc']}). The guards catch you. Time passes..."
+                        })
+                    auto_save()
+                    st.rerun()
+            else:
+                st.markdown("##### 🧭 Navigation & Movement")
+                exits = dungeon_manager.get_available_exits(world)
+                
+                nav_cols = st.columns(2)
+                directions = [("North ⬆️", "north"), ("South ⬇️", "south"), ("East ➡️", "east"), ("West ⬅️", "west")]
+                
+                for idx, (label, dir_key) in enumerate(directions):
+                    col_idx = idx % 2
+                    dest_id = exits.get(dir_key)
+                    with nav_cols[col_idx]:
+                        if dest_id is not None:
+                            if st.button(label, key=f"move_{dir_key}", use_container_width=True):
+                                ok_m, msg_m, new_room = dungeon_manager.move_player(dir_key, world, player)
+                                if ok_m and new_room:
+                                    st.session_state["last_action_msg"] = msg_m
+                                    st.session_state["narrative_log"].append({
+                                        "role": "user",
+                                        "content": f"I move {dir_key} into {new_room.get('name')}."
+                                    })
+                                    auto_save()
+                                    st.rerun()
+                        else:
+                            st.button(label, key=f"move_disabled_{dir_key}", disabled=True, use_container_width=True)
 
         with col_act:
             st.markdown("##### 🎭 Actions & Interaction")

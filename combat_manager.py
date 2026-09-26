@@ -784,14 +784,13 @@ def build_round_narration_block(
 # COMBAT END CHECK
 # ════════════════════════════════════════════════════════════════════════════════
 
-def check_combat_end(combat_state: Dict[str, Any]) -> Optional[str]:
+def check_combat_end(combat_state: Dict[str, Any], world_state: Optional[Dict[str, Any]] = None) -> Optional[str]:
     """
-    Check whether combat should end.
-    Spec 9b-5: 'hp <= 0 → "downed", monster removed from turn order. check_combat_end() unchanged.'
+    Check whether combat should end (spec 9b-5 & Section 17a).
 
     Returns:
         'player_victory'  — all enemies are downed.
-        'player_defeat'   — player is downed (companions still alive = retreat, not death).
+        'player_defeat'   — player is downed (triggers resolve_downed_outcome, non-permadeath).
         None              — combat continues.
     """
     enemies    = combat_state.get("enemies", [])
@@ -810,6 +809,9 @@ def check_combat_end(combat_state: Dict[str, Any]) -> Optional[str]:
         combat_state["status"]  = "ended"
         combat_state["outcome"] = "player_defeat"
         logger.debug("check_combat_end: player_defeat — player downed.")
+        import state_manager
+        downed_res = state_manager.resolve_downed_outcome(player_c, combat_state, world_state)
+        combat_state["downed_outcome"] = downed_res
         return "player_defeat"
 
     return None
@@ -822,39 +824,11 @@ def check_combat_end(combat_state: Dict[str, Any]) -> Optional[str]:
 def resolve_round(
     combat_state: Dict[str, Any],
     player_attack_result: Optional[Dict[str, Any]] = None,
+    world_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Orchestrate a full combat round in initiative order and return a complete
     round summary dict for the narrative LLM.
-
-    Design (spec Section 9b-3):
-    - Python resolves the WHOLE round first, then assembles ONE combined result block.
-    - The player's action is supplied by the caller via `player_attack_result` (driven
-      by human input upstream); the player slot in turn_order is skipped by this function.
-    - Enemy / companion actions are resolved by resolve_enemy_turn / resolve_companion_turn.
-    - Live list references are used directly (no copies) so HP changes from earlier turns
-      in the same round affect target selection for later turns.
-    - Results are appended to combat_state["round_log"] before returning.
-    - Conditions are ticked at end of round.
-    - round counter increments AFTER resolution (so the narration block correctly names
-      the round that just happened).
-    - check_combat_end() is called last; its outcome is included in the return dict.
-
-    Args:
-        combat_state:        live combat_state dict from world_state.
-        player_attack_result: result dict from resolve_attack() for the player's chosen
-                              action, or None if the player did not attack this turn
-                              (e.g. used an item, cast a non-attack spell, etc.).
-
-    Returns:
-        {
-          "round_num":      int,   # the round that was just resolved
-          "significant":    list,  # significant events (spec 9b-4)
-          "routine":        list,  # routine hits/misses
-          "routine_summary": str,  # canned-template summary of routine events
-          "narration_block": str,  # '[System: Round Result]' block for narrative LLM
-          "combat_outcome": str | None,  # 'player_victory' | 'player_defeat' | None
-        }
     """
     round_num      = combat_state["round"]
     turn_order     = combat_state["turn_order"]
@@ -906,6 +880,20 @@ def resolve_round(
 
         round_results.append(result)
 
+    # ── Process death saves for downed player or companions ───────────────────
+    import state_manager
+    if player_c.get("hp", {}).get("current", 0) <= 0:
+        ds_res = state_manager.resolve_death_save(player_c)
+        if ds_res.get("exhausted"):
+            downed_res = state_manager.resolve_downed_outcome(player_c, combat_state, world_state)
+            combat_state["downed_outcome"] = downed_res
+
+    for comp in companions:
+        if comp.get("hp", {}).get("current", 0) <= 0:
+            ds_res = state_manager.resolve_death_save(comp)
+            if ds_res.get("exhausted"):
+                state_manager.resolve_downed_outcome(comp, combat_state, world_state)
+
     # ── Persist round results into round_log ──────────────────────────────────
     combat_state["round_log"].append(round_results)
 
@@ -925,7 +913,7 @@ def resolve_round(
     narration_block = build_round_narration_block(round_num, significant, routine_summary)
 
     # ── Check for combat end ──────────────────────────────────────────────────
-    combat_outcome = check_combat_end(combat_state)
+    combat_outcome = check_combat_end(combat_state, world_state)
 
     logger.debug(
         f"resolve_round: round {round_num} done. "
