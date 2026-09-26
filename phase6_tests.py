@@ -299,7 +299,7 @@ try:
         check("Single-model default verified online", True)
 except Exception as e:
     print("  Live Ollama Server: UNREACHABLE / NOT RUNNING.")
-    print("  STATUS: Same-model ('llama3') decision taken as SPEC-RECOMMENDED DEFAULT.")
+    print(f"  STATUS: Same-model ('{llm_handler.DEFAULT_MODEL}') decision taken as SPEC-RECOMMENDED DEFAULT.")
     print("  NOTE: Comparative empirical benchmark could not be run because Ollama server is offline.")
     check("Ollama offline status reported accurately without fabricating numbers", True)
 

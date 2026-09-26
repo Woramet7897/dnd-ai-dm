@@ -36,7 +36,7 @@ if not logger.handlers:
 
 # ── Model Configuration & Defaults ────────────────────────────────────────────
 # Spec 12d: Default to the SAME model for both narrative and extraction calls.
-DEFAULT_MODEL = "llama3"
+DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "llama3")
 DEFAULT_NUM_CTX = 4096
 MAX_PROMPT_RATIO = 0.70  # 70% of num_ctx for system prompt + history budget
 
