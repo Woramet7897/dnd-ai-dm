@@ -10,6 +10,7 @@ World events (Phase 10) and companion-based room effects are excluded here.
 import json
 import logging
 import os
+import random
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger("dungeon_manager")
@@ -197,6 +198,9 @@ def move_player(
     if time_info.get("period_changed") and character_state is not None:
         import state_manager
         state_manager.handle_period_change(world_state, character_state)
+
+    # Lightweight World Events (~10% chance on player movement, spec Section 6d)
+    check_and_trigger_world_event(world_state)
 
     logger.debug(f"move_player: moved to '{destination_id}' ({destination.get('name')})")
     return True, f"You move {direction} into {destination.get('name', destination_id)}.", destination
@@ -407,3 +411,120 @@ def find_nearest_visited_safe_room(world_state: Dict[str, Any]) -> str:
                     queue.append((dest_id, dist + 1))
 
     return safe_visited[0] if safe_visited else "town_riverside"
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# LIGHTWEIGHT WORLD EVENTS (spec Section 6d / Phase 10 Part 2)
+# ════════════════════════════════════════════════════════════════════════════════
+
+WORLD_EVENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
+    "goblin_camp_grew": {
+        "allowed_types": {"wilderness", "dungeon"},
+        "context_line": "Recent reports say a nearby goblin camp has grown larger and more aggressive.",
+    },
+    "merchant_route_reopened": {
+        "allowed_types": {"town", "wilderness"},
+        "context_line": "Travelers report that the regional merchant trade route has recently reopened.",
+    },
+    "ancient_shrine_glowing": {
+        "allowed_types": {"wilderness", "dungeon"},
+        "context_line": "Whispers say strange mystical lights have been seen emanating from nearby ancient ruins.",
+    },
+    "bandit_activity_increased": {
+        "allowed_types": {"wilderness", "town"},
+        "context_line": "Local guard patrols warn that bandit activity has increased along the surrounding roads.",
+    },
+    "unusual_fog_settled": {
+        "allowed_types": {"wilderness", "dungeon", "town"},
+        "context_line": "An unnatural, heavy mist has settled over the area, dampening sound and visibility.",
+    },
+}
+
+
+def check_and_trigger_world_event(
+    world_state: Dict[str, Any],
+    chance: float = 0.10,
+    rng_val: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Spec Section 6d / Phase 10 Part 2:
+    On move_player() success, roll ~10% chance to set one world event flag
+    on a location the player is NOT currently in.
+
+    Args:
+        world_state: current world save dict.
+        chance: probability threshold (default 0.10 for ~10%).
+        rng_val: optional float in [0.0, 1.0) to override random.random() for deterministic testing.
+
+    Returns:
+        Dict describing the triggered event (location_id, flag), or None if no event triggered.
+    """
+    roll = random.random() if rng_val is None else rng_val
+    if roll >= chance:
+        return None
+
+    current_loc = world_state.get("current_location")
+    all_rooms = list(_all_known_room_ids(world_state))
+    eligible_locs = [rid for rid in all_rooms if rid != current_loc]
+
+    if not eligible_locs:
+        return None
+
+    target_loc_id = random.choice(eligible_locs)
+    target_room = _get_room(target_loc_id, world_state)
+    room_type = target_room.get("type", "wilderness") if target_room else "wilderness"
+
+    matching_flags = [
+        flag_name for flag_name, info in WORLD_EVENT_DEFINITIONS.items()
+        if room_type in info.get("allowed_types", {"wilderness"})
+    ]
+
+    if not matching_flags:
+        matching_flags = list(WORLD_EVENT_DEFINITIONS.keys())
+
+    chosen_flag = random.choice(matching_flags)
+
+    # Store in world_event_flags dict (mapping location_id -> list of flags)
+    event_flags = world_state.setdefault("world_event_flags", {})
+    if not isinstance(event_flags, dict):
+        event_flags = {}
+        world_state["world_event_flags"] = event_flags
+
+    loc_flags = event_flags.setdefault(target_loc_id, [])
+    if chosen_flag not in loc_flags:
+        loc_flags.append(chosen_flag)
+
+    logger.debug(f"check_and_trigger_world_event: set flag '{chosen_flag}' on location '{target_loc_id}'.")
+    return {"location_id": target_loc_id, "flag": chosen_flag}
+
+
+def get_active_world_events_for_location(
+    location_id: str,
+    world_state: Dict[str, Any],
+    consume: bool = True,
+) -> List[str]:
+    """
+    Retrieve context lines for active world event flags at location_id.
+    If consume is True, clears the flags for that location after reading
+    (clears on visit policy so the prompt injection occurs once upon arrival).
+    """
+    event_flags = world_state.get("world_event_flags")
+    if not isinstance(event_flags, dict) or location_id not in event_flags:
+        return []
+
+    loc_flags = event_flags.get(location_id, [])
+    if not loc_flags:
+        return []
+
+    context_lines = []
+    for flag in loc_flags:
+        info = WORLD_EVENT_DEFINITIONS.get(flag, {})
+        line = info.get("context_line")
+        if line:
+            context_lines.append(f"[World Event] {line}")
+
+    if consume:
+        event_flags.pop(location_id, None)
+
+    return context_lines
+

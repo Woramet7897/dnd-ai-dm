@@ -124,8 +124,21 @@ def build_system_prompt_tiers(
                 tier_2_parts.append(f"- {c_name}")
     tier_2 = "Active Companions in Scene:\n" + "\n".join(tier_2_parts) if tier_2_parts else ""
 
-    # Tier 3: RAG lore entries
+    # Tier 3: RAG lore entries & active location World Events
     tier_3_parts = []
+
+    # Active location world event context line injection (spec Section 6d / Phase 10)
+    cur_loc = world_state.get("current_location")
+    event_flags = world_state.get("world_event_flags")
+    if cur_loc and isinstance(event_flags, dict) and cur_loc in event_flags:
+        loc_flags = event_flags.get(cur_loc, [])
+        for flag in loc_flags:
+            import dungeon_manager
+            info = dungeon_manager.WORLD_EVENT_DEFINITIONS.get(flag, {})
+            c_line = info.get("context_line")
+            if c_line:
+                tier_3_parts.append(f"- [WORLD EVENT] {c_line}")
+
     if lore_entries:
         for entry in lore_entries:
             if isinstance(entry, dict):

@@ -77,7 +77,7 @@ def list_saved_characters() -> List[str]:
     return sorted(saves)
 
 
-def load_game(char_name: str) -> bool:
+def load_game(char_name: str, client: Optional[Any] = None) -> bool:
     """Load character and world state from disk."""
     try:
         player = state_manager.load_character(char_name)
@@ -90,9 +90,36 @@ def load_game(char_name: str) -> bool:
         if not st.session_state["narrative_log"]:
             room = dungeon_manager.get_current_room(world)
             room_name = room.get("name", "Unknown Location") if room else "Unknown"
+
+            # Session Recap on Load (spec Section 14a / Phase 10 Part 1)
+            recap_text = ""
+            recap_key = f"recap_generated_{char_name}"
+            if not st.session_state.get(recap_key):
+                st.session_state[recap_key] = True
+                mm = memory_manager.MemoryManager(char_name)
+                major_ids = mm.get_all_major_lore_ids()
+                if len(major_ids) >= 2:
+                    major_col = mm._get_major_collection()
+                    docs_res = major_col.get(where={"character": {"$eq": char_name}}, include=["documents"])
+                    docs = docs_res.get("documents", [])
+                    if len(docs) >= 2:
+                        major_entries = [{"text": d, "type": "major"} for d in docs[-3:]]
+                        res = llm_handler.generate_narrative_response(
+                            user_input="Please provide a concise 'Previously, in your story...' recap paragraph summarizing our major past chapters.",
+                            player_state=player,
+                            world_state=world,
+                            lore_entries=major_entries,
+                            client=client,
+                        )
+                        recap_narrative = res.get("narrative", "")
+                        if recap_narrative:
+                            if not recap_narrative.startswith("Previously"):
+                                recap_narrative = f"Previously, in your story...\n{recap_narrative}"
+                            recap_text = f"\n\n📖 **Session Recap:**\n{recap_narrative}"
+
             st.session_state["narrative_log"].append({
                 "role": "assistant",
-                "content": f"Loaded save for **{char_name}**. You are currently in **{room_name}**."
+                "content": f"Loaded save for **{char_name}**. You are currently in **{room_name}**.{recap_text}"
             })
         return True
     except Exception as e:
