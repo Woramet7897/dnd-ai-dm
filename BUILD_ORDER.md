@@ -191,6 +191,7 @@ combat flow from Phase 4/7 in place of the placeholder.
 Each of these only touches its own files/functions plus `app.py` UI additions — none of them depend on each
 other. Do them one at a time, one Definition of Done per system, in whatever order the user prefers:
 
+- **Equipment & Consumables** (`equip_item`, `unequip_item`, `get_active_effects`, `use_consumable` in `state_manager.py` — spec Section 7b). Done when: equip_item/unequip_item dynamically update AC and equipped flags, get_active_effects aggregates active item bonuses, use_consumable handles healing potions in/out of combat, and combat_manager reads equipped weapons.
 - **XP/Leveling** (`award_xp`, `check_level_up`, `apply_level_up` + level-up popup UI). Done when: crossing
   an XP threshold in a test correctly increases HP max/proficiency/spell slots.
 - **Shop/Economy** (`buy_item`, `sell_item` + shop panel UI). Done when: buying then selling the same item in
@@ -261,3 +262,37 @@ time if needed. Phase 8 (death system) comes before Phase 9's optional systems b
 tone-defining feature discussed earlier, not because it's technically required before the others. Phase 9's
 five systems are ordered by convenience only, not dependency — skip, reorder, or drop any of them freely.
 Phase 10 is pure polish, cut without a second thought if short on time or tokens.
+
+## SOMEDAY / MAYBE — freedom & life-sim layer (not scheduled, revisit after MVP)
+Goal: more "Elin-style" freedom without building a full life-sim engine.
+Idea list below, roughly cheapest-to-build first. None of these block Phase 6-10.
+
+1. NPC lazy-generation (mirrors existing item/location pattern — see review
+   findings item D). Cheapest, highest-leverage item on this list: without it,
+   any casual interaction with an NPC the player wasn't pre-introduced to
+   (flirting, chatting, making an enemy) can never persist — the LLM narrates
+   it fine but the relationship state silently drops every time. This is the
+   single most direct lever for "do whatever, world remembers it" freedom.
+   Natural slot: alongside Phase 9's lazy item generation, same shape of fix.
+
+2. Lightweight reputation/trust numbers per location or faction (not per-NPC).
+   A handful of Python-owned ints (e.g. town_riverside.reputation) nudged by
+   extraction tags, no new UI needed — gives "the world remembers what you did
+   here" without simulating individual NPC memory.
+
+3. Minimal ownership/economy layer (e.g. run a stall/inn). NOT a Elin-style
+   sim — just 2-3 Python-tracked numbers (accumulated gold, days operated)
+   that grow on a fixed schedule, with all flavor/day-to-day detail left to
+   the LLM to improvise per visit. Gives "what I built yesterday is still
+   there and bigger today" without a real economy engine.
+
+4. Explicit "downtime scene" narrative mode — a flag/action type for freeform
+   activity that doesn't map to any mechanical system (a day in town, just
+   talking). Nothing gets extracted to state_updates, but the scene still
+   gets written to memory_manager's minor_lore, so future scenes can
+   reference it narratively even with zero hard stats attached. Cheap
+   (memory_manager.py already exists) — mostly a llm_handler.py prompt-design
+   decision, not new state.
+
+None of these are committed. Revisit once Phase 6-10 core loop (MVP) is done
+and stable.

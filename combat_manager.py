@@ -348,26 +348,53 @@ def start_combat(
 
 def _player_attacks(player_state: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Build a minimal attack list for the player based on their inventory.
-    Returns a basic unarmed strike if no weapon is found.
-    This is intentionally simple for Phase 4 — the Phase 6 item system will
-    enrich this once item_catalog attack stats are integrated.
+    Build the attack list for the player based on currently-equipped weapons in inventory.
+    Spec Section 7b & Bugfix:
+    - Finds inventory items where equipped == True and item_catalog type == 'weapon'.
+    - Calculates total to-hit bonus:
+        player proficiency_bonus + ability modifier (STR mod, or max(STR, DEX) for finesse weapons)
+        + item's magic attack_bonus from catalog.
+    - Unarmed Strike fallback uses proficiency_bonus + STR mod.
     """
-    # Phase 4 placeholder — unarmed strike as guaranteed fallback.
-    attacks = [
-        {"name": "Unarmed Strike", "attack_bonus": 0, "damage": "1+0",
+    from state_manager import _get_item_catalog, get_modifier
+    catalog = _get_item_catalog()
+
+    stats = player_state.get("stats", {})
+    prof = player_state.get("proficiency_bonus", 2)
+    str_mod = get_modifier(stats.get("STR", 10))
+    dex_mod = get_modifier(stats.get("DEX", 10))
+
+    equipped_weapons = []
+    for item in player_state.get("inventory", []):
+        if isinstance(item, dict) and item.get("equipped") is True:
+            item_id = item.get("item_id")
+            info = catalog.get(item_id, {})
+            if info.get("type") == "weapon":
+                effects = info.get("effects", {})
+                is_finesse = info.get("finesse", False)
+                stat_mod = max(str_mod, dex_mod) if is_finesse else str_mod
+                magic_bonus = effects.get("attack_bonus", 0)
+                total_attack_bonus = prof + stat_mod + magic_bonus
+
+                attack = {
+                    "name": info.get("name", item_id.capitalize()),
+                    "attack_bonus": total_attack_bonus,
+                    "damage": effects.get("damage", "1d4"),
+                    "damage_type": effects.get("damage_type", "slashing"),
+                    "applies_condition": effects.get("applies_condition", None),
+                }
+                equipped_weapons.append(attack)
+
+    if equipped_weapons:
+        return equipped_weapons
+
+    unarmed_bonus = prof + str_mod
+    return [
+        {"name": "Unarmed Strike", "attack_bonus": unarmed_bonus, "damage": "1+0",
          "damage_type": "bludgeoning", "applies_condition": None}
     ]
-    # If the player carries a dagger, give a simple melee attack.
-    for item in player_state.get("inventory", []):
-        item_id = item.get("item_id", "") if isinstance(item, dict) else ""
-        if "dagger" in item_id.lower():
-            attacks = [
-                {"name": "Dagger", "attack_bonus": 2, "damage": "1d4+0",
-                 "damage_type": "piercing", "applies_condition": None}
-            ]
-            break
-    return attacks
+
+
 
 
 def end_combat(world_state: Dict[str, Any]) -> None:

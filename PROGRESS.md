@@ -13,6 +13,7 @@ Last updated: 2026-08-03 (Phase 5 complete — memory_manager.py, 57/57 tests)
 | 6 - llm_handler | NOT_STARTED | | |
 | 7 - app.py core loop (MVP milestone) | NOT_STARTED | | |
 | 8 - Death/downed outcome | NOT_STARTED | | |
+| 9 - Equipment & Consumables | DONE | state_manager.py, combat_manager.py, character_creator.py, item_catalog.json, phase_equipment_tests.py | Implemented equip_item, unequip_item, get_active_effects, _compute_ac, use_consumable per spec Section 7b. combat_manager._player_attacks() updated to query equipped weapons from catalog. Bugfix: player attack_bonus was ignoring proficiency_bonus and ability modifier (STR or max(STR, DEX) for finesse weapons like dagger/rapier). Added "finesse": true to rapier/dagger in item_catalog.json and updated _player_attacks() to add prof + stat mod. DoD: 34/34 tests (incl. attack_bonus regression) + 135/135 phase4 tests + 45/45 phase3 tests + 57/57 phase5 tests passed. |
 | 9 - XP/Leveling | NOT_STARTED | | |
 | 9 - Shop/Economy | NOT_STARTED | | |
 | 9 - Spellcasting | NOT_STARTED | | |

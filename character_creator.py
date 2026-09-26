@@ -117,8 +117,9 @@ def compute_max_hp(class_id: str, con_score: int, level: int = 1) -> int:
 def compute_ac(class_id: str, stats: Dict[str, int], equipped_items: list = None) -> int:
     """
     Compute base AC from class armor proficiency + equipped items.
-    Simplified for character creation: unarmored = 10 + DEX mod.
-    Actual item effects applied by state_manager at runtime.
+    Simplified for level-1 character creation.
+    NOTE: state_manager._compute_ac() is the source of truth for every AC change
+    after creation at runtime.
     """
     dex_mod = get_modifier(stats.get("DEX", 10))
     classes = _load_catalog("classes_catalog.json")

@@ -62,6 +62,249 @@ MAX_BACKUPS      = 3
 # ─── Concentration check DC floor (spec Section 8 / PART 5a) ─────────────────
 CONCENTRATION_DC_FLOOR = 10
 
+# ─── Item Catalog Loader (spec Section 7b) ────────────────────────────────────
+_CATALOG_DIR = os.path.dirname(os.path.abspath(__file__))
+_item_catalog: Optional[Dict[str, Any]] = None
+
+def _get_item_catalog() -> Dict[str, Any]:
+    global _item_catalog
+    if _item_catalog is None:
+        try:
+            path = os.path.join(_CATALOG_DIR, "item_catalog.json")
+            with open(path, "r", encoding="utf-8") as f:
+                _item_catalog = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to load item_catalog.json: {e}")
+            _item_catalog = {}
+    return _item_catalog
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# EQUIPMENT & CONSUMABLES SYSTEM (spec Section 7b)
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _compute_ac(character_state: Dict[str, Any]) -> int:
+    """
+    Compute total Armor Class (AC) from equipped items + DEX modifier.
+    Spec Section 7b:
+    - Base AC comes from equipped chest item's ac_base (or 10 if unarmored).
+    - DEX mod is added if unarmored or if chest armor's stat_mod == "DEX".
+    - Adds sum of ac_bonus from all equipped items (shield, cloak, etc.).
+    """
+    catalog = _get_item_catalog()
+    inventory = character_state.get("inventory", [])
+    stats = character_state.get("stats", {})
+    dex_mod = get_modifier(stats.get("DEX", 10))
+
+    equipped_chest = None
+    ac_bonus_total = 0
+
+    for item in inventory:
+        if isinstance(item, dict) and item.get("equipped") is True:
+            item_id = item.get("item_id")
+            info = catalog.get(item_id, {})
+            slot = info.get("slot")
+            effects = info.get("effects", {})
+
+            if slot == "chest":
+                equipped_chest = info
+
+            if "ac_bonus" in effects:
+                ac_bonus_total += effects.get("ac_bonus", 0)
+
+    if equipped_chest is not None:
+        chest_effects = equipped_chest.get("effects", {})
+        base_ac = chest_effects.get("ac_base", 10)
+        stat_mod = chest_effects.get("stat_mod")
+        if stat_mod == "DEX":
+            total_ac = base_ac + dex_mod + ac_bonus_total
+        else:
+            total_ac = base_ac + ac_bonus_total
+    else:
+        # Unarmored: 10 + DEX mod
+        total_ac = 10 + dex_mod + ac_bonus_total
+
+    return total_ac
+
+
+def get_active_effects(character_state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Aggregate all effects from currently-equipped items in character inventory.
+    Spec Section 7b: Single source of truth for equipment effects queried by
+    combat_manager and validation.py.
+
+    Returns dict like:
+      {
+        "ac_bonus_total": 3,
+        "saving_throw_bonus": 1,
+        "attack_bonus": 0,
+        "skill_bonus": {"Sleight of Hand": 2},
+        "enables_spellcasting": True
+      }
+    """
+    catalog = _get_item_catalog()
+    inventory = character_state.get("inventory", [])
+
+    ac_bonus_total = 0
+    saving_throw_bonus = 0
+    attack_bonus = 0
+    skill_bonus: Dict[str, int] = {}
+    enables_spellcasting = False
+
+    for item in inventory:
+        if isinstance(item, dict) and item.get("equipped") is True:
+            item_id = item.get("item_id")
+            info = catalog.get(item_id, {})
+            effects = info.get("effects", {})
+
+            if "ac_bonus" in effects:
+                ac_bonus_total += effects["ac_bonus"]
+            if "saving_throw_bonus" in effects:
+                saving_throw_bonus += effects["saving_throw_bonus"]
+            if "attack_bonus" in effects:
+                attack_bonus += effects["attack_bonus"]
+            if "enables_spellcasting" in effects and effects["enables_spellcasting"]:
+                enables_spellcasting = True
+            if "skill_bonus" in effects and isinstance(effects["skill_bonus"], dict):
+                for sk, bon in effects["skill_bonus"].items():
+                    skill_bonus[sk] = skill_bonus.get(sk, 0) + bon
+
+    return {
+        "ac_bonus_total": ac_bonus_total,
+        "saving_throw_bonus": saving_throw_bonus,
+        "attack_bonus": attack_bonus,
+        "skill_bonus": skill_bonus,
+        "enables_spellcasting": enables_spellcasting,
+    }
+
+
+def equip_item(item_id: str, character_state: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    Equip an item from character inventory.
+    Spec Section 7b:
+    - Fail if not carried, or if item type is not 'wearable' or 'weapon'.
+    - If another equipped item occupies the same slot, unequip it first.
+    - Set target item's 'equipped': True.
+    - Recompute character_state['ac'] in place.
+    - Return (True, "") or (False, reason). Never partially apply.
+    """
+    inventory = character_state.get("inventory", [])
+    target_item = None
+    for item in inventory:
+        if isinstance(item, dict) and item.get("item_id") == item_id:
+            target_item = item
+            break
+
+    if target_item is None:
+        return False, f"Item '{item_id}' not found in inventory."
+
+    catalog = _get_item_catalog()
+    item_info = catalog.get(item_id)
+    if not item_info:
+        return False, f"Item '{item_id}' not found in item catalog."
+
+    item_type = item_info.get("type")
+    if item_type not in ("wearable", "weapon"):
+        return False, f"Item '{item_id}' of type '{item_type}' cannot be equipped."
+
+    target_slot = item_info.get("slot")
+    if target_slot:
+        for other_item in inventory:
+            if isinstance(other_item, dict) and other_item is not target_item and other_item.get("equipped") is True:
+                other_id = other_item.get("item_id")
+                other_info = catalog.get(other_id, {})
+                if other_info.get("slot") == target_slot:
+                    other_item["equipped"] = False
+
+    target_item["equipped"] = True
+    character_state["ac"] = _compute_ac(character_state)
+    logger.debug(f"equip_item: equipped '{item_id}' in slot '{target_slot}'. New AC: {character_state['ac']}.")
+    return True, ""
+
+
+def unequip_item(item_id: str, character_state: Dict[str, Any]) -> Tuple[bool, str]:
+    """
+    Unequip an item in character inventory.
+    Spec Section 7b:
+    - Set 'equipped': False (no-op success if already unequipped).
+    - Recompute character_state['ac'].
+    - Return (True, "") or (False, reason).
+    """
+    inventory = character_state.get("inventory", [])
+    target_item = None
+    for item in inventory:
+        if isinstance(item, dict) and item.get("item_id") == item_id:
+            target_item = item
+            break
+
+    if target_item is None:
+        return False, f"Item '{item_id}' not found in inventory."
+
+    target_item["equipped"] = False
+    character_state["ac"] = _compute_ac(character_state)
+    logger.debug(f"unequip_item: unequipped '{item_id}'. New AC: {character_state['ac']}.")
+    return True, ""
+
+
+def use_consumable(item_id: str, character_state: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
+    """
+    Use a consumable item (e.g. healing potion) from inventory.
+    Spec Section 7b:
+    - Works identically in or out of combat.
+    - Validate item exists in inventory, type == 'consumable'.
+    - Apply effect (e.g. 'heal': roll_dice(effects['heal']), add to HP capped at max).
+    - Decrement quantity; remove item from inventory if quantity hits 0.
+    - Return (True, "", {"healed": N, "hp_now": X}) or (False, reason, {}).
+    """
+    inventory = character_state.get("inventory", [])
+    target_item = None
+    for item in inventory:
+        if isinstance(item, dict) and item.get("item_id") == item_id:
+            target_item = item
+            break
+
+    if target_item is None:
+        return False, f"Item '{item_id}' not found in inventory.", {}
+
+    catalog = _get_item_catalog()
+    item_info = catalog.get(item_id)
+    if not item_info:
+        return False, f"Item '{item_id}' not found in item catalog.", {}
+
+    if item_info.get("type") != "consumable":
+        return False, f"Item '{item_id}' is not a consumable item.", {}
+
+    qty = target_item.get("quantity", 1)
+    if qty <= 0:
+        return False, f"Item '{item_id}' quantity is 0.", {}
+
+    effects = item_info.get("effects", {})
+    result_dict: Dict[str, Any] = {}
+
+    if "heal" in effects:
+        from combat_manager import roll_dice
+        heal_expr = effects["heal"]
+        heal_amount = roll_dice(heal_expr)
+
+        hp = character_state.setdefault("hp", {"current": 10, "max": 10})
+        old_hp = hp.get("current", 0)
+        max_hp = hp.get("max", 10)
+        new_hp = min(max_hp, old_hp + heal_amount)
+        actual_healed = new_hp - old_hp
+        hp["current"] = new_hp
+
+        result_dict["healed"] = actual_healed
+        result_dict["hp_now"] = new_hp
+
+    # Decrement quantity and remove if 0
+    target_item["quantity"] = qty - 1
+    if target_item["quantity"] <= 0:
+        inventory.remove(target_item)
+
+    logger.debug(f"use_consumable: used '{item_id}'. Result: {result_dict}.")
+    return True, "", result_dict
+
+
 
 # ════════════════════════════════════════════════════════════════════════════════
 # SAVE FILE I/O

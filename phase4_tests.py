@@ -64,7 +64,7 @@ def fresh_player():
         "death_saves": {"success": 0, "fail": 0},
         "status": "normal",
         "gold": 10,
-        "inventory": [{"item_id": "dagger", "quantity": 1}],
+        "inventory": [{"item_id": "dagger", "equipped": True, "quantity": 1}],
         "active_conditions": [],
         "roll_log": [],
     }
@@ -738,7 +738,7 @@ p_attack = cs_rr["player_combatant"]["attacks"][0]
 player_r1 = cm.resolve_attack(cs_rr["player_combatant"], goblin1, p_attack)
 check("Round 1 player hits goblin1 (roll=15+2 vs AC13)", player_r1["hit"] is True)
 
-r1_other_rolls = iter([14, 3, 4, 3])
+r1_other_rolls = iter([14, 3, 4, 3, 3])
 cm._roll_d20 = lambda: next(r1_other_rolls)
 rr1 = cm.resolve_round(cs_rr, player_attack_result=player_r1)
 
