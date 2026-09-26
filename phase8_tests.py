@@ -149,15 +149,68 @@ class TestPhase8DownedOutcome(unittest.TestCase):
         combat_manager.start_combat(["goblin_scout"], self.character_state, self.world_state)
         cs = self.world_state["combat_state"]
 
-        # Force player HP to 0
+        # Force player HP to 0 & death saves to 3 fails
         self.character_state["hp"]["current"] = 0
         cs["player_combatant"]["hp"]["current"] = 0
+        cs["player_combatant"]["death_saves"]["fail"] = 3
 
         # Check combat end triggers player_defeat and resolve_downed_outcome without crashing
         outcome = combat_manager.check_combat_end(cs, self.world_state)
         self.assertEqual(outcome, "player_defeat")
         self.assertIn("downed_outcome", cs)
         self.assertIn(cs["downed_outcome"]["outcome"], ["robbed_and_left", "captured", "rescued_by_npc"])
+
+    def test_multi_round_death_save_accumulation_integration(self):
+        # Reset character HP to 0 and death_saves to 0 fails
+        self.character_state["hp"]["current"] = 0
+        self.character_state["death_saves"] = {"success": 0, "fail": 0}
+        
+        # Start combat
+        combat_manager.start_combat(["goblin_scout"], self.character_state, self.world_state)
+        cs = self.world_state["combat_state"]
+        cs["player_combatant"]["hp"]["current"] = 0
+        cs["player_combatant"]["death_saves"] = {"success": 0, "fail": 0}
+
+        # Mock resolve_death_save to return fail=1 (not exhausted) on round 1
+        with patch("state_manager.resolve_death_save") as mock_ds:
+            mock_ds.return_value = {"roll": 8, "dc": 10, "success": False, "critical": False, "fumble": False, "stabilized": False, "exhausted": False}
+            cs["player_combatant"]["death_saves"]["fail"] = 1
+            
+            res1 = combat_manager.resolve_round(cs, world_state=self.world_state)
+            # On round 1 with 1 fail, combat must NOT end
+            self.assertIsNone(res1["combat_outcome"])
+            self.assertEqual(cs["status"], "active")
+            self.assertNotIn("downed_outcome", cs)
+
+        # Mock resolve_death_save to hit 3 fails (exhausted) on round 2
+        with patch("state_manager.resolve_death_save") as mock_ds2:
+            mock_ds2.return_value = {"roll": 8, "dc": 10, "success": False, "critical": False, "fumble": False, "stabilized": False, "exhausted": True}
+            cs["player_combatant"]["death_saves"]["fail"] = 3
+            
+            res2 = combat_manager.resolve_round(cs, world_state=self.world_state)
+            # On round 2 with 3 fails, combat MUST end with player_defeat and resolve downed outcome
+            self.assertEqual(res2["combat_outcome"], "player_defeat")
+            self.assertEqual(cs["status"], "ended")
+            self.assertIn("downed_outcome", cs)
+
+    def test_check_combat_end_idempotency(self):
+        combat_manager.start_combat(["goblin_scout"], self.character_state, self.world_state)
+        cs = self.world_state["combat_state"]
+        self.character_state["hp"]["current"] = 0
+        cs["player_combatant"]["hp"]["current"] = 0
+        cs["player_combatant"]["death_saves"]["fail"] = 3
+
+        # Call check_combat_end first time
+        with patch("state_manager.resolve_downed_outcome", wraps=state_manager.resolve_downed_outcome) as mock_rdo:
+            outcome1 = combat_manager.check_combat_end(cs, self.world_state)
+            self.assertEqual(outcome1, "player_defeat")
+            self.assertEqual(mock_rdo.call_count, 1)
+
+            # Call check_combat_end second time
+            outcome2 = combat_manager.check_combat_end(cs, self.world_state)
+            self.assertEqual(outcome2, "player_defeat")
+            # Must NOT re-call resolve_downed_outcome
+            self.assertEqual(mock_rdo.call_count, 1)
 
 
 def json_clone(obj):

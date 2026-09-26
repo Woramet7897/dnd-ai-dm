@@ -311,6 +311,7 @@ def start_combat(
         "attacks":          _player_attacks(player_state),
         "initiative":       None,
         "active_conditions": copy.deepcopy(player_state.get("active_conditions", [])),
+        "death_saves":      copy.deepcopy(player_state.get("death_saves", {"success": 0, "fail": 0})),
     }
 
     # ── Build companion combatants ────────────────────────────────────────────
@@ -790,28 +791,34 @@ def check_combat_end(combat_state: Dict[str, Any], world_state: Optional[Dict[st
 
     Returns:
         'player_victory'  — all enemies are downed.
-        'player_defeat'   — player is downed (triggers resolve_downed_outcome, non-permadeath).
-        None              — combat continues.
+        'player_defeat'   — player death save failures >= 3 or downed_outcome present.
+        None              — combat continues (e.g. player at 0 HP still accumulating death saves).
     """
-    enemies    = combat_state.get("enemies", [])
-    player_c   = combat_state.get("player_combatant", {})
+    if combat_state.get("status") == "ended":
+        return combat_state.get("outcome")
 
-    all_enemies_down = all(e.get("hp", {}).get("current", 0) <= 0 for e in enemies)
-    player_down      = player_c.get("hp", {}).get("current", 0) <= 0
+    enemies  = combat_state.get("enemies", [])
+    player_c = combat_state.get("player_combatant", {})
 
+    all_enemies_down = len(enemies) > 0 and all(e.get("hp", {}).get("current", 0) <= 0 for e in enemies)
+    
     if all_enemies_down:
         combat_state["status"]  = "ended"
         combat_state["outcome"] = "player_victory"
         logger.debug("check_combat_end: player_victory — all enemies downed.")
         return "player_victory"
 
-    if player_down:
+    player_fails = player_c.get("death_saves", {}).get("fail", 0)
+    has_downed_outcome = combat_state.get("downed_outcome") is not None
+
+    if player_fails >= 3 or has_downed_outcome:
         combat_state["status"]  = "ended"
         combat_state["outcome"] = "player_defeat"
-        logger.debug("check_combat_end: player_defeat — player downed.")
-        import state_manager
-        downed_res = state_manager.resolve_downed_outcome(player_c, combat_state, world_state)
-        combat_state["downed_outcome"] = downed_res
+        if not has_downed_outcome:
+            import state_manager
+            downed_res = state_manager.resolve_downed_outcome(player_c, combat_state, world_state)
+            combat_state["downed_outcome"] = downed_res
+        logger.debug("check_combat_end: player_defeat — player death save fails >= 3 or downed_outcome present.")
         return "player_defeat"
 
     return None

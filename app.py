@@ -353,7 +353,8 @@ def render_playing_view():
 
         with col_c2:
             st.markdown("##### Combat Actions")
-            if st.button("⚔️ Resolve Combat Round", use_container_width=True, type="primary"):
+            btn_disabled = (cs.get("status") == "ended") or (cs.get("downed_outcome") is not None)
+            if st.button("⚔️ Resolve Combat Round", disabled=btn_disabled, use_container_width=True, type="primary"):
                 # 1. Resolve full combat round (Python math)
                 res_round = combat_manager.resolve_round(cs, world)
                 narration_block = res_round["narration_block"]
@@ -377,14 +378,14 @@ def render_playing_view():
                 st.session_state["history_buffer"].append({"role": "assistant", "content": narration_text})
 
                 # 4. Check combat end
-                if outcome == "victory":
+                if outcome == "player_victory":
                     combat_manager.end_combat(world)
                     st.success("🎉 Combat Victory! All enemies have been defeated.")
                     st.session_state["narrative_log"].append({
                         "role": "assistant",
                         "content": "🏆 **Victory!** You defeated your foes and stand triumphant."
                     })
-                elif outcome == "defeat":
+                elif outcome == "player_defeat":
                     out_res = cs.get("downed_outcome") or state_manager.resolve_downed_outcome(player, cs, world)
                     combat_manager.end_combat(world)
                     
@@ -396,7 +397,7 @@ def render_playing_view():
                     elif out_name == "captured":
                         msg = "⚠️ **Defeat!** You were captured by your enemies! You are now held captive."
                     else:  # rescued_by_npc
-                        msg = f"⚠️ **Defeat!** An wanderer rescued you from death! Restored to {pen.get('hp_restored', 1)} HP."
+                        msg = f"⚠️ **Defeat!** A wanderer rescued you from death! Restored to {pen.get('hp_restored', 1)} HP."
 
                     st.error(msg)
                     st.session_state["narrative_log"].append({
