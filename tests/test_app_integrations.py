@@ -6,8 +6,15 @@ Verifies all systems wired into app.py:
 3. Spellcasting resolution (attack_roll, attack_save, heal) & spell slots
 4. Room loot collection & consumption
 5. Town shops buy/sell with gold & open periods
-6. Extraction result routing (combat_start, world_updates, requires_roll)
-7. Full combat round resolution with weapon and spell attacks
+6. Full combat round resolution with weapon and spell attacks
+7. app.resolve_player_combat_action() execution & argument integrity:
+   - Weapon attack routing with non-swapped arguments to resolve_round
+   - Weapon action routing (cleave/concussive/hamstring)
+   - Shove action routing (knock prone / push)
+   - Spellcast routing with slot deduction
+   - Stunned player skips attack
+   - Cast failure error handling
+   - Explicit verification that player_attack_result and world_state are NEVER swapped
 """
 
 import math
@@ -154,6 +161,167 @@ class TestAppIntegrations(unittest.TestCase):
         res_round = combat_manager.resolve_round(combat_state=cs, player_attack_result=spell_res, world_state=self.world)
         self.assertIn("narration_block", res_round)
         self.assertIn("Ezren", res_round["narration_block"])
+
+    def test_app_resolve_player_combat_action_weapon_attack(self):
+        """Verify app.resolve_player_combat_action correctly routes weapon attack without argument swapping."""
+        cs = combat_manager.start_combat(["goblin_scout"], self.fighter, self.world)
+        player_c = cs["player_combatant"]
+        target = cs["enemies"][0]
+        attack = {"name": "Longsword", "damage_dice": "1d8", "attack_bonus": 5, "damage_type": "slashing"}
+
+        with patch.object(combat_manager, "resolve_round", wraps=combat_manager.resolve_round) as mock_rr:
+            atk_res, res_round = app.resolve_player_combat_action(
+                action_type="⚔️ Weapon Attack",
+                player_c=player_c,
+                selected_target=target,
+                selected_attack=attack,
+                cs=cs,
+                player=self.fighter,
+                world=self.world,
+            )
+
+            # Assert resolve_round was called exactly once with non-swapped arguments
+            mock_rr.assert_called_once()
+            called_kwargs = mock_rr.call_args.kwargs
+            self.assertEqual(called_kwargs["combat_state"], cs)
+            self.assertEqual(called_kwargs["player_attack_result"], atk_res)
+            self.assertEqual(called_kwargs["world_state"], self.world)
+            # Crucial check: verify world_state and player_attack_result were NOT swapped!
+            self.assertNotEqual(called_kwargs["player_attack_result"], self.world)
+            self.assertNotEqual(called_kwargs["world_state"], atk_res)
+
+            self.assertIsNotNone(atk_res)
+            self.assertIn("hit", atk_res)
+            self.assertIn("narration_block", res_round)
+
+    def test_app_resolve_player_combat_action_weapon_action(self):
+        """Verify app.resolve_player_combat_action routes weapon actions (Cleave/Concussive/Hamstring)."""
+        cs = combat_manager.start_combat(["goblin_scout", "goblin_warrior"], self.fighter, self.world)
+        player_c = cs["player_combatant"]
+        target = cs["enemies"][0]
+        adj_target = cs["enemies"][1]
+        attack = {"name": "Longsword", "damage_dice": "1d8", "attack_bonus": 5, "damage_type": "slashing"}
+
+        with patch.object(combat_manager, "resolve_round", wraps=combat_manager.resolve_round) as mock_rr:
+            atk_res, res_round = app.resolve_player_combat_action(
+                action_type="💥 Weapon Action",
+                player_c=player_c,
+                selected_target=target,
+                selected_attack=attack,
+                selected_adj_target=adj_target,
+                cs=cs,
+                player=self.fighter,
+                world=self.world,
+            )
+
+            mock_rr.assert_called_once()
+            called_kwargs = mock_rr.call_args.kwargs
+            self.assertEqual(called_kwargs["combat_state"], cs)
+            self.assertEqual(called_kwargs["player_attack_result"], atk_res)
+            self.assertEqual(called_kwargs["world_state"], self.world)
+            self.assertNotEqual(called_kwargs["player_attack_result"], self.world)
+
+            self.assertIsNotNone(atk_res)
+            self.assertIn("weapon_action_name", atk_res)
+            self.assertEqual(atk_res.get("action_type"), "weapon_action")
+
+    def test_app_resolve_player_combat_action_shove(self):
+        """Verify app.resolve_player_combat_action routes shove action."""
+        cs = combat_manager.start_combat(["goblin_scout"], self.fighter, self.world)
+        player_c = cs["player_combatant"]
+        target = cs["enemies"][0]
+
+        with patch.object(combat_manager, "resolve_round", wraps=combat_manager.resolve_round) as mock_rr:
+            atk_res, res_round = app.resolve_player_combat_action(
+                action_type="🫸 Shove",
+                player_c=player_c,
+                selected_target=target,
+                selected_shove_type="knock_prone",
+                cs=cs,
+                player=self.fighter,
+                world=self.world,
+            )
+
+            mock_rr.assert_called_once()
+            called_kwargs = mock_rr.call_args.kwargs
+            self.assertEqual(called_kwargs["player_attack_result"], atk_res)
+            self.assertEqual(called_kwargs["world_state"], self.world)
+            self.assertNotEqual(called_kwargs["player_attack_result"], self.world)
+
+            self.assertIsNotNone(atk_res)
+            self.assertIn("success", atk_res)
+            self.assertIsInstance(atk_res.get("success"), bool)
+            self.assertEqual(atk_res.get("action_type"), "shove")
+
+    def test_app_resolve_player_combat_action_cast_spell(self):
+        """Verify app.resolve_player_combat_action routes cast_spell."""
+        cs = combat_manager.start_combat(["goblin_scout"], self.wizard, self.world)
+        player_c = cs["player_combatant"]
+        target = cs["enemies"][0]
+
+        with patch.object(combat_manager, "resolve_round", wraps=combat_manager.resolve_round) as mock_rr:
+            atk_res, res_round = app.resolve_player_combat_action(
+                action_type="🪄 Cast Spell",
+                player_c=player_c,
+                selected_target=target,
+                selected_spell_id="magic_missile",
+                cs=cs,
+                player=self.wizard,
+                world=self.world,
+            )
+
+            mock_rr.assert_called_once()
+            called_kwargs = mock_rr.call_args.kwargs
+            self.assertEqual(called_kwargs["player_attack_result"], atk_res)
+            self.assertEqual(called_kwargs["world_state"], self.world)
+            self.assertNotEqual(called_kwargs["player_attack_result"], self.world)
+
+            self.assertIsNotNone(atk_res)
+            self.assertTrue(atk_res.get("success"))
+
+    def test_app_resolve_player_combat_action_stunned_skips_attack(self):
+        """Verify player with stunned condition skips attack and passes skipped result to resolve_round."""
+        cs = combat_manager.start_combat(["goblin_scout"], self.fighter, self.world)
+        player_c = cs["player_combatant"]
+        target = cs["enemies"][0]
+        combat_manager.apply_condition(player_c, "stunned", duration=1)
+        attack = {"name": "Longsword", "damage_dice": "1d8", "attack_bonus": 5, "damage_type": "slashing"}
+
+        atk_res, res_round = app.resolve_player_combat_action(
+            action_type="⚔️ Weapon Attack",
+            player_c=player_c,
+            selected_target=target,
+            selected_attack=attack,
+            cs=cs,
+            player=self.fighter,
+            world=self.world,
+        )
+
+        self.assertIsNotNone(atk_res)
+        self.assertTrue(atk_res.get("skipped"))
+        self.assertEqual(atk_res.get("reason"), "stunned")
+        self.assertIn("narration_block", res_round)
+
+    def test_app_resolve_player_combat_action_cast_failure_returns_error(self):
+        """Verify spell cast failure (e.g. out of slots) returns error dict without corrupting round."""
+        cs = combat_manager.start_combat(["goblin_scout"], self.wizard, self.world)
+        player_c = cs["player_combatant"]
+        target = cs["enemies"][0]
+        # Exhaust slots
+        self.wizard["spell_slots"]["1"]["current"] = 0
+
+        atk_res, res_round = app.resolve_player_combat_action(
+            action_type="🪄 Cast Spell",
+            player_c=player_c,
+            selected_target=target,
+            selected_spell_id="magic_missile",
+            cs=cs,
+            player=self.wizard,
+            world=self.world,
+        )
+
+        self.assertFalse(atk_res.get("success"))
+        self.assertIn("error", res_round)
 
 
 if __name__ == "__main__":

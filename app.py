@@ -662,6 +662,82 @@ def render_sidebar():
             st.rerun()
 
 
+def resolve_player_combat_action(
+    action_type: str,
+    player_c: Dict[str, Any],
+    selected_target: Optional[Dict[str, Any]],
+    selected_attack: Optional[Dict[str, Any]] = None,
+    selected_spell_id: Optional[str] = None,
+    selected_shove_type: Optional[str] = "push",
+    selected_adj_target: Optional[Dict[str, Any]] = None,
+    cs: Optional[Dict[str, Any]] = None,
+    player: Optional[Dict[str, Any]] = None,
+    world: Optional[Dict[str, Any]] = None,
+) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Build player_attack_result and execute combat_manager.resolve_round().
+    Standalone and importable for automated testing (protects against parameter swapping).
+
+    Returns:
+        Tuple of (player_attack_result, round_result_dict)
+    """
+    player_alive = player_c.get("hp", {}).get("current", 0) > 0 if player_c else False
+    player_attack_result = None
+
+    if player_alive and selected_target:
+        p_conds = combat_manager._get_condition_set(player_c)
+        if "stunned" in p_conds:
+            player_attack_result = {
+                "attacker_id": player_c.get("id", "player"),
+                "attacker_name": player_c.get("name", "Player"),
+                "skipped": True,
+                "reason": "stunned",
+            }
+        elif ("Weapon Action" in action_type or action_type == "weapon_action") and selected_attack:
+            w_res = combat_manager.resolve_weapon_action(
+                attacker=player_c,
+                target=selected_target,
+                attack=selected_attack,
+                combat_state=cs,
+                adjacent_target=selected_adj_target,
+            )
+            player_attack_result = w_res
+        elif "Shove" in action_type or action_type == "shove":
+            shove_res = combat_manager.resolve_shove(
+                attacker=player_c,
+                target=selected_target,
+                combat_state=cs,
+                shove_type=selected_shove_type or "push",
+            )
+            player_attack_result = shove_res
+        elif ("Cast Spell" in action_type or action_type in ("spell", "cast_spell")) and selected_spell_id:
+            cast_res = state_manager.cast_spell(
+                caster=player_c,
+                target=selected_target,
+                spell_id=selected_spell_id,
+                character_state=player or {},
+                world_state=world,
+            )
+            if not cast_res.get("success"):
+                return cast_res, {"error": cast_res.get("reason", "Failed to cast spell.")}
+            player_attack_result = cast_res
+        elif selected_attack:
+            player_attack_result = combat_manager.resolve_attack(
+                player_c,
+                selected_target,
+                selected_attack,
+                combat_state=cs,
+            )
+
+    # 2. Resolve full combat round (Python math)
+    res_round = combat_manager.resolve_round(
+        combat_state=cs,
+        player_attack_result=player_attack_result,
+        world_state=world,
+    )
+    return player_attack_result, res_round
+
+
 def render_playing_view():
     player = st.session_state.get("player_state")
     world = st.session_state.get("world_state")
@@ -868,60 +944,23 @@ def render_playing_view():
                 button_label = "⚔️ Attack & End Round"
 
             if st.button(button_label, disabled=btn_disabled, use_container_width=True, type="primary"):
-                # 1. Resolve player's attack, shove, or spell if conscious
-                player_attack_result = None
-                if player_alive and selected_target:
-                    p_conds = combat_manager._get_condition_set(player_c)
-                    if "stunned" in p_conds:
-                        player_attack_result = {
-                            "attacker_id": player_c.get("id", "player"),
-                            "attacker_name": player_c.get("name", "Player"),
-                            "skipped": True,
-                            "reason": "stunned",
-                        }
-                    elif action_type == "💥 Weapon Action" and selected_attack:
-                        w_res = combat_manager.resolve_weapon_action(
-                            attacker=player_c,
-                            target=selected_target,
-                            attack=selected_attack,
-                            combat_state=cs,
-                            adjacent_target=selected_adj_target,
-                        )
-                        player_attack_result = w_res
-                    elif action_type == "🫸 Shove":
-                        shove_res = combat_manager.resolve_shove(
-                            attacker=player_c,
-                            target=selected_target,
-                            combat_state=cs,
-                            shove_type=selected_shove_type,
-                        )
-                        player_attack_result = shove_res
-                    elif action_type == "🪄 Cast Spell" and selected_spell_id:
-                        cast_res = state_manager.cast_spell(
-                            caster=player_c,
-                            target=selected_target,
-                            spell_id=selected_spell_id,
-                            character_state=player,
-                            world_state=world,
-                        )
-                        if not cast_res.get("success"):
-                            st.error(cast_res.get("reason", "Failed to cast spell."))
-                            st.stop()
-                        player_attack_result = cast_res
-                    elif selected_attack:
-                        player_attack_result = combat_manager.resolve_attack(
-                            player_c,
-                            selected_target,
-                            selected_attack,
-                            combat_state=cs,
-                        )
-
-                # 2. Resolve full combat round (Python math)
-                res_round = combat_manager.resolve_round(
-                    combat_state=cs,
-                    player_attack_result=player_attack_result,
-                    world_state=world,
+                # 1. Resolve player's combat action & round
+                player_attack_result, res_round = resolve_player_combat_action(
+                    action_type=action_type,
+                    player_c=player_c,
+                    selected_target=selected_target,
+                    selected_attack=selected_attack,
+                    selected_spell_id=selected_spell_id,
+                    selected_shove_type=selected_shove_type,
+                    selected_adj_target=selected_adj_target,
+                    cs=cs,
+                    player=player,
+                    world=world,
                 )
+                if res_round.get("error"):
+                    st.error(res_round["error"])
+                    st.stop()
+
                 combat_manager.sync_player_state(player_c)
                 narration_block = res_round["narration_block"]
                 outcome = res_round["combat_outcome"]
