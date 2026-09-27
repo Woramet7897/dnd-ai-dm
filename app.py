@@ -99,12 +99,26 @@ def apply_custom_css():
         transform: translateY(-1px);
     }
 
-    /* Chat message container */
+    /* Chat message container (Modern Gemini / Claude / ChatGPT style) */
     div[data-testid="stChatMessage"] {
-        background: rgba(19, 27, 46, 0.55);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 12px;
-        margin-bottom: 8px;
+        background: rgba(19, 27, 46, 0.65);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 14px;
+        margin-bottom: 12px;
+        padding: 12px 18px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        transition: all 0.2s ease;
+    }
+    div[data-testid="stChatMessage"]:hover {
+        border-color: rgba(225, 29, 72, 0.35);
+    }
+    div[data-testid="stChatMessage"]:has(div[data-testid="chatAvatarIcon-user"]) {
+        background: rgba(30, 41, 59, 0.6);
+        border-left: 3px solid #38bdf8;
+    }
+    div[data-testid="stChatMessage"]:has(div[data-testid="chatAvatarIcon-assistant"]) {
+        background: rgba(19, 27, 46, 0.75);
+        border-left: 3px solid #f43f5e;
     }
 
     /* Sliders track */
@@ -140,12 +154,16 @@ def init_session_state():
 
 
 def auto_save():
-    """Save both player and world states atomically."""
+    """Save both player and world states atomically, including narrative log and suggestions."""
     char_state = st.session_state.get("player_state")
     world_state = st.session_state.get("world_state")
     if char_state and world_state:
         char_name = char_state.get("name")
         if char_name:
+            if "narrative_log" in st.session_state:
+                world_state["narrative_log"] = list(st.session_state["narrative_log"])
+            if "action_suggestions" in st.session_state:
+                world_state["action_suggestions"] = list(st.session_state["action_suggestions"])
             state_manager.save_character(char_name, char_state)
             state_manager.save_world(char_name, world_state)
 
@@ -164,50 +182,66 @@ def list_saved_characters() -> List[str]:
 
 
 def load_game(char_name: str, client: Optional[Any] = None) -> bool:
-    """Load character and world state from disk."""
+    """Load character and world state from disk, restoring complete narrative history."""
     try:
         player = state_manager.load_character(char_name)
         world = state_manager.load_world(char_name)
+        state_manager._ensure_currency(player)
         st.session_state["player_state"] = player
         st.session_state["world_state"] = world
         st.session_state["current_char_name"] = char_name
 
-        # Initial welcome entry in narrative log if empty
+        saved_log = world.get("narrative_log")
+        saved_suggs = world.get("action_suggestions")
+        if saved_suggs:
+            st.session_state["action_suggestions"] = list(saved_suggs)
+
+        # Restore past narrative history
+        if saved_log:
+            st.session_state["narrative_log"] = list(saved_log)
+        else:
+            st.session_state["narrative_log"] = []
+
+        room = dungeon_manager.get_current_room(world)
+        room_name = room.get("name", "Unknown Location") if room else "Unknown"
+
+        # Session Recap on Load (spec Section 14a / Phase 10 Part 1)
+        recap_text = ""
+        recap_key = f"recap_generated_{char_name}"
+        if not st.session_state.get(recap_key):
+            st.session_state[recap_key] = True
+            mm = memory_manager.MemoryManager(char_name)
+            major_ids = mm.get_all_major_lore_ids()
+            if len(major_ids) >= 2:
+                major_col = mm._get_major_collection()
+                docs_res = major_col.get(where={"character": {"$eq": char_name}}, include=["documents"])
+                docs = docs_res.get("documents", [])
+                if len(docs) >= 2:
+                    major_entries = [{"text": d, "type": "major"} for d in docs[-3:]]
+                    res = llm_handler.generate_narrative_response(
+                        user_input="Please provide a concise 'Previously, in your story...' recap paragraph summarizing our major past chapters.",
+                        player_state=player,
+                        world_state=world,
+                        lore_entries=major_entries,
+                        client=client,
+                    )
+                    recap_narrative = res.get("narrative", "")
+                    if res.get("suggestions"):
+                        st.session_state["action_suggestions"] = res["suggestions"]
+                    if recap_narrative:
+                        if not recap_narrative.startswith("Previously"):
+                            recap_narrative = f"Previously, in your story...\n{recap_narrative}"
+                        recap_text = f"\n\n📖 **Session Recap:**\n{recap_narrative}"
+
         if not st.session_state["narrative_log"]:
-            room = dungeon_manager.get_current_room(world)
-            room_name = room.get("name", "Unknown Location") if room else "Unknown"
-
-            # Session Recap on Load (spec Section 14a / Phase 10 Part 1)
-            recap_text = ""
-            recap_key = f"recap_generated_{char_name}"
-            if not st.session_state.get(recap_key):
-                st.session_state[recap_key] = True
-                mm = memory_manager.MemoryManager(char_name)
-                major_ids = mm.get_all_major_lore_ids()
-                if len(major_ids) >= 2:
-                    major_col = mm._get_major_collection()
-                    docs_res = major_col.get(where={"character": {"$eq": char_name}}, include=["documents"])
-                    docs = docs_res.get("documents", [])
-                    if len(docs) >= 2:
-                        major_entries = [{"text": d, "type": "major"} for d in docs[-3:]]
-                        res = llm_handler.generate_narrative_response(
-                            user_input="Please provide a concise 'Previously, in your story...' recap paragraph summarizing our major past chapters.",
-                            player_state=player,
-                            world_state=world,
-                            lore_entries=major_entries,
-                            client=client,
-                        )
-                        recap_narrative = res.get("narrative", "")
-                        if res.get("suggestions"):
-                            st.session_state["action_suggestions"] = res["suggestions"]
-                        if recap_narrative:
-                            if not recap_narrative.startswith("Previously"):
-                                recap_narrative = f"Previously, in your story...\n{recap_narrative}"
-                            recap_text = f"\n\n📖 **Session Recap:**\n{recap_narrative}"
-
             st.session_state["narrative_log"].append({
                 "role": "assistant",
                 "content": f"Loaded save for **{char_name}**. You are currently in **{room_name}**.{recap_text}"
+            })
+        elif recap_text:
+            st.session_state["narrative_log"].append({
+                "role": "assistant",
+                "content": f"📖 **Welcome back to your adventure, {char_name}!** You are currently in **{room_name}**.{recap_text}"
             })
         return True
     except Exception as e:
@@ -488,14 +522,8 @@ def render_landing_view():
                             "combat_state": None,
                         }
 
-                        state_manager.save_character(char_name.strip(), player)
-                        state_manager.save_world(char_name.strip(), world)
-
-                        st.session_state["player_state"] = player
-                        st.session_state["world_state"] = world
-                        st.session_state["current_char_name"] = char_name.strip()
                         intro_quote = cls_info.get("quote", "")
-                        st.session_state["narrative_log"] = [{
+                        init_log = [{
                             "role": "assistant",
                             "content": (
                                 f"🌅 **บทนำ: ก้าวแรกสู่ริเวอร์ไซด์ (Prologue: Arrival at Riverside Village)**\n\n"
@@ -511,11 +539,23 @@ def render_landing_view():
                                 f"**เจ้าต้องการมุ่งหน้าไปสำรวจที่ไหนก่อนดี?** *(สามารถคลิกปุ่มตัวเลือกแนะนำด้านล่าง หรือพิมพ์คำสั่งสิ่งที่อยากทำได้เลย)*"
                             ),
                         }]
-                        st.session_state["action_suggestions"] = [
+                        init_suggs = [
                             "เดินไปที่โรงเตี๊ยมเพื่อดูกระดานประกาศภารกิจ",
                             "แวะดูสินค้าที่ร้านค้าและโรงตีเหล็ก",
                             "พูดคุยสอบถามข่าวสารกับชาวบ้านในจัตุรัส",
                         ]
+
+                        world["narrative_log"] = list(init_log)
+                        world["action_suggestions"] = list(init_suggs)
+
+                        state_manager.save_character(char_name.strip(), player)
+                        state_manager.save_world(char_name.strip(), world)
+
+                        st.session_state["player_state"] = player
+                        st.session_state["world_state"] = world
+                        st.session_state["current_char_name"] = char_name.strip()
+                        st.session_state["narrative_log"] = list(init_log)
+                        st.session_state["action_suggestions"] = list(init_suggs)
 
                         st.success(f"สร้างตัวละคร '{char_name.strip()}' สำเร็จ!")
                         st.rerun()
@@ -1126,8 +1166,14 @@ def render_playing_view():
         st.toast(st.session_state["last_action_msg"])
         st.session_state["last_action_msg"] = None
 
-    # Story & Narrative Log
-    st.markdown("### 📜 Narrative Log")
+    # Story & Narrative Log Header
+    char_display_name = player.get("name", "Player") if player else "Player"
+    total_msgs = len(st.session_state.get("narrative_log", []))
+    col_nh, col_nc = st.columns([3, 1])
+    with col_nh:
+        st.markdown(f"### 📜 Narrative Log &bull; <span style='font-size: 1.05rem; color: #cbd5e1;'>{char_display_name}</span>", unsafe_allow_html=True)
+    with col_nc:
+        st.caption(f"💬 {total_msgs} ข้อความในบันทึก")
 
     # Auto-enhance initial prologue if needed for current session
     log = st.session_state.get("narrative_log", [])
@@ -1143,9 +1189,14 @@ def render_playing_view():
     with log_container:
         for entry in st.session_state["narrative_log"]:
             role = entry.get("role", "assistant")
-            icon = "🧑‍🌾" if role == "user" else "🎲"
-            with st.chat_message(role, avatar=icon):
-                st.markdown(entry.get("content", ""))
+            if role == "user":
+                with st.chat_message("user", avatar="🧑‍💼"):
+                    st.caption(f"**{char_display_name}**")
+                    st.markdown(entry.get("content", ""))
+            else:
+                with st.chat_message("assistant", avatar="🎲"):
+                    st.caption("**Dungeon Master AI**")
+                    st.markdown(entry.get("content", ""))
 
     combat_active = world.get("combat_state") is not None
 
