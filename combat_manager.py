@@ -544,6 +544,8 @@ def start_combat(
         "xp_current":       player_state["xp_current"],
         "level":            player_state["level"],
         "proficiency_bonus": player_state["proficiency_bonus"],
+        "proficient_skills": player_state.get("proficient_skills", []),
+        "has_high_ground":  player_state.get("has_high_ground", False),
         "_player_state":    player_state,                        # Reference to real character dict
     }
 
@@ -555,12 +557,23 @@ def start_combat(
         comp.setdefault("initiative", None)
         comp.setdefault("death_saves", {"success": 0, "fail": 0})
         comp.setdefault("hp", {"current": 10, "max": 10})
+        comp.setdefault("has_high_ground", False)
         companions.append(comp)  # SHARED BY REFERENCE — NO copy.deepcopy!
+
+    for enemy in enemies:
+        enemy.setdefault("has_high_ground", False)
 
     # ── Roll initiative for everyone ──────────────────────────────────────────
     all_combatants = [player_c] + companions + enemies
     roll_initiative(all_combatants)
     turn_order = [c["id"] for c in all_combatants]
+
+    room_hazards = []
+    if world_state:
+        import dungeon_manager
+        c_room = dungeon_manager.get_current_room(world_state)
+        if c_room:
+            room_hazards = list(c_room.get("hazards", []))
 
     combat_state: Dict[str, Any] = {
         "round":            1,
@@ -575,6 +588,7 @@ def start_combat(
         "room_surface":     {"type": None, "duration": 0},
         "smoke_active":     False,
         "smoke_duration":   0,
+        "room_hazards":     room_hazards,
     }
 
     world_state["combat_state"] = combat_state
@@ -728,6 +742,13 @@ def resolve_attack(
     if is_ranged and combat_state and combat_state.get("smoke_active"):
         has_disadvantage = True
 
+    # High Ground logic (Phase 11.2)
+    attacker_high_ground = attacker.get("has_high_ground", False)
+    target_high_ground   = target.get("has_high_ground", False)
+
+    if is_ranged and target_high_ground:
+        has_disadvantage = True
+
     # Advantage and disadvantage cancel each other out (5e rule)
     if has_advantage and has_disadvantage:
         has_advantage = has_disadvantage = False
@@ -741,6 +762,8 @@ def resolve_attack(
         raw_roll = _roll_d20()
 
     attack_bonus  = attack.get("attack_bonus", 0)
+    if is_ranged and attacker_high_ground:
+        attack_bonus += 2
     total_to_hit  = raw_roll + attack_bonus
     target_ac     = target.get("ac", 10)
 
@@ -809,6 +832,236 @@ def resolve_attack(
         f"dmg={damage}"
     )
     return result
+
+
+def _get_skill_mod(combatant: Dict[str, Any], skill_name: str) -> int:
+    """Return total skill modifier for a combatant (ability mod + proficiency bonus if proficient)."""
+    stat = "STR" if skill_name == "Athletics" else "DEX" if skill_name == "Acrobatics" else "STR"
+    mod = _get_stat_mod(combatant, stat)
+    prof_skills = combatant.get("proficient_skills", [])
+    if not prof_skills and "_player_state" in combatant:
+        prof_skills = combatant["_player_state"].get("proficient_skills", [])
+    if skill_name in prof_skills:
+        mod += combatant.get("proficiency_bonus", 2)
+    return mod
+
+
+def resolve_shove(
+    attacker: Dict[str, Any],
+    target: Dict[str, Any],
+    room_hazards: Optional[Any] = None,
+    combat_state: Optional[Dict[str, Any]] = None,
+    shove_type: str = "push",
+) -> Dict[str, Any]:
+    """
+    Resolve a Shove action (Module A §2 / Phase 11.2).
+
+    Rules:
+      - Attacker rolls Athletics (STR check) vs target's higher of Athletics (STR) or Acrobatics (DEX).
+      - Attacker loses (total <= target total): clean no-op, state unchanged.
+      - Attacker wins (total > target total):
+          - shove_type == 'prone': target knocked prone (applies 'prone' condition, duration 2).
+          - shove_type == 'push': target pushed 5ft.
+            If room has 'near_chasm' or 'acid_pool' hazard:
+              target rolls DC 13 DEX save:
+                - If passed: catches footing, no damage.
+                - If failed:
+                    - 'near_chasm': instant death for Tiny/Small/Medium, or 3d6 damage for Large+.
+                    - 'acid_pool': 3d6 acid damage.
+    """
+    if isinstance(room_hazards, dict) and "turn_order" in room_hazards:
+        combat_state = room_hazards
+        room_hazards = combat_state.get("room_hazards", [])
+    elif isinstance(room_hazards, str) and room_hazards in ("push", "prone"):
+        shove_type = room_hazards
+        room_hazards = combat_state.get("room_hazards", []) if combat_state else []
+    elif isinstance(room_hazards, str):
+        room_hazards = [room_hazards]
+    elif room_hazards is None:
+        if combat_state and "room_hazards" in combat_state:
+            room_hazards = combat_state.get("room_hazards", [])
+        else:
+            room_hazards = []
+    else:
+        room_hazards = list(room_hazards)
+
+    attacker_conds = _get_condition_set(attacker)
+    target_conds   = _get_condition_set(target)
+
+    # ── Attacker roll (Athletics) ─────────────────────────────────────────────
+    attacker_disadv = any(c in attacker_conds for c in ("poisoned", "exhausted", "restrained", "dazed"))
+    attacker_adv = False
+    if attacker_adv and not attacker_disadv:
+        attacker_roll = max(_roll_d20(), _roll_d20())
+    elif attacker_disadv and not attacker_adv:
+        attacker_roll = min(_roll_d20(), _roll_d20())
+    else:
+        attacker_roll = _roll_d20()
+
+    attacker_mod = _get_skill_mod(attacker, "Athletics")
+    attacker_total = attacker_roll + attacker_mod
+
+    # ── Target contest roll (Higher of Athletics vs Acrobatics) ───────────────
+    target_ath_mod = _get_skill_mod(target, "Athletics")
+    target_acro_mod = _get_skill_mod(target, "Acrobatics")
+    if target_acro_mod > target_ath_mod:
+        target_skill = "Acrobatics"
+        target_mod = target_acro_mod
+    else:
+        target_skill = "Athletics"
+        target_mod = target_ath_mod
+
+    target_disadv = any(c in target_conds for c in ("poisoned", "exhausted", "restrained"))
+    target_adv = False
+    if target_adv and not target_disadv:
+        target_roll = max(_roll_d20(), _roll_d20())
+    elif target_disadv and not target_adv:
+        target_roll = min(_roll_d20(), _roll_d20())
+    else:
+        target_roll = _roll_d20()
+
+    target_total = target_roll + target_mod
+
+    attacker_name = attacker.get("name", "Attacker")
+    target_name = target.get("name", "Target")
+
+    # ── Contest Evaluation ───────────────────────────────────────────────────
+    if attacker_total <= target_total:
+        # Attacker loses or ties: status quo maintained, state unchanged
+        logger.debug(
+            f"resolve_shove: FAIL {attacker_name} ({attacker_total}) vs {target_name} ({target_total})"
+        )
+        return {
+            "success":           False,
+            "action_type":       "shove",
+            "shove_type":        shove_type,
+            "attacker_id":       attacker.get("id", "player"),
+            "attacker_name":     attacker_name,
+            "target_id":         target.get("id", "target"),
+            "target_name":       target_name,
+            "attacker_roll":     attacker_roll,
+            "attacker_mod":      attacker_mod,
+            "attacker_total":    attacker_total,
+            "target_skill":      target_skill,
+            "target_roll":       target_roll,
+            "target_mod":        target_mod,
+            "target_total":      target_total,
+            "damage":            0,
+            "damage_type":       "",
+            "condition_applied": None,
+            "hazard_triggered":  None,
+            "hazard_saved":      False,
+            "target_hp_after":   target.get("hp", {}).get("current", 0),
+            "target_downed":     target.get("hp", {}).get("current", 0) <= 0,
+            "narration":         f"{attacker_name} attempts to shove {target_name}, but {target_name} holds their ground ({target_total} vs {attacker_total}).",
+        }
+
+    # ── Attacker Wins ────────────────────────────────────────────────────────
+    damage = 0
+    damage_type = ""
+    condition_applied = None
+    hazard_triggered = None
+    hazard_saved = False
+
+    if shove_type == "prone":
+        apply_condition(target, "prone", duration=2)
+        condition_applied = "prone"
+        if target.get("has_high_ground"):
+            target["has_high_ground"] = False
+        narration = f"{attacker_name} forcefully shoves {target_name} to the ground, knocking them prone!"
+    else:  # shove_type == "push" (5ft)
+        if target.get("has_high_ground"):
+            target["has_high_ground"] = False
+
+        if "near_chasm" in room_hazards:
+            hazard = "near_chasm"
+        elif "acid_pool" in room_hazards:
+            hazard = "acid_pool"
+        else:
+            hazard = None
+
+        if hazard:
+            hazard_triggered = hazard
+            # Target rolls DEX save DC 13
+            dex_mod = _get_stat_mod(target, "DEX")
+            prof_saves = target.get("saving_throw_proficiencies", target.get("proficient_saves", []))
+            if not prof_saves and "_player_state" in target:
+                prof_saves = target["_player_state"].get("saving_throw_proficiencies", [])
+            if "DEX" in prof_saves:
+                dex_mod += target.get("proficiency_bonus", 2)
+
+            save_roll = _roll_d20()
+            save_total = save_roll + dex_mod
+            save_passed = (save_roll == 20) or (save_roll != 1 and save_total >= 13)
+
+            if save_passed:
+                hazard_saved = True
+                narration = (
+                    f"{attacker_name} shoves {target_name} toward the {hazard.replace('_', ' ')}, "
+                    f"but {target_name} passes a DC 13 Dexterity save ({save_total}) and catches their footing!"
+                )
+            else:
+                hazard_saved = False
+                target_size = str(target.get("size", "Medium")).strip().lower()
+                is_large_or_larger = target_size in ("large", "huge", "gargantuan")
+
+                if hazard == "near_chasm":
+                    if is_large_or_larger:
+                        damage = roll_dice("3d6")
+                        damage_type = "bludgeoning"
+                        target_hp = target.setdefault("hp", {"current": 1, "max": 1})
+                        target_hp["current"] = max(0, target_hp["current"] - damage)
+                        narration = (
+                            f"{attacker_name} shoves the massive {target_name} into the chasm! "
+                            f"{target_name} fails the DC 13 DEX save ({save_total}), taking {damage} falling damage!"
+                        )
+                    else:
+                        damage_type = "fall"
+                        target_hp = target.setdefault("hp", {"current": 1, "max": 1})
+                        damage = target_hp.get("current", 1)
+                        target_hp["current"] = 0
+                        narration = (
+                            f"{attacker_name} shoves {target_name} over the edge into the chasm! "
+                            f"{target_name} fails the DC 13 DEX save ({save_total}) and plunges to their death!"
+                        )
+                elif hazard == "acid_pool":
+                    damage = roll_dice("3d6")
+                    damage_type = "acid"
+                    target_hp = target.setdefault("hp", {"current": 1, "max": 1})
+                    target_hp["current"] = max(0, target_hp["current"] - damage)
+                    narration = (
+                        f"{attacker_name} shoves {target_name} into the bubbling acid pool! "
+                        f"{target_name} fails the DC 13 DEX save ({save_total}), taking {damage} acid damage!"
+                    )
+        else:
+            narration = f"{attacker_name} shoves {target_name} back 5 feet!"
+
+    target_downed = target.get("hp", {}).get("current", 0) <= 0
+
+    return {
+        "success":           True,
+        "action_type":       "shove",
+        "shove_type":        shove_type,
+        "attacker_id":       attacker.get("id", "player"),
+        "attacker_name":     attacker_name,
+        "target_id":         target.get("id", "target"),
+        "target_name":       target_name,
+        "attacker_roll":     attacker_roll,
+        "attacker_mod":      attacker_mod,
+        "attacker_total":    attacker_total,
+        "target_skill":      target_skill,
+        "target_roll":       target_roll,
+        "target_mod":        target_mod,
+        "target_total":      target_total,
+        "damage":            damage,
+        "damage_type":       damage_type,
+        "condition_applied": condition_applied,
+        "hazard_triggered":  hazard_triggered,
+        "hazard_saved":      hazard_saved,
+        "target_hp_after":   target.get("hp", {}).get("current", 0),
+        "target_downed":     target_downed,
+        "narration":         narration,
+    }
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -945,6 +1198,7 @@ def classify_round_significance(
             or result.get("fumble")
             or result.get("target_downed")
             or result.get("condition_applied") is not None
+            or result.get("action_type") == "shove"
             or _is_below_25pct(result)
         )
         if is_sig:
@@ -984,6 +1238,10 @@ def build_routine_summary(routine_results: List[Dict[str, Any]]) -> str:
             name = r.get("attacker_name", "Someone")
             reason = r.get("reason", "skipped")
             lines.append(f"{name} skips their turn ({reason}).")
+            continue
+
+        if r.get("action_type") == "shove":
+            lines.append(r.get("narration", ""))
             continue
 
         attacker = r.get("attacker_name", "?")
@@ -1029,6 +1287,10 @@ def build_round_narration_block(
     lines = [f"[System: Round Result]", f"Round {round_num}:"]
 
     for r in significant:
+        if r.get("action_type") == "shove":
+            lines.append(f"- {r.get('narration')}")
+            continue
+
         attacker = r.get("attacker_name", "?")
         target   = r.get("target_name", "?")
         weapon   = r.get("attack_name", "attack")

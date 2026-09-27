@@ -1197,6 +1197,20 @@ def resolve_spell_attack(
     cast_mod = get_modifier(caster.get("stats", {}).get(cast_stat, 10))
     to_hit_bonus = caster_prof + cast_mod
 
+    # High Ground logic (Phase 11.2)
+    caster_high_ground = caster.get("has_high_ground", False)
+    target_high_ground = target.get("has_high_ground", False)
+
+    if caster_high_ground:
+        to_hit_bonus += 2
+
+    caster_conds = set(c.get("condition") if isinstance(c, dict) else str(c) for c in caster.get("active_conditions", []))
+    has_disadvantage = target_high_ground or any(c in caster_conds for c in ("poisoned", "restrained", "exhausted", "frightened", "dazed"))
+    has_advantage = False
+
+    if has_advantage and has_disadvantage:
+        has_advantage = has_disadvantage = False
+
     eff = spell.get("effect", {})
     target_ac = target.get("ac", 10)
 
@@ -1207,7 +1221,12 @@ def resolve_spell_attack(
         raw_roll = 20
         total_to_hit = 99
     else:
-        raw_roll = _roll_d20()
+        if has_advantage:
+            raw_roll = max(_roll_d20(), _roll_d20())
+        elif has_disadvantage:
+            raw_roll = min(_roll_d20(), _roll_d20())
+        else:
+            raw_roll = _roll_d20()
         crit = (raw_roll == 20)
         fumble = (raw_roll == 1)
         total_to_hit = raw_roll + to_hit_bonus

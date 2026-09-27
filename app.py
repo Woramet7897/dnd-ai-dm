@@ -518,6 +518,9 @@ def render_playing_view():
         if cs.get("smoke_active"):
             smoke_dur = cs.get("smoke_duration", 0)
             st.warning(f"💨 **Smoke Active**: Ranged attacks suffer disadvantage ({smoke_dur} round{'s' if smoke_dur != 1 else ''} remaining)")
+        room_hazards = cs.get("room_hazards", [])
+        if room_hazards:
+            st.warning(f"⚠️ **Environmental Hazards: {', '.join(h.replace('_', ' ').title() for h in room_hazards)}**")
 
         col_c1, col_c2 = st.columns([2, 1])
 
@@ -525,11 +528,13 @@ def render_playing_view():
             st.markdown(f"##### Round {round_num} — Active Combatants")
             p_cur_hp = player_c.get("hp", {}).get("current", 0)
             p_max_hp = player_c.get("hp", {}).get("max", 10)
-            st.markdown(f"🧑 **{player_c.get('name', 'Adventurer')}** (You) | HP: {p_cur_hp}/{p_max_hp} | AC: {player_c.get('ac', 10)}")
+            p_hg = " [⛰️ High Ground]" if player_c.get("has_high_ground") else ""
+            st.markdown(f"🧑 **{player_c.get('name', 'Adventurer')}** (You) | HP: {p_cur_hp}/{p_max_hp} | AC: {player_c.get('ac', 10)}{p_hg}")
 
             for comp in companions:
                 c_hp = comp.get("hp", {})
-                st.markdown(f"🤝 **{comp.get('name', 'Companion')}** | HP: {c_hp.get('current', 0)}/{c_hp.get('max', 10)} | AC: {comp.get('ac', 10)}")
+                c_hg = " [⛰️ High Ground]" if comp.get("has_high_ground") else ""
+                st.markdown(f"🤝 **{comp.get('name', 'Companion')}** | HP: {c_hp.get('current', 0)}/{c_hp.get('max', 10)} | AC: {comp.get('ac', 10)}{c_hg}")
 
             st.markdown("---")
             for enemy in enemies:
@@ -538,7 +543,8 @@ def render_playing_view():
                 e_hp = enemy.get("hp", {})
                 cur_e_hp = e_hp.get("current", 0)
                 max_e_hp = e_hp.get("max", 1)
-                st.markdown(f"👹 **{e_name}** | HP: {cur_e_hp}/{max_e_hp} | AC: {enemy.get('ac', 10)}")
+                e_hg = " [⛰️ High Ground]" if enemy.get("has_high_ground") else ""
+                st.markdown(f"👹 **{e_name}** | HP: {cur_e_hp}/{max_e_hp} | AC: {enemy.get('ac', 10)}{e_hg}")
 
         living_enemies = [e for e in enemies if e.get("hp", {}).get("current", 0) > 0]
         player_alive = player_c.get("hp", {}).get("current", 0) > 0
@@ -550,14 +556,17 @@ def render_playing_view():
             selected_target = None
             selected_attack = None
             selected_spell_id = None
+            selected_shove_type = "push"
             action_type = "⚔️ Weapon Attack"
 
             known_spells = player.get("known_spells", [])
             sp_catalog = state_manager._get_spell_catalog()
 
             if player_alive and (living_enemies or known_spells):
+                act_options = ["⚔️ Weapon Attack", "🫸 Shove"]
                 if known_spells:
-                    action_type = st.radio("Action:", ["⚔️ Weapon Attack", "🪄 Cast Spell"], horizontal=True, key=f"c_act_type_{round_num}")
+                    act_options.append("🪄 Cast Spell")
+                action_type = st.radio("Action:", act_options, horizontal=True, key=f"c_act_type_{round_num}")
 
                 if action_type == "⚔️ Weapon Attack" and living_enemies:
                     target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
@@ -575,6 +584,13 @@ def render_playing_view():
                     atk_map = {_fmt_atk(a): a for a in attacks}
                     chosen_atk_label = st.selectbox("⚔️ Weapon / Attack", list(atk_map.keys()), key=f"atk_sel_{round_num}")
                     selected_attack = atk_map[chosen_atk_label]
+                elif action_type == "🫸 Shove" and living_enemies:
+                    target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
+                    chosen_target_label = st.selectbox("🎯 Target Enemy to Shove", list(target_map.keys()), key=f"shove_target_sel_{round_num}")
+                    selected_target = target_map[chosen_target_label]
+
+                    shove_goal = st.radio("Shove Goal:", ["Push 5ft", "Knock Prone"], horizontal=True, key=f"shove_goal_{round_num}")
+                    selected_shove_type = "prone" if shove_goal == "Knock Prone" else "push"
                 elif action_type == "🪄 Cast Spell" and known_spells:
                     def _fmt_sp(sid):
                         sinfo = sp_catalog.get(sid, {})
@@ -608,9 +624,19 @@ def render_playing_view():
             elif not player_alive:
                 st.warning("⚠️ You are down! Rolling death saves...")
 
-            button_label = "⚔️ Attack & End Round" if (player_alive and action_type == "⚔️ Weapon Attack") else ("🪄 Cast Spell & End Round" if player_alive else "⏳ Endure Round")
+            if not player_alive:
+                button_label = "⏳ Endure Round"
+            elif action_type == "⚔️ Weapon Attack":
+                button_label = "⚔️ Attack & End Round"
+            elif action_type == "🫸 Shove":
+                button_label = "🫸 Shove & End Round"
+            elif action_type == "🪄 Cast Spell":
+                button_label = "🪄 Cast Spell & End Round"
+            else:
+                button_label = "⚔️ Attack & End Round"
+
             if st.button(button_label, disabled=btn_disabled, use_container_width=True, type="primary"):
-                # 1. Resolve player's attack or spell if conscious
+                # 1. Resolve player's attack, shove, or spell if conscious
                 player_attack_result = None
                 if player_alive and selected_target:
                     p_conds = combat_manager._get_condition_set(player_c)
@@ -621,6 +647,14 @@ def render_playing_view():
                             "skipped": True,
                             "reason": "stunned",
                         }
+                    elif action_type == "🫸 Shove":
+                        shove_res = combat_manager.resolve_shove(
+                            attacker=player_c,
+                            target=selected_target,
+                            combat_state=cs,
+                            shove_type=selected_shove_type,
+                        )
+                        player_attack_result = shove_res
                     elif action_type == "🪄 Cast Spell" and selected_spell_id:
                         cast_res = state_manager.cast_spell(
                             caster=player_c,
