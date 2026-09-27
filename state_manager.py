@@ -970,7 +970,31 @@ def long_rest(
     active_conditions = character_state.setdefault("active_conditions", [])
     if "exhausted" in active_conditions:
         active_conditions.remove("exhausted")
-    logger.debug("Long rest completed. HP restored, time advanced to next morning.")
+
+    character_state["weapon_actions_available"] = True
+    logger.debug("Long rest completed. HP restored, time advanced to next morning, weapon actions recharged.")
+
+
+def perform_short_rest(
+    character_state: Dict[str, Any],
+    world_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Spec Module A §3 / Phase 11.3:
+    Perform a short rest.
+    Resets character_state['weapon_actions_available'] = True.
+    If world_state is provided, advances time by 1 step.
+    """
+    character_state["weapon_actions_available"] = True
+    if world_state:
+        import dungeon_manager
+        dungeon_manager.advance_time(world_state, character_state)
+    logger.debug("perform_short_rest: weapon_actions_available reset to True.")
+    return {
+        "success": True,
+        "weapon_actions_available": True,
+        "message": "You take a short rest. Your weapon actions are recharged!",
+    }
 
 
 def buy_item(
@@ -1213,6 +1237,9 @@ def resolve_spell_attack(
 
     eff = spell.get("effect", {})
     target_ac = target.get("ac", 10)
+    target_conds = set(c.get("condition") if isinstance(c, dict) else str(c) for c in target.get("active_conditions", []))
+    if "dazed" in target_conds:
+        target_ac -= 1
 
     if eff.get("auto_hit") is True:
         hit = True

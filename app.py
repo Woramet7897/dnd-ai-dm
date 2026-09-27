@@ -437,6 +437,17 @@ def render_sidebar():
                     lvl_lbl = "Cantrip" if sp_lvl == 0 else f"Lvl {sp_lvl}"
                     st.markdown(f"- **{sp_name}** ({lvl_lbl})")
 
+    # Rest Actions
+    if not combat_active:
+        if st.sidebar.button("☕ Take Short Rest (1 hr)", use_container_width=True):
+            state_manager.perform_short_rest(player, world)
+            auto_save()
+            st.session_state["narrative_log"].append({
+                "role": "assistant",
+                "content": "You take a short rest, catching your breath and checking your gear. Weapon actions recharged!"
+            })
+            st.rerun()
+
     # Town Actions
     if current_room and current_room.get("type") == "town":
         if st.sidebar.button("⛺ Take Long Rest (Town)", use_container_width=True):
@@ -557,13 +568,17 @@ def render_playing_view():
             selected_attack = None
             selected_spell_id = None
             selected_shove_type = "push"
+            selected_adj_target = None
             action_type = "⚔️ Weapon Attack"
 
             known_spells = player.get("known_spells", [])
             sp_catalog = state_manager._get_spell_catalog()
+            w_avail = player.get("weapon_actions_available", True) and player_c.get("weapon_actions_available", True)
 
             if player_alive and (living_enemies or known_spells):
                 act_options = ["⚔️ Weapon Attack", "🫸 Shove"]
+                if w_avail:
+                    act_options.append("💥 Weapon Action")
                 if known_spells:
                     act_options.append("🪄 Cast Spell")
                 action_type = st.radio("Action:", act_options, horizontal=True, key=f"c_act_type_{round_num}")
@@ -584,6 +599,32 @@ def render_playing_view():
                     atk_map = {_fmt_atk(a): a for a in attacks}
                     chosen_atk_label = st.selectbox("⚔️ Weapon / Attack", list(atk_map.keys()), key=f"atk_sel_{round_num}")
                     selected_attack = atk_map[chosen_atk_label]
+                elif action_type == "💥 Weapon Action" and living_enemies:
+                    target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
+                    chosen_target_label = st.selectbox("🎯 Target Enemy", list(target_map.keys()), key=f"wact_target_sel_{round_num}")
+                    selected_target = target_map[chosen_target_label]
+
+                    attacks = player_c.get("attacks", [])
+                    if not attacks:
+                        attacks = [{"name": "Unarmed Strike", "attack_bonus": 2, "damage": "1+0", "damage_type": "bludgeoning", "ranged": False}]
+
+                    def _fmt_wact(a):
+                        winfo = combat_manager.get_weapon_action_info(a)
+                        return f"{a.get('name', 'Attack')} → {winfo['name']} ({winfo['damage_type'].title()})"
+
+                    wact_map = {_fmt_wact(a): a for a in attacks}
+                    chosen_wact_label = st.selectbox("💥 Weapon Action", list(wact_map.keys()), key=f"wact_sel_{round_num}")
+                    selected_attack = wact_map[chosen_wact_label]
+
+                    w_info = combat_manager.get_weapon_action_info(selected_attack)
+                    st.info(f"💥 **{w_info['name']}**: {w_info['description']}")
+
+                    if w_info["name"] == "Cleave":
+                        other_enemies = [e for e in living_enemies if e.get("id") != selected_target.get("id")]
+                        if other_enemies:
+                            adj_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in other_enemies}
+                            chosen_adj_label = st.selectbox("🎯 Adjacent Enemy (Cleave)", list(adj_map.keys()), key=f"cleave_adj_{round_num}")
+                            selected_adj_target = adj_map[chosen_adj_label]
                 elif action_type == "🫸 Shove" and living_enemies:
                     target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
                     chosen_target_label = st.selectbox("🎯 Target Enemy to Shove", list(target_map.keys()), key=f"shove_target_sel_{round_num}")
@@ -628,6 +669,9 @@ def render_playing_view():
                 button_label = "⏳ Endure Round"
             elif action_type == "⚔️ Weapon Attack":
                 button_label = "⚔️ Attack & End Round"
+            elif action_type == "💥 Weapon Action":
+                w_info_btn = combat_manager.get_weapon_action_info(selected_attack) if selected_attack else {"name": "Weapon Action"}
+                button_label = f"💥 {w_info_btn['name']} & End Round"
             elif action_type == "🫸 Shove":
                 button_label = "🫸 Shove & End Round"
             elif action_type == "🪄 Cast Spell":
@@ -647,6 +691,15 @@ def render_playing_view():
                             "skipped": True,
                             "reason": "stunned",
                         }
+                    elif action_type == "💥 Weapon Action" and selected_attack:
+                        w_res = combat_manager.resolve_weapon_action(
+                            attacker=player_c,
+                            target=selected_target,
+                            attack=selected_attack,
+                            combat_state=cs,
+                            adjacent_target=selected_adj_target,
+                        )
+                        player_attack_result = w_res
                     elif action_type == "🫸 Shove":
                         shove_res = combat_manager.resolve_shove(
                             attacker=player_c,

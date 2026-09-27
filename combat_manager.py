@@ -55,7 +55,7 @@ def _get_monster_catalog() -> Dict:
 # CONDITIONS (spec Section 20)
 # ════════════════════════════════════════════════════════════════════════════════
 
-CONDITIONS = {"prone", "poisoned", "stunned", "restrained", "frightened", "exhausted", "burning", "dazed"}
+CONDITIONS = {"prone", "poisoned", "stunned", "restrained", "frightened", "exhausted", "burning", "dazed", "slowed"}
 
 # Mechanical effect lookup — used by resolve_attack() before rolling.
 CONDITION_EFFECTS: Dict[str, Dict[str, bool]] = {
@@ -66,7 +66,8 @@ CONDITION_EFFECTS: Dict[str, Dict[str, bool]] = {
     "frightened":  {"cannot_approach_source": True},
     "exhausted":   {"attack_rolls_disadvantage": True, "ability_checks_disadvantage": True},
     "burning":     {},
-    "dazed":       {"attack_rolls_disadvantage": True},
+    "dazed":       {"attack_rolls_disadvantage": True, "ac_penalty": 1, "lose_reaction": True},
+    "slowed":      {"movement_penalty": True},
 }
 
 
@@ -546,6 +547,7 @@ def start_combat(
         "proficiency_bonus": player_state["proficiency_bonus"],
         "proficient_skills": player_state.get("proficient_skills", []),
         "has_high_ground":  player_state.get("has_high_ground", False),
+        "weapon_actions_available": player_state.get("weapon_actions_available", True),
         "_player_state":    player_state,                        # Reference to real character dict
     }
 
@@ -662,7 +664,7 @@ def sync_player_state(player_c: Dict[str, Any]) -> None:
     if real_state is None or not isinstance(real_state, dict):
         return
 
-    for key in ("gold", "status", "xp_current", "level", "proficiency_bonus", "ac"):
+    for key in ("gold", "status", "xp_current", "level", "proficiency_bonus", "ac", "weapon_actions_available"):
         if key in player_c:
             real_state[key] = player_c[key]
 
@@ -766,6 +768,8 @@ def resolve_attack(
         attack_bonus += 2
     total_to_hit  = raw_roll + attack_bonus
     target_ac     = target.get("ac", 10)
+    if "dazed" in target_conditions:
+        target_ac -= 1
 
     crit   = (raw_roll == 20)
     fumble = (raw_roll == 1)
@@ -1064,6 +1068,164 @@ def resolve_shove(
     }
 
 
+def get_weapon_action_info(attack: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Return weapon action metadata for an attack based on its damage_type (Module A §3 / Phase 11.3).
+    - Bludgeoning -> Concussive Smash (DC 8+prof+STR CON save, fail = dazed)
+    - Slashing -> Cleave (STR mod damage to adjacent enemy)
+    - Piercing -> Hamstring (slowed condition)
+    """
+    dtype = str(attack.get("damage_type", "slashing")).strip().lower()
+    if dtype == "bludgeoning":
+        return {
+            "name": "Concussive Smash",
+            "damage_type": "bludgeoning",
+            "description": "On hit, target must pass a CON save (DC 8 + prof + STR mod) or become dazed (-1 AC, disadvantage on attacks) for 1 round.",
+        }
+    elif dtype == "piercing":
+        return {
+            "name": "Hamstring",
+            "damage_type": "piercing",
+            "description": "On hit, target is slowed (movement penalty) for 2 rounds.",
+        }
+    else:  # default slashing
+        return {
+            "name": "Cleave",
+            "damage_type": "slashing",
+            "description": "Hits primary target and deals STR modifier damage to an adjacent enemy.",
+        }
+
+
+def resolve_weapon_action(
+    attacker: Dict[str, Any],
+    target: Dict[str, Any],
+    attack: Dict[str, Any],
+    combat_state: Optional[Dict[str, Any]] = None,
+    adjacent_target: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Resolve a Cooldown-Gated Weapon Action (Module A §3 / Phase 11.3).
+
+    Rules:
+      - Cooldown check: attacker must have weapon_actions_available == True.
+      - Once used: weapon_actions_available becomes False until next short rest.
+      - Resolves standard attack roll first.
+      - On-hit effects per weapon damage type:
+          - Bludgeoning (Concussive Smash): target rolls CON save DC (8 + prof + STR mod);
+            on fail -> target gets 'dazed' condition (dur 1, -1 AC, disadvantage).
+          - Slashing (Cleave): target takes regular damage, and one adjacent enemy takes STR mod damage.
+          - Piercing (Hamstring): target gets 'slowed' condition (dur 2).
+    """
+    # ── Cooldown Check ────────────────────────────────────────────────────────
+    available = attacker.get("weapon_actions_available")
+    if available is None and "_player_state" in attacker:
+        available = attacker["_player_state"].get("weapon_actions_available", True)
+    if available is False:
+        logger.debug(f"resolve_weapon_action: {attacker.get('name')} weapon action on cooldown.")
+        return {
+            "success": False,
+            "hit": False,
+            "damage": 0,
+            "action_type": "weapon_action",
+            "reason": "Weapon action is on cooldown. Requires a short rest to recharge.",
+            "attacker_id": attacker.get("id"),
+            "target_id": target.get("id"),
+        }
+
+    # Consume cooldown
+    attacker["weapon_actions_available"] = False
+    if "_player_state" in attacker and isinstance(attacker["_player_state"], dict):
+        attacker["_player_state"]["weapon_actions_available"] = False
+
+    action_info = get_weapon_action_info(attack)
+    action_name = action_info["name"]
+
+    # ── Execute Attack Roll ───────────────────────────────────────────────────
+    result = resolve_attack(attacker, target, attack, combat_state=combat_state)
+    result["action_type"] = "weapon_action"
+    result["weapon_action_name"] = action_name
+    result["success"] = True
+
+    attacker_name = attacker.get("name", "Attacker")
+    target_name = target.get("name", "Target")
+
+    if not result.get("hit"):
+        result["narration"] = f"{attacker_name} attempts {action_name} against {target_name}, but misses!"
+        return result
+
+    # ── On-Hit Effects ────────────────────────────────────────────────────────
+    if action_name == "Concussive Smash":
+        prof = attacker.get("proficiency_bonus", 2)
+        str_mod = _get_stat_mod(attacker, "STR")
+        dc = 8 + prof + str_mod
+
+        target_con_mod = _get_stat_mod(target, "CON")
+        target_prof_saves = target.get("saving_throw_proficiencies", target.get("proficient_saves", []))
+        if not target_prof_saves and "_player_state" in target:
+            target_prof_saves = target["_player_state"].get("saving_throw_proficiencies", [])
+        if "CON" in target_prof_saves:
+            target_con_mod += target.get("proficiency_bonus", 2)
+
+        con_roll = _roll_d20()
+        con_total = con_roll + target_con_mod
+        save_passed = (con_roll == 20) or (con_roll != 1 and con_total >= dc)
+
+        result["save_dc"] = dc
+        result["save_roll"] = con_roll
+        result["save_total"] = con_total
+        result["save_passed"] = save_passed
+
+        if save_passed:
+            result["narration"] = (
+                f"{attacker_name} hits {target_name} with a Concussive Smash for {result['damage']} bludgeoning damage, "
+                f"but {target_name} withstands the concussion with a DC {dc} CON save ({con_total})!"
+            )
+        else:
+            apply_condition(target, "dazed", duration=1)
+            result["condition_applied"] = "dazed"
+            result["narration"] = (
+                f"{attacker_name} smashes {target_name} with a Concussive Smash for {result['damage']} damage! "
+                f"{target_name} fails the DC {dc} CON save ({con_total}) and is DAZED (-1 AC, disadvantage on attacks)!"
+            )
+
+    elif action_name == "Cleave":
+        cleave_damage = max(1, _get_stat_mod(attacker, "STR"))
+        if adjacent_target is None and combat_state:
+            for e in combat_state.get("enemies", []):
+                if e.get("id") != target.get("id") and e.get("hp", {}).get("current", 0) > 0:
+                    adjacent_target = e
+                    break
+
+        if adjacent_target:
+            adj_hp = adjacent_target.setdefault("hp", {"current": 1, "max": 1})
+            adj_hp["current"] = max(0, adj_hp["current"] - cleave_damage)
+            adj_downed = adj_hp["current"] <= 0
+            result["cleave_target_id"] = adjacent_target.get("id")
+            result["cleave_target_name"] = adjacent_target.get("name")
+            result["cleave_damage"] = cleave_damage
+            result["cleave_target_hp_after"] = adj_hp["current"]
+            result["cleave_target_downed"] = adj_downed
+            adj_msg = f", downing them!" if adj_downed else f" ({adj_hp['current']} HP remaining)!"
+            result["narration"] = (
+                f"{attacker_name} strikes {target_name} with a Cleave for {result['damage']} slashing damage, "
+                f"and arcs the blade into {adjacent_target.get('name')} for {cleave_damage} damage{adj_msg}"
+            )
+        else:
+            result["narration"] = (
+                f"{attacker_name} hits {target_name} with a sweeping Cleave for {result['damage']} slashing damage!"
+            )
+
+    elif action_name == "Hamstring":
+        apply_condition(target, "slowed", duration=2)
+        result["condition_applied"] = "slowed"
+        result["narration"] = (
+            f"{attacker_name} pierces {target_name} with a Hamstring strike for {result['damage']} piercing damage! "
+            f"{target_name} is SLOWED for 2 rounds!"
+        )
+
+    return result
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # TURN RESOLUTION
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1198,7 +1360,8 @@ def classify_round_significance(
             or result.get("fumble")
             or result.get("target_downed")
             or result.get("condition_applied") is not None
-            or result.get("action_type") == "shove"
+            or result.get("action_type") in ("shove", "weapon_action")
+            or result.get("cleave_damage", 0) > 0
             or _is_below_25pct(result)
         )
         if is_sig:
@@ -1240,7 +1403,7 @@ def build_routine_summary(routine_results: List[Dict[str, Any]]) -> str:
             lines.append(f"{name} skips their turn ({reason}).")
             continue
 
-        if r.get("action_type") == "shove":
+        if r.get("action_type") in ("shove", "weapon_action"):
             lines.append(r.get("narration", ""))
             continue
 
@@ -1287,7 +1450,7 @@ def build_round_narration_block(
     lines = [f"[System: Round Result]", f"Round {round_num}:"]
 
     for r in significant:
-        if r.get("action_type") == "shove":
+        if r.get("action_type") in ("shove", "weapon_action"):
             lines.append(f"- {r.get('narration')}")
             continue
 

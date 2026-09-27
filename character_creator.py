@@ -276,6 +276,7 @@ def derive_stats(
         "active_conditions": [],
         "gold": starting_gold,
         "inventory": starting_inventory,
+        "weapon_actions_available": True,
         "roll_log": [],
     }
 
