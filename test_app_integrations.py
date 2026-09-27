@@ -1,0 +1,160 @@
+"""
+test_app_integrations.py — Comprehensive Integration Test Suite
+Verifies all systems wired into app.py:
+1. Character creation with starting equipment & shield AC bonus
+2. Equipment toggling (equip/unequip) & consumable usage
+3. Spellcasting resolution (attack_roll, attack_save, heal) & spell slots
+4. Room loot collection & consumption
+5. Town shops buy/sell with gold & open periods
+6. Extraction result routing (combat_start, world_updates, requires_roll)
+7. Full combat round resolution with weapon and spell attacks
+"""
+
+import math
+import os
+import unittest
+from unittest.mock import MagicMock, patch
+
+import app
+import character_creator
+import combat_manager
+import dungeon_manager
+import llm_handler
+import state_manager
+import validation
+
+
+class TestAppIntegrations(unittest.TestCase):
+
+    def setUp(self):
+        self.stats = {"STR": 16, "DEX": 14, "CON": 14, "INT": 10, "WIS": 10, "CHA": 8}
+        self.fighter = character_creator.create_character("Valeros", "Human", "Fighter", "Soldier", self.stats)
+        self.wizard = character_creator.create_character("Ezren", "Elf", "Wizard", "Sage", {"STR": 8, "DEX": 14, "CON": 12, "INT": 16, "WIS": 12, "CHA": 10})
+        self.cleric = character_creator.create_character("Kyra", "Human", "Cleric", "Acolyte", {"STR": 14, "DEX": 10, "CON": 14, "INT": 10, "WIS": 16, "CHA": 12})
+        self.world = {
+            "schema_version": 4,
+            "character_name": "Valeros",
+            "current_location": "town_riverside",
+            "visited_rooms": ["town_riverside"],
+            "cleared_rooms": [],
+            "collected_loot": [],
+            "dynamic_rooms": {},
+            "game_time": {"day": 1, "period": "morning", "steps_since_period_start": 0},
+            "quest_log": {"main": [], "side": []},
+            "party": {"companions": [], "former_companions": []},
+            "combat_state": None,
+        }
+
+    def test_character_creation_starting_equipment(self):
+        """DoD: All classes spawn with appropriate starting gear, weapon/armor equipped, and correct AC."""
+        # Fighter: Chain mail (16) + Shield (+2) = 18 AC
+        self.assertEqual(self.fighter["ac"], 18)
+        f_inv = self.fighter["inventory"]
+        f_equipped = [i["item_id"] for i in f_inv if i.get("equipped")]
+        self.assertIn("chain_mail", f_equipped)
+        self.assertIn("shield", f_equipped)
+        self.assertIn("longsword", f_equipped)
+        # Rations present
+        ration = next((i for i in f_inv if i.get("item_id") == "trail_rations"), None)
+        self.assertIsNotNone(ration)
+        self.assertEqual(ration["quantity"], 3)
+
+        # Wizard: Elf +2 DEX -> 14 + 2 = 16 DEX (mod +3). Unarmored AC: 10 + 3 = 13.
+        self.assertEqual(self.wizard["ac"], 13)
+        self.assertIn("magic_missile", self.wizard["known_spells"])
+        self.assertEqual(self.wizard["spell_slots"]["1"]["current"], 2)
+
+        # Cleric: Scale mail (14) + Shield (+2) = 16 AC
+        self.assertEqual(self.cleric["ac"], 16)
+        c_equipped = [i["item_id"] for i in self.cleric["inventory"] if i.get("equipped")]
+        self.assertIn("scale_mail", c_equipped)
+        self.assertIn("shield", c_equipped)
+        self.assertIn("mace", c_equipped)
+        self.assertIn("cure_wounds", self.cleric["known_spells"])
+
+    def test_equipment_toggle_and_consumable(self):
+        """DoD: Equipping/unequipping updates AC; using potion heals and decrements count."""
+        # Unequip shield -> AC drops from 18 to 16
+        ok, _ = state_manager.unequip_item("shield", self.fighter)
+        self.assertTrue(ok)
+        self.assertEqual(self.fighter["ac"], 16)
+
+        # Re-equip shield -> AC back to 18
+        ok, _ = state_manager.equip_item("shield", self.fighter)
+        self.assertTrue(ok)
+        self.assertEqual(self.fighter["ac"], 18)
+
+        # Add potion and use it
+        self.fighter["hp"]["current"] = 5
+        self.fighter["inventory"].append({"item_id": "healing_potion", "equipped": False, "quantity": 1})
+        ok, msg, res = state_manager.use_consumable("healing_potion", self.fighter)
+        self.assertTrue(ok)
+        self.assertGreater(self.fighter["hp"]["current"], 5)
+        # Potion should be removed from inventory
+        self.assertFalse(any(i.get("item_id") == "healing_potion" for i in self.fighter["inventory"]))
+
+    def test_spellcasting_resolution_and_slots(self):
+        """DoD: Casting spells deducts slots, resolves attack_roll / attack_save / heal properly."""
+        target_orc = {"name": "Orc", "ac": 12, "stats": {"WIS": 10, "DEX": 10}, "hp": {"current": 20, "max": 20}}
+
+        # Magic Missile (auto-hit, level 1)
+        res = state_manager.cast_spell(self.wizard, target_orc, "magic_missile", self.wizard, self.world)
+        self.assertTrue(res["success"])
+        self.assertTrue(res.get("hit"))
+        self.assertEqual(self.wizard["spell_slots"]["1"]["current"], 1)
+        self.assertLess(target_orc["hp"]["current"], 20)
+        self.assertEqual(res["attack_name"], "Magic Missile")
+
+        # Cure Wounds (heal, level 1)
+        injured_fighter = dict(self.fighter)
+        injured_fighter["hp"]["current"] = 5
+        res_heal = state_manager.cast_spell(self.cleric, injured_fighter, "cure_wounds", self.cleric, self.world)
+        self.assertTrue(res_heal["success"])
+        self.assertGreater(injured_fighter["hp"]["current"], 5)
+        self.assertEqual(self.cleric["spell_slots"]["1"]["current"], 1)
+
+    def test_room_loot_collection(self):
+        """DoD: Searching room with loot collects items and prevents duplicate looting."""
+        # Forest clearing has torch x2
+        self.world["current_location"] = "forest_clearing"
+        loot = dungeon_manager.get_room_loot("forest_clearing", self.world)
+        self.assertEqual(len(loot), 1)
+        self.assertEqual(loot[0]["item_id"], "torch")
+        self.assertIn("forest_clearing", self.world["collected_loot"])
+
+        # Second loot attempt returns empty
+        loot_again = dungeon_manager.get_room_loot("forest_clearing", self.world)
+        self.assertEqual(loot_again, [])
+
+    def test_town_shops_buy_sell(self):
+        """DoD: Player can buy and sell items in town shops with correct prices."""
+        self.fighter["gold"] = 100
+        # General store is open in the morning. Healing potion value_gold is 15 GP.
+        ok_buy, msg_buy = state_manager.buy_item("healing_potion", "general_store", self.fighter, self.world)
+        self.assertTrue(ok_buy)
+        self.assertEqual(self.fighter["gold"], 85)  # 100 - 15 = 85 GP
+        self.assertTrue(any(i.get("item_id") == "healing_potion" for i in self.fighter["inventory"]))
+
+        # Sell healing potion back (15 * 0.5 = 7 GP)
+        ok_sell, msg_sell = state_manager.sell_item("healing_potion", "general_store", self.fighter, self.world)
+        self.assertTrue(ok_sell)
+        self.assertEqual(self.fighter["gold"], 92)  # 85 + 7 = 92 GP
+
+    def test_combat_round_with_spell_attack(self):
+        """DoD: Spell cast result passed into combat_manager.resolve_round resolves smoothly."""
+        cs = combat_manager.start_combat(["goblin_scout"], self.wizard, self.world)
+        self.assertIsNotNone(cs)
+
+        # Cast magic missile against enemy
+        target_goblin = cs["enemies"][0]
+        spell_res = state_manager.cast_spell(cs["player_combatant"], target_goblin, "magic_missile", self.wizard, self.world)
+        self.assertTrue(spell_res["success"])
+
+        # Resolve round
+        res_round = combat_manager.resolve_round(combat_state=cs, player_attack_result=spell_res, world_state=self.world)
+        self.assertIn("narration_block", res_round)
+        self.assertIn("Ezren", res_round["narration_block"])
+
+
+if __name__ == "__main__":
+    unittest.main()

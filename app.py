@@ -9,6 +9,7 @@ interactive Streamlit application.
 
 import json
 import logging
+import math
 import os
 import streamlit as st
 from typing import Any, Dict, List, Optional
@@ -340,6 +341,102 @@ def render_sidebar():
     ration_qty = sum(i.get("quantity", 1) for i in inventory if isinstance(i, dict) and i.get("item_id") == "trail_rations")
     st.sidebar.markdown(f"🍞 **Trail Rations:** {ration_qty}")
 
+    # ── Inventory & Equipment Expander ──────────────────────────────────────────
+    with st.sidebar.expander("🎒 Inventory & Equipment", expanded=False):
+        if not inventory:
+            st.info("Inventory is empty.")
+        else:
+            catalog = state_manager._get_item_catalog()
+            for idx, item in enumerate(inventory):
+                if not isinstance(item, dict):
+                    continue
+                item_id = item.get("item_id", "unknown")
+                qty = item.get("quantity", 1)
+                is_equipped = item.get("equipped", False)
+                info = catalog.get(item_id, {})
+                item_name = info.get("name", item_id.replace("_", " ").title())
+                itype = info.get("type", "misc")
+                islot = info.get("slot", "")
+                slot_tag = f" [{islot}]" if islot else ""
+                status_tag = " *(Equipped)*" if is_equipped else ""
+
+                col_i1, col_i2 = st.columns([3, 2])
+                with col_i1:
+                    st.markdown(f"**{item_name}** x{qty}{slot_tag}{status_tag}")
+                with col_i2:
+                    if itype in ("wearable", "weapon"):
+                        if is_equipped:
+                            if st.button("Unequip", key=f"inv_unequip_{idx}_{item_id}", use_container_width=True):
+                                state_manager.unequip_item(item_id, player)
+                                auto_save()
+                                st.rerun()
+                        else:
+                            if st.button("Equip", key=f"inv_equip_{idx}_{item_id}", use_container_width=True):
+                                state_manager.equip_item(item_id, player)
+                                auto_save()
+                                st.rerun()
+                    elif itype == "consumable":
+                        if st.button("Use", key=f"inv_use_{idx}_{item_id}", use_container_width=True):
+                            ok_u, msg_u, res_u = state_manager.use_consumable(item_id, player)
+                            if ok_u:
+                                healed = res_u.get("healed", 0)
+                                st.toast(f"Used {item_name}! Restored {healed} HP.")
+                                st.session_state["narrative_log"].append({
+                                    "role": "assistant",
+                                    "content": f"🧪 You drank a **{item_name}** and regained {healed} HP! (HP: {player['hp']['current']}/{player['hp']['max']})"
+                                })
+                            else:
+                                st.error(msg_u)
+                            auto_save()
+                            st.rerun()
+
+    # ── Quest Log Expander ───────────────────────────────────────────────────────
+    with st.sidebar.expander("📜 Quest Log", expanded=False):
+        q_log = world.get("quest_log", {})
+        main_q = q_log.get("main", [])
+        side_q = q_log.get("side", [])
+        if not main_q and not side_q:
+            st.info("No active quests in journal.")
+        else:
+            if main_q:
+                st.markdown("##### 🌟 Main Quests")
+                for q in main_q:
+                    st.markdown(f"**{q.get('title')}** `({q.get('status', 'active')})`")
+                    if q.get("description"):
+                        st.caption(q["description"])
+                    for obj in q.get("objectives", []):
+                        chk = "✅" if obj.get("done") else "⬜"
+                        st.markdown(f"- {chk} {obj.get('description', 'Objective')}")
+            if side_q:
+                st.markdown("##### 📌 Side Quests")
+                for q in side_q:
+                    st.markdown(f"**{q.get('title')}** `({q.get('status', 'active')})`")
+                    if q.get("description"):
+                        st.caption(q["description"])
+                    for obj in q.get("objectives", []):
+                        chk = "✅" if obj.get("done") else "⬜"
+                        st.markdown(f"- {chk} {obj.get('description', 'Objective')}")
+
+    # ── Spell Slots Display (if caster) ─────────────────────────────────────────
+    spell_slots = player.get("spell_slots", {})
+    known_spells = player.get("known_spells", [])
+    if spell_slots or known_spells:
+        with st.sidebar.expander("✨ Spellbook & Slots", expanded=False):
+            if spell_slots:
+                st.markdown("##### Spell Slots")
+                for lvl, sinfo in spell_slots.items():
+                    if isinstance(sinfo, dict):
+                        st.markdown(f"Level {lvl}: **{sinfo.get('current', 0)} / {sinfo.get('max', 0)}**")
+            if known_spells:
+                st.markdown("##### Known Spells")
+                sp_cat = state_manager._get_spell_catalog()
+                for sp_id in known_spells:
+                    sp_data = sp_cat.get(sp_id, {})
+                    sp_name = sp_data.get("name", sp_id.replace("_", " ").title())
+                    sp_lvl = sp_data.get("level", 0)
+                    lvl_lbl = "Cantrip" if sp_lvl == 0 else f"Lvl {sp_lvl}"
+                    st.markdown(f"- **{sp_name}** ({lvl_lbl})")
+
     # Town Actions
     if current_room and current_room.get("type") == "town":
         if st.sidebar.button("⛺ Take Long Rest (Town)", use_container_width=True):
@@ -452,31 +549,70 @@ def render_playing_view():
 
             selected_target = None
             selected_attack = None
+            selected_spell_id = None
+            action_type = "⚔️ Weapon Attack"
 
-            if player_alive and living_enemies:
-                target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
-                chosen_target_label = st.selectbox("🎯 Target Enemy", list(target_map.keys()), key=f"target_sel_{round_num}")
-                selected_target = target_map[chosen_target_label]
+            known_spells = player.get("known_spells", [])
+            sp_catalog = state_manager._get_spell_catalog()
 
-                attacks = player_c.get("attacks", [])
-                if not attacks:
-                    attacks = [{"name": "Unarmed Strike", "attack_bonus": 2, "damage": "1+0", "damage_type": "bludgeoning", "ranged": False}]
+            if player_alive and (living_enemies or known_spells):
+                if known_spells:
+                    action_type = st.radio("Action:", ["⚔️ Weapon Attack", "🪄 Cast Spell"], horizontal=True, key=f"c_act_type_{round_num}")
 
-                def _fmt_atk(a):
-                    ranged_tag = " [Ranged]" if a.get("ranged") else ""
-                    return f"{a.get('name', 'Attack')} (+{a.get('attack_bonus', 0)}, {a.get('damage', '1d4')} {a.get('damage_type', '')}){ranged_tag}"
+                if action_type == "⚔️ Weapon Attack" and living_enemies:
+                    target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
+                    chosen_target_label = st.selectbox("🎯 Target Enemy", list(target_map.keys()), key=f"target_sel_{round_num}")
+                    selected_target = target_map[chosen_target_label]
 
-                atk_map = {_fmt_atk(a): a for a in attacks}
-                chosen_atk_label = st.selectbox("⚔️ Weapon / Attack", list(atk_map.keys()), key=f"atk_sel_{round_num}")
-                selected_attack = atk_map[chosen_atk_label]
+                    attacks = player_c.get("attacks", [])
+                    if not attacks:
+                        attacks = [{"name": "Unarmed Strike", "attack_bonus": 2, "damage": "1+0", "damage_type": "bludgeoning", "ranged": False}]
+
+                    def _fmt_atk(a):
+                        ranged_tag = " [Ranged]" if a.get("ranged") else ""
+                        return f"{a.get('name', 'Attack')} (+{a.get('attack_bonus', 0)}, {a.get('damage', '1d4')} {a.get('damage_type', '')}){ranged_tag}"
+
+                    atk_map = {_fmt_atk(a): a for a in attacks}
+                    chosen_atk_label = st.selectbox("⚔️ Weapon / Attack", list(atk_map.keys()), key=f"atk_sel_{round_num}")
+                    selected_attack = atk_map[chosen_atk_label]
+                elif action_type == "🪄 Cast Spell" and known_spells:
+                    def _fmt_sp(sid):
+                        sinfo = sp_catalog.get(sid, {})
+                        slvl = sinfo.get("level", 0)
+                        lvl_tag = "Cantrip" if slvl == 0 else f"Lvl {slvl}"
+                        slots_left = ""
+                        if slvl > 0:
+                            s_cur = player.get("spell_slots", {}).get(str(slvl), {}).get("current", 0)
+                            slots_left = f" [{s_cur} slot(s)]"
+                        return f"{sinfo.get('name', sid)} ({lvl_tag}){slots_left}"
+
+                    sp_map = {_fmt_sp(s): s for s in known_spells}
+                    chosen_sp_label = st.selectbox("🪄 Select Spell", list(sp_map.keys()), key=f"spell_sel_{round_num}")
+                    selected_spell_id = sp_map[chosen_sp_label]
+                    chosen_sp_data = sp_catalog.get(selected_spell_id, {})
+                    sp_type = chosen_sp_data.get("type", "attack_save")
+
+                    # Target selection based on spell type
+                    if sp_type == "heal":
+                        heal_targets = {f"You ({player_c.get('name')}) [HP: {player_c.get('hp',{}).get('current')}/{player_c.get('hp',{}).get('max')}]": player_c}
+                        for comp in companions:
+                            heal_targets[f"🤝 {comp.get('name')} [HP: {comp.get('hp',{}).get('current')}/{comp.get('hp',{}).get('max')}]"] = comp
+                        chosen_ht = st.selectbox("🎯 Target (Heal)", list(heal_targets.keys()), key=f"heal_target_sel_{round_num}")
+                        selected_target = heal_targets[chosen_ht]
+                    elif living_enemies:
+                        target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
+                        chosen_target_label = st.selectbox("🎯 Target Enemy", list(target_map.keys()), key=f"spell_target_sel_{round_num}")
+                        selected_target = target_map[chosen_target_label]
+                    else:
+                        selected_target = player_c
             elif not player_alive:
                 st.warning("⚠️ You are down! Rolling death saves...")
 
-            button_label = "⚔️ Attack & End Round" if player_alive else "⏳ Endure Round"
+            button_label = "⚔️ Attack & End Round" if (player_alive and action_type == "⚔️ Weapon Attack") else ("🪄 Cast Spell & End Round" if player_alive else "⏳ Endure Round")
             if st.button(button_label, disabled=btn_disabled, use_container_width=True, type="primary"):
-                # 1. Resolve player's attack if conscious
+                # 1. Resolve player's attack or spell if conscious
                 player_attack_result = None
-                if player_alive and selected_target and selected_attack:
+                if player_alive and selected_target:
                     p_conds = combat_manager._get_condition_set(player_c)
                     if "stunned" in p_conds:
                         player_attack_result = {
@@ -485,7 +621,19 @@ def render_playing_view():
                             "skipped": True,
                             "reason": "stunned",
                         }
-                    else:
+                    elif action_type == "🪄 Cast Spell" and selected_spell_id:
+                        cast_res = state_manager.cast_spell(
+                            caster=player_c,
+                            target=selected_target,
+                            spell_id=selected_spell_id,
+                            character_state=player,
+                            world_state=world,
+                        )
+                        if not cast_res.get("success"):
+                            st.error(cast_res.get("reason", "Failed to cast spell."))
+                            st.stop()
+                        player_attack_result = cast_res
+                    elif selected_attack:
                         player_attack_result = combat_manager.resolve_attack(
                             player_c,
                             selected_target,
@@ -667,12 +815,40 @@ def render_playing_view():
                     world_state=world,
                 )
 
-                # 3. Apply state updates if present
+                # 3. Apply state updates and events if present
                 if ext_res:
                     if "state_updates" in ext_res and ext_res["state_updates"]:
                         state_manager.apply_state_updates(ext_res["state_updates"], player, world)
                     if "quest_updates" in ext_res and ext_res["quest_updates"]:
                         state_manager.apply_quest_updates(ext_res["quest_updates"], world)
+                    if "combat_start" in ext_res and ext_res["combat_start"]:
+                        c_enemies = ext_res["combat_start"].get("enemies", [])
+                        if c_enemies:
+                            combat_manager.start_combat(c_enemies, player, world)
+                            st.session_state["narrative_log"].append({
+                                "role": "assistant",
+                                "content": f"⚔️ Combat initiated against **{', '.join(e.replace('_', ' ').title() for e in c_enemies)}**!"
+                            })
+                    if "world_updates" in ext_res and ext_res["world_updates"]:
+                        w_up = ext_res["world_updates"]
+                        if "new_location" in w_up and w_up["new_location"]:
+                            ok_nl, reason_nl = dungeon_manager.register_new_location(w_up["new_location"], world)
+                            if ok_nl:
+                                nl_name = w_up["new_location"].get("name", "New Area")
+                                st.session_state["narrative_log"].append({
+                                    "role": "assistant",
+                                    "content": f"🗺️ **New Area Discovered:** {nl_name}!"
+                                })
+                    if "requires_roll" in ext_res and ext_res["requires_roll"]:
+                        rr = ext_res["requires_roll"]
+                        stat = rr.get("stat", "STR")
+                        diff = rr.get("difficulty", "medium")
+                        chk_res = state_manager.resolve_check(stat, diff, player)
+                        succ_str = "SUCCESS ✅" if chk_res["success"] else "FAILURE ❌"
+                        st.session_state["narrative_log"].append({
+                            "role": "assistant",
+                            "content": f"🎲 **Automatic Check ({diff.capitalize()} {stat} DC {chk_res['dc']})**: Rolled {chk_res['roll']} + {chk_res['modifier']} = **{chk_res['total']}** → **{succ_str}**"
+                        })
 
                 st.session_state["narrative_log"].append({"role": "assistant", "content": narrative_text})
                 st.session_state["history_buffer"].append({"role": "user", "content": action_to_process})
@@ -681,9 +857,39 @@ def render_playing_view():
                 auto_save()
                 st.rerun()
 
-            # Manual Ability Check & Combat Launchers
-            col_chk, col_cmbt = st.columns(2)
-            with col_chk:
+            # Room Loot Interaction
+            room_id = current_room.get("id")
+            has_loot = bool(current_room.get("loot")) and (room_id not in world.get("collected_loot", []))
+            if has_loot:
+                if st.button("💎 Search / Loot Room", use_container_width=True, type="secondary"):
+                    looted = dungeon_manager.get_room_loot(room_id, world)
+                    if looted:
+                        item_cat = state_manager._get_item_catalog()
+                        looted_names = []
+                        for lit in looted:
+                            li_id = lit.get("item_id")
+                            li_qty = lit.get("quantity", 1)
+                            li_name = item_cat.get(li_id, {}).get("name", li_id)
+                            looted_names.append(f"{li_name} (x{li_qty})")
+                            pinv = player.setdefault("inventory", [])
+                            existing = next((i for i in pinv if isinstance(i, dict) and i.get("item_id") == li_id), None)
+                            if existing and existing.get("quantity") is not None:
+                                existing["quantity"] = existing.get("quantity", 1) + li_qty
+                            elif not existing:
+                                pinv.append({"item_id": li_id, "equipped": False, "quantity": li_qty})
+                        msg_loot = f"💎 You searched the room and found: **{', '.join(looted_names)}**!"
+                        st.session_state["narrative_log"].append({"role": "assistant", "content": msg_loot})
+                        auto_save()
+                        st.rerun()
+
+            # Manual Ability Check, Spells & Combat Launchers
+            known_spells = player.get("known_spells", [])
+            has_ooc_spells = bool(known_spells)
+
+            col_counts = 3 if has_ooc_spells else 2
+            cols_actions = st.columns(col_counts)
+
+            with cols_actions[0]:
                 with st.popover("🎲 Make Ability Check"):
                     chk_stat = st.selectbox("Stat:", ["STR", "DEX", "CON", "INT", "WIS", "CHA"])
                     chk_diff = st.selectbox("Difficulty:", ["easy", "medium", "hard", "very_hard"])
@@ -698,7 +904,7 @@ def render_playing_view():
                         auto_save()
                         st.rerun()
 
-            with col_cmbt:
+            with cols_actions[1]:
                 if st.button("⚔️ Attack / Trigger Combat", use_container_width=True):
                     # Check room encounter table or spawn default goblins
                     enc_table = current_room.get("encounter_table", ["goblin_scout"])
@@ -712,6 +918,128 @@ def render_playing_view():
                         "content": f"⚔️ Combat initiated against **{monster_id.replace('_', ' ').title()}**!"
                     })
                     st.rerun()
+
+            if has_ooc_spells:
+                with cols_actions[2]:
+                    with st.popover("✨ Cast Spell"):
+                        sp_cat = state_manager._get_spell_catalog()
+                        def _fmt_ooc_sp(sid):
+                            sinfo = sp_cat.get(sid, {})
+                            slvl = sinfo.get("level", 0)
+                            lvl_tag = "Cantrip" if slvl == 0 else f"Lvl {slvl}"
+                            return f"{sinfo.get('name', sid)} ({lvl_tag})"
+
+                        ooc_map = {_fmt_ooc_sp(s): s for s in known_spells}
+                        chosen_ooc_lbl = st.selectbox("Spell:", list(ooc_map.keys()), key="ooc_sp_sel")
+                        chosen_ooc_id = ooc_map[chosen_ooc_lbl]
+                        ooc_data = sp_cat.get(chosen_ooc_id, {})
+
+                        ooc_targets = {f"You ({player.get('name')})": player}
+                        for comp in world.get("party", {}).get("companions", []):
+                            ooc_targets[f"🤝 {comp.get('name')}"] = comp
+                        chosen_ooc_tgt_lbl = st.selectbox("Target:", list(ooc_targets.keys()), key="ooc_tgt_sel")
+                        chosen_ooc_tgt = ooc_targets[chosen_ooc_tgt_lbl]
+
+                        if st.button("Cast", key="ooc_cast_btn", use_container_width=True):
+                            c_res = state_manager.cast_spell(
+                                caster=player,
+                                target=chosen_ooc_tgt,
+                                spell_id=chosen_ooc_id,
+                                character_state=player,
+                                world_state=world,
+                            )
+                            if not c_res.get("success"):
+                                st.error(c_res.get("reason", "Failed to cast."))
+                            else:
+                                h_val = c_res.get("healed")
+                                if h_val:
+                                    st.toast(f"Cast {ooc_data.get('name')}! Restored {h_val} HP.")
+                                    st.session_state["narrative_log"].append({
+                                        "role": "assistant",
+                                        "content": f"✨ You cast **{ooc_data.get('name')}** on **{chosen_ooc_tgt.get('name')}**, restoring {h_val} HP!"
+                                    })
+                                else:
+                                    st.toast(f"Cast {ooc_data.get('name')}!")
+                                    st.session_state["narrative_log"].append({
+                                        "role": "assistant",
+                                        "content": f"✨ You cast **{ooc_data.get('name')}**!"
+                                    })
+                                auto_save()
+                                st.rerun()
+
+            # Town Shops & Merchants UI
+            if current_room.get("shops"):
+                st.markdown("---")
+                st.markdown("##### 🏪 Town Shops & Merchants")
+                shop_cat = state_manager._get_shop_catalog()
+                gt = world.get("game_time", {})
+                cur_period = gt.get("period", "morning")
+
+                for shop_id in current_room["shops"]:
+                    s_data = shop_cat.get(shop_id)
+                    if not s_data:
+                        continue
+                    s_name = s_data.get("name", shop_id.title())
+                    s_desc = s_data.get("description", "")
+                    open_periods = s_data.get("open_periods", [])
+                    is_open = cur_period in open_periods
+
+                    with st.expander(f"🏪 {s_name} ({'Open' if is_open else 'Closed'})", expanded=False):
+                        st.caption(f"*{s_desc}*")
+                        if not is_open:
+                            st.warning(f"This shop is closed for the {cur_period}. Open during: {', '.join(open_periods)}.")
+                        else:
+                            buy_tab, sell_tab = st.tabs(["🛍️ Buy Goods", "💰 Sell Items"])
+                            with buy_tab:
+                                sell_items = s_data.get("sell_items", [])
+                                item_cat = state_manager._get_item_catalog()
+                                for s_item_id in sell_items:
+                                    i_info = item_cat.get(s_item_id, {})
+                                    i_name = i_info.get("name", s_item_id)
+                                    i_val = i_info.get("value_gold", 0)
+                                    cost = math.ceil(i_val * s_data.get("sell_multiplier", 1.0))
+                                    col_b1, col_b2 = st.columns([3, 1])
+                                    with col_b1:
+                                        st.markdown(f"**{i_name}** — {cost} GP")
+                                        if i_info.get("description"):
+                                            st.caption(i_info["description"])
+                                    with col_b2:
+                                        can_afford = player.get("gold", 0) >= cost
+                                        if st.button(f"Buy ({cost} GP)", key=f"buy_{shop_id}_{s_item_id}", disabled=not can_afford, use_container_width=True):
+                                            ok_b, msg_b = state_manager.buy_item(s_item_id, shop_id, player, world)
+                                            if ok_b:
+                                                st.toast(msg_b)
+                                                auto_save()
+                                                st.rerun()
+                                            else:
+                                                st.error(msg_b)
+
+                            with sell_tab:
+                                inv = player.get("inventory", [])
+                                non_equipped = [i for i in inv if isinstance(i, dict) and not i.get("equipped")]
+                                if not non_equipped:
+                                    st.info("No unequipped items available to sell.")
+                                else:
+                                    item_cat = state_manager._get_item_catalog()
+                                    for s_item in non_equipped:
+                                        s_iid = s_item.get("item_id")
+                                        s_qty = s_item.get("quantity", 1)
+                                        i_info = item_cat.get(s_iid, {})
+                                        i_name = i_info.get("name", s_iid)
+                                        i_val = i_info.get("value_gold", 0)
+                                        gain = math.floor(i_val * s_data.get("buy_multiplier", 0.5))
+                                        col_s1, col_s2 = st.columns([3, 1])
+                                        with col_s1:
+                                            st.markdown(f"**{i_name}** (x{s_qty}) — Sells for {gain} GP")
+                                        with col_s2:
+                                            if st.button(f"Sell (+{gain} GP)", key=f"sell_{shop_id}_{s_iid}", use_container_width=True):
+                                                ok_s, msg_s = state_manager.sell_item(s_iid, shop_id, player, world)
+                                                if ok_s:
+                                                    st.toast(msg_s)
+                                                    auto_save()
+                                                    st.rerun()
+                                                else:
+                                                    st.error(msg_s)
 
 
 # ────────────────────────────────────────────────────────────────────────────────

@@ -134,5 +134,67 @@
     "rarity": "common",
     "value_gold": 5,
     "description": "A flanged metal weapon favored by clerics."
+  },
+  "handaxe": {
+    "name": "Handaxe",
+    "type": "weapon",
+    "slot": "off_hand",
+    "effects": {"attack_bonus": 0, "damage": "1d6", "damage_type": "slashing"},
+    "rarity": "common",
+    "value_gold": 5,
+    "description": "A light, versatile woodcutter's axe suitable for close-quarters combat."
+  },
+  "quarterstaff": {
+    "name": "Quarterstaff",
+    "type": "weapon",
+    "slot": "main_hand",
+    "effects": {"attack_bonus": 0, "damage": "1d6", "damage_type": "bludgeoning"},
+    "rarity": "common",
+    "value_gold": 1,
+    "description": "A simple wooden staff carried by travelers and spellcasters alike."
+  },
+  "shortbow": {
+    "name": "Shortbow",
+    "type": "weapon",
+    "slot": "main_hand",
+    "ranged": true,
+    "finesse": true,
+    "effects": {"attack_bonus": 0, "damage": "1d6", "damage_type": "piercing", "ranged": true},
+    "rarity": "common",
+    "value_gold": 25,
+    "description": "A small recurve bow designed for hunting and skirmishing."
+  },
+  "quiver": {
+    "name": "Quiver of Arrows",
+    "type": "tool",
+    "effects": {},
+    "rarity": "common",
+    "value_gold": 1,
+    "description": "A leather quiver holding 20 arrows."
+  },
+  "scale_mail": {
+    "name": "Scale Mail",
+    "type": "wearable",
+    "slot": "chest",
+    "effects": {"ac_base": 14, "stat_mod": null},
+    "rarity": "common",
+    "value_gold": 50,
+    "description": "Armor made of overlapping metal scales fastened to leather backing."
+  },
+  "spellbook": {
+    "name": "Spellbook",
+    "type": "tool",
+    "effects": {"enables_spellcasting": true},
+    "rarity": "common",
+    "value_gold": 50,
+    "description": "A leather-bound tome inscribed with arcane formula and incantations."
+  },
+  "holy_symbol": {
+    "name": "Holy Symbol",
+    "type": "tool",
+    "effects": {"enables_spellcasting": true},
+    "rarity": "common",
+    "value_gold": 5,
+    "description": "A sacred medallion channel for divine spellcasting."
   }
 }

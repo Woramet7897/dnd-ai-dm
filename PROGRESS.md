@@ -30,7 +30,33 @@ Status values to use: NOT_STARTED / IN_PROGRESS / DONE
 ## Phase 11.1 & 14.1 Systems Verification:
 - **Phase 11.1 DoD**: 18/18 `phase11_1_tests.py` tests passed (includes player attack integration and resolve_round defensive guard).
 - **Phase 14.1 DoD**: 9/9 `phase14_1_tests.py` tests passed.
-- **Full Regression**: 266/266 tests passing clean across all test suites (`phase11_1_tests.py`: 18/18, `phase14_1_tests.py`: 9/9, `phase10_tests.py`: 3/3, `phase9_tests.py`: 20/20, `phase8_tests.py`: 9/9, `phase7_tests.py`: 6/6, `phase6_tests.py`: 32/32, `phase_equipment_tests.py`: 34/34, `phase4_tests.py`: 135/135, `phase3_tests.py`: 45/45).
+- **Full Regression & Integration**: 272/272 tests passing clean across all test suites (`test_app_integrations.py`: 6/6, `phase11_1_tests.py`: 18/18, `phase14_1_tests.py`: 9/9, `phase10_tests.py`: 3/3, `phase9_tests.py`: 20/20, `phase8_tests.py`: 9/9, `phase7_tests.py`: 6/6, `phase6_tests.py`: 32/32, `phase_equipment_tests.py`: 34/34, `phase4_tests.py`: 135/135, `phase3_tests.py`: 45/45).
+
+## Comprehensive Codebase Audit & System Integration (All Phase Features Fully Wired into UI):
+- **1. Character Creation & Starting Equipment**:
+  - Added `create_character()` wrapper to `character_creator.py` resolving runtime `AttributeError` in `app.py`.
+  - Added missing items to `item_catalog.json`: `handaxe`, `quarterstaff`, `shortbow`, `quiver`, `scale_mail`, `spellbook`, `holy_symbol`.
+  - `character_creator.derive_stats()` now automatically places starting equipment into character inventory with starting weapon & armor/shield equipped, plus 3 trail rations.
+  - `character_creator.compute_ac()` now includes `+2` AC for shields.
+- **2. Inventory & Equipment Management UI (`app.py`)**:
+  - Added sidebar expander `🎒 Inventory & Equipment` allowing real-time viewing of all items, equipping/unequipping weapons and armor, and drinking healing potions with instant HP restoration and AC recalculation.
+- **3. Quest Log Display (`app.py`)**:
+  - Added sidebar expander `📜 Quest Log` displaying main quests and side quests with objective completion checkmarks (`✅` / `⬜`).
+- **4. Spellcasting System Integration (`app.py` & `state_manager.py`)**:
+  - Fixed bug in `state_manager.resolve_spell_save` (signature was missing `combat_state`, causing `TypeError`/`NameError` when casting save spells).
+  - Enriched `state_manager.resolve_spell_save` and `resolve_spell_attack` output with `attacker_id`, `attacker_name`, `target_id`, `attack_name`, and `target_downed`.
+  - Added combat spellcasting UI in `app.py` allowing casters (Wizard, Cleric, Bard) to choose between Weapon Attack and Spellcasting, select spells from `known_spells`, track spell slots, choose targets (enemies or allies for heals), and resolve spells into `combat_manager.resolve_round()`.
+  - Added out-of-combat heal/utility spellcasting popover in exploration panel.
+- **5. Town Shops & Merchants UI (`app.py`)**:
+  - Added `🏪 Town Shops & Merchants` expander when in town (`current_room.get("shops")`). Checks shop opening hours against game time period, displays goods for sale with gold prices, and supports both buying goods (`state_manager.buy_item()`) and selling unequipped inventory (`state_manager.sell_item()`).
+- **6. Room Loot Collection UI (`app.py`)**:
+  - Added `💎 Search / Loot Room` action in exploration when room defines loot and has not yet been looted, wiring `dungeon_manager.get_room_loot()`, adding items to inventory, and marking room looted.
+- **7. Extraction Routing Completion (`app.py`)**:
+  - Fully wired `ext_res["combat_start"]` to `combat_manager.start_combat()`.
+  - Fully wired `ext_res["world_updates"]["new_location"]` to `dungeon_manager.register_new_location()`.
+  - Auto-resolves and logs `ext_res["requires_roll"]` ability checks in the narrative log.
+- **8. Integration Test Suite**:
+  - Created `test_app_integrations.py` (6/6 tests passing) verifying all 7 integration points end-to-end.
 
 ## Critical Bugfix (Phase 7 Integration Disconnect):
 - **Player Combat Action Integration**: Resolved legacy issue where `app.py` called `resolve_round(cs, world)` passing `world` as 2nd positional argument instead of `world_state=world`.
@@ -40,7 +66,7 @@ Status values to use: NOT_STARTED / IN_PROGRESS / DONE
   4. Updated `phase7_tests.py` line 147 to use `world_state=self.world_state`.
 
 ## If IN_PROGRESS when a session ends, note exactly what's left here:
-Sub-phases 11.1 and 14.1 are 100% DONE and fully verified. Sub-phases 11.2–13.5 and 14.2 remain on the roadmap.
+All systems through Phase 11.1 + 14.1 + Full UI Integrations are 100% DONE and fully verified.
 
 ## Phase 10 deferred items (explicitly out of scope until Phase 10)
 - Session recap on load (Section 14a / BUILD_ORDER.md Phase 10): generate a "previously in your story…" paragraph from recent major_lore entries on save load. NOT implemented in Phase 5. Owner: Phase 10 (optional polish).

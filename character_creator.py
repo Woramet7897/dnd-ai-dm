@@ -132,14 +132,18 @@ def compute_ac(class_id: str, stats: Dict[str, int], equipped_items: list = None
     # Simplify: check starting equipment for armor type
     starting_gear = cls.get("starting_equipment", [])
 
+    ac_base = 10 + dex_mod
     if "chain_mail" in starting_gear:
-        return 16
+        ac_base = 16
     elif "scale_mail" in starting_gear:
-        return 14
+        ac_base = 14
     elif "leather_armor" in starting_gear:
-        return 11 + dex_mod  # leather = 11 + DEX
-    else:
-        return 10 + dex_mod  # unarmored
+        ac_base = 11 + dex_mod
+
+    if "shield" in starting_gear:
+        ac_base += 2
+
+    return ac_base
 
 
 def derive_stats(
@@ -214,6 +218,39 @@ def derive_stats(
     # 8. Background hook
     background_hook = background.get("background_hook", "")
 
+    # 9. Starting inventory & equipment
+    starting_gear = cls.get("starting_equipment", [])
+    item_catalog = _load_catalog("item_catalog.json")
+    starting_inventory = []
+    equipped_slots = set()
+
+    for item_id in starting_gear:
+        info = item_catalog.get(item_id, {})
+        itype = info.get("type")
+        islot = info.get("slot")
+
+        should_equip = False
+        if itype in ("weapon", "wearable"):
+            if islot and islot not in equipped_slots:
+                should_equip = True
+                equipped_slots.add(islot)
+            elif not islot and "main_hand" not in equipped_slots:
+                should_equip = True
+                equipped_slots.add("main_hand")
+
+        starting_inventory.append({
+            "item_id": item_id,
+            "equipped": should_equip,
+            "quantity": 1,
+        })
+
+    # Always ensure starting trail rations (3)
+    starting_inventory.append({
+        "item_id": "trail_rations",
+        "equipped": False,
+        "quantity": 3,
+    })
+
     character_sheet = {
         "schema_version": 4,
         "name": name,
@@ -238,8 +275,33 @@ def derive_stats(
         "status": "normal",
         "active_conditions": [],
         "gold": starting_gold,
-        "inventory": [],
+        "inventory": starting_inventory,
         "roll_log": [],
     }
 
     return character_sheet
+
+
+def create_character(
+    name: str,
+    race: str,
+    class_name: str,
+    background: str,
+    stats: Dict[str, int],
+    campaign_tone: str = "classic",
+) -> Dict[str, Any]:
+    """
+    Convenience wrapper for UI / callers. Normalizes display names to catalog IDs
+    and delegates to derive_stats().
+    """
+    race_id = race.strip().lower().replace(" ", "_").replace("-", "_")
+    class_id = class_name.strip().lower().replace(" ", "_")
+    background_id = background.strip().lower().replace(" ", "_")
+    return derive_stats(
+        name=name.strip(),
+        race_id=race_id,
+        class_id=class_id,
+        background_id=background_id,
+        base_stats=stats,
+        campaign_tone=campaign_tone,
+    )

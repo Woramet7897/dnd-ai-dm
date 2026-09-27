@@ -1096,6 +1096,7 @@ def resolve_spell_save(
     target: Dict[str, Any],
     spell: Dict[str, Any],
     state: Optional[Dict[str, Any]] = None,
+    combat_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Spec Section 8b / 18b / PART 4b:
@@ -1152,19 +1153,24 @@ def resolve_spell_save(
             condition_applied = spell["on_fail_extra"]
 
     return {
-        "caster_name": caster.get("name", "Caster"),
-        "target_name": target.get("name", "Target"),
-        "spell_name":  spell.get("name", "Spell"),
-        "dc":          dc,
-        "roll":        roll,
-        "modifier":    t_mod + t_prof_bonus,
-        "total":       total,
-        "success":     success,
-        "critical":    critical,
-        "fumble":      fumble,
-        "damage":      damage,
+        "attacker_id":   caster.get("id", "player"),
+        "attacker_name": caster.get("name", "Caster"),
+        "caster_name":   caster.get("name", "Caster"),
+        "target_id":     target.get("id", "unknown"),
+        "target_name":   target.get("name", "Target"),
+        "spell_name":    spell.get("name", "Spell"),
+        "attack_name":   spell.get("name", "Spell"),
+        "dc":            dc,
+        "roll":          roll,
+        "modifier":      t_mod + t_prof_bonus,
+        "total":         total,
+        "success":       success,
+        "critical":      critical,
+        "fumble":        fumble,
+        "damage":        damage,
         "condition_applied": condition_applied,
         "target_hp_after": target.get("hp", {}).get("current", 0),
+        "target_downed": target.get("hp", {}).get("current", 0) <= 0,
     }
 
 
@@ -1228,18 +1234,23 @@ def resolve_spell_attack(
                 combat_manager.trigger_lightning_surface_reaction(combat_state)
 
     return {
-        "caster_name": caster.get("name", "Caster"),
-        "target_name": target.get("name", "Target"),
-        "spell_name":  spell.get("name", "Spell"),
-        "raw_roll":    raw_roll,
-        "to_hit_bonus": to_hit_bonus,
-        "total_to_hit": total_to_hit,
-        "target_ac":   target_ac,
-        "hit":          hit,
-        "crit":         crit,
-        "fumble":       fumble,
-        "damage":       damage,
+        "attacker_id":   caster.get("id", "player"),
+        "attacker_name": caster.get("name", "Caster"),
+        "caster_name":   caster.get("name", "Caster"),
+        "target_id":     target.get("id", "unknown"),
+        "target_name":   target.get("name", "Target"),
+        "spell_name":    spell.get("name", "Spell"),
+        "attack_name":   spell.get("name", "Spell"),
+        "raw_roll":      raw_roll,
+        "to_hit_bonus":  to_hit_bonus,
+        "total_to_hit":  total_to_hit,
+        "target_ac":     target_ac,
+        "hit":           hit,
+        "crit":          crit,
+        "fumble":        fumble,
+        "damage":        damage,
         "target_hp_after": target.get("hp", {}).get("current", 0),
+        "target_downed": target.get("hp", {}).get("current", 0) <= 0,
     }
 
 
