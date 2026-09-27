@@ -219,6 +219,39 @@ def load_game(char_name: str, client: Optional[Any] = None) -> bool:
 # Character Creation / Landing View
 # ────────────────────────────────────────────────────────────────────────────────
 
+CLASS_FLAVOR = {
+    "Fighter": {
+        "quote": "คมดาบไม่เคยโกหก... ไม่ว่าจะเผชิญหน้ากับศัตรูหน้าไหน ความแข็งแกร่งและระเบียบวินัยจะนำพาชัยชนะมาให้",
+        "desc": "ผู้เชี่ยวชาญการต่อสู้และอาวุธทุกรูปแบบ พร้อมยืนหยัดแนวหน้าของสมรภูมิด้วยความเด็ดเดี่ยว",
+    },
+    "Wizard": {
+        "quote": "ความรู้คืออำนาจที่ไร้ขอบเขต... เส้นสายมนตราแห่งจักรวาลรอคอยให้ข้าเป็นผู้ร่ายและควบคุม",
+        "desc": "จอมเวทผู้ศึกษาตำราเวทลึกลับ สามารถควบคุมพลังเวททำลายล้างและพลิกแพลงสถานการณ์ได้ดั่งใจ",
+    },
+    "Rogue": {
+        "quote": "เงามืดคือสหายที่ซื่อสัตย์ที่สุด... ฝีเท้าที่เงียบงันและการโจมตีจุดตายก่อนที่ศัตรูจะทันรู้ตัวคืองานศิลปะของข้า",
+        "desc": "ผู้เชี่ยวชาญการลอบเร้น ปลดกับดัก ล้วงกระเป๋า และชำนาญการสร้างความเสียหายคริติคอลจากเงามืด",
+    },
+    "Cleric": {
+        "quote": "ตราบใดที่ศรัทธายังคงอยู่ แสงสว่างแห่งทวยเทพจะคอยปกป้องคุ้มครองพวกเรา และแผดเผาความชั่วร้ายให้มลายสิ้น",
+        "desc": "ผู้รับใช้ทวยเทพที่เปี่ยมด้วยพลังศักดิ์สิทธิ์ สามารถรักษาบาดแผล เสริมพลังพันธมิตร และขับไล่เหล่าปิศาจ",
+    },
+    "Bard": {
+        "quote": "โลกใบนี้คือเวทีการแสดง และทุกการเดินทางคือบทกวีอันยิ่งใหญ่... ฟังเสียงดนตรีของข้า แล้วเจ้าจะก้าวข้ามขีดจำกัด!",
+        "desc": "ผู้ใช้เสียงเพลงและคำพูดเป็นเวทมนตร์ ปลุกใจเพื่อนร่วมทีมด้วยแรงบันดาลใจ และร่ายมนตร์สะกดใจศัตรู",
+    },
+}
+
+RACE_FLAVOR = {
+    "Human": "มนุษย์ผู้มีความมุ่งมั่นไม่ย่อท้อและปรับตัวได้อย่างยอดเยี่ยม",
+    "Elf": "เอลฟ์ผู้สง่างาม สืบสายเลือดแห่งเฟย์ที่ต้านทานมนต์สะกดและมีประสาทสัมผัสฉับไว",
+    "Dwarf": "คนแคระผู้ทรหดอดทน ต้านทานพิษและมีจิตวิญญาณแห่งช่างฝีมือใต้ขุนเขา",
+    "Halfling": "ฮาล์ฟลิงผู้คล่องแคล่วและโชคดี มีความกล้าหาญซ่อนอยู่ภายใต้รูปร่างกะทัดรัด",
+    "Tiefling": "ไทฟลิงผู้มีสายเลือดแห่งขุมนรก มีความต้านทานไฟและสายตามองทะลุความมืด",
+    "Half-Orc": "ฮาล์ฟออร์คผู้ดุดัน แข็งแกร่ง และมีพลังใจในการเอาชีวิตรอดที่ไร้ขีดจำกัด",
+    "Dragonborn": "ดรากอนบอร์นผู้สืบสายเลือดจากมังกรโบราณ เปี่ยมด้วยเกียรติยศและลมหายใจมังกร",
+}
+
 CLASS_PRIORITY = {
     "Fighter": ["STR", "CON", "DEX", "WIS", "INT", "CHA"],
     "Wizard":  ["INT", "DEX", "CON", "WIS", "CHA", "STR"],
@@ -313,6 +346,28 @@ def render_landing_view():
                     ["Fighter", "Wizard", "Rogue", "Cleric", "Bard"],
                     key="select_class",
                 )
+
+            # Dynamic Character Flavor & Voice Quote Card
+            cls_info = CLASS_FLAVOR.get(cls_name, {})
+            race_info = RACE_FLAVOR.get(race, "")
+            bgs_cat = character_creator._load_catalog("backgrounds_catalog.json")
+            bg_key = bg.lower().replace(" ", "_")
+            bg_hook = bgs_cat.get(bg_key, {}).get("background_hook", "")
+
+            st.markdown(
+                f"""
+                <div style="background: rgba(30, 41, 59, 0.75); border-left: 4px solid #f43f5e; padding: 14px 18px; border-radius: 8px; margin: 14px 0 16px 0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);">
+                    <div style="font-style: italic; font-size: 1.05rem; color: #f8fafc; margin-bottom: 8px; line-height: 1.5;">
+                        &ldquo;{cls_info.get('quote', '')}&rdquo;
+                    </div>
+                    <div style="font-size: 0.88rem; color: #94a3b8; line-height: 1.45;">
+                        <span style="color: #cbd5e1; font-weight: 600;">{char_name}</span> &bull; {race} {cls_name} &bull; <span style="color: #fda4af;">{bg}</span><br/>
+                        {race_info} &bull; <em>{bg_hook}</em>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
             st.markdown("---")
             st.markdown("##### ⚔️ จัดสรรค่าพลัง Point-Buy (27 แต้มรวม)")
@@ -439,9 +494,18 @@ def render_landing_view():
                         st.session_state["player_state"] = player
                         st.session_state["world_state"] = world
                         st.session_state["current_char_name"] = char_name.strip()
+                        intro_quote = cls_info.get("quote", "")
                         st.session_state["narrative_log"] = [{
                             "role": "assistant",
-                            "content": f"Welcome to Riverside Village, **{char_name.strip()}**! Your journey begins here.",
+                            "content": (
+                                f"🌅 **บทนำ: ก้าวแรกสู่ริเวอร์ไซด์ (Prologue: Arrival at Riverside Village)**\n\n"
+                                f"สายลมยามเช้าพัดผ่านทิวไม้แห่งป่าธอร์นวูดมายังแม่น้ำซิลเวอร์ประกายระยิบระยับ... "
+                                f"**{char_name.strip()}** {race_info} ในมาดของ {cls_name} ผู้มีภูมิหลังเป็น {bg} "
+                                f"ก้าวเท้าข้ามสะพานไม้เก่าเข้าสู่หมู่บ้านริมน้ำริเวอร์ไซด์\n\n"
+                                f"> *\"{intro_quote}\"*\n\n"
+                                f"กลิ่นขนมปังอบใหม่และควันจากโรงตีเหล็กลอยอวลในอากาศ ชาวบ้านเริ่มออกมาทำมาหากิน "
+                                f"เสียงลำน้ำและโอกาสครั้งใหม่รอคอยเจ้าอยู่เบื้องหน้า... การผจญภัยเริ่มต้นขึ้นแล้ว!"
+                            ),
                         }]
 
                         st.success(f"สร้างตัวละคร '{char_name.strip()}' สำเร็จ!")
