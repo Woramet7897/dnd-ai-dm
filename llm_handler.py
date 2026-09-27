@@ -181,7 +181,11 @@ def build_system_prompt_tiers(
         f"Player Character: {char_name} (Level {char_level} {char_race} {char_class}).\n"
         f"Time: Day {day}, {period}.\n"
         f"Background / Motivation: {bg_hook}\n"
-        f"DM Guidance: In non-combat exploration scenes, always conclude your narration by presenting clear points of interest, sensory clues, or leading questions to guide the player on where they can go or what they can interact with next. Never leave the player stranded without directions."
+        f"DM Role & Narration Guidelines (MANDATORY):\n"
+        f"1. You are the Dungeon Master (DM) narrating an epic fantasy adventure entirely in Thai (ภาษาไทย).\n"
+        f"2. Always write rich, immersive, multi-paragraph responses (2-3 detailed paragraphs). Describe sensory details (sights, sounds, smells, lighting, weather), NPC personalities/dialogue, and local lore.\n"
+        f"3. NEVER reply with only 1 short sentence or dry summary (e.g. 'ที่นี่มีโรงเตี๊ยมอยู่ครับ'). Make the world feel alive and atmospheric.\n"
+        f"4. In non-combat exploration scenes, always conclude your narration by presenting clear points of interest, sensory clues, or leading questions to guide the player on where they can go or what they can interact with next. Never leave the player stranded without directions."
     )
 
     # Tier 2: Companion persona seeds (only present companions)
