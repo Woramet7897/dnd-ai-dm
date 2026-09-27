@@ -110,6 +110,21 @@ def run_single_suite(test_file: str, verbose: bool = False) -> Tuple[bool, float
     return success, elapsed, output
 
 
+def extract_test_count(output: str) -> int:
+    """Extract individual test or assertion count from suite output."""
+    import re
+    m = re.search(r"Ran (\d+) tests?", output)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"RESULTS:\s+(\d+)\s+passed", output)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"(\d+)\s+checks? passed", output)
+    if m:
+        return int(m.group(1))
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="DnD AI DM Central Test Runner")
     parser.add_argument("phases", nargs="*", help="Optional phase numbers or names to test (e.g. 13.5, phase8)")
@@ -129,11 +144,11 @@ def main():
     total_start = time.time()
 
     for idx, f in enumerate(test_files, 1):
-        display_name = f.replace("_tests.py", "").replace("test_", "")
         print(f"[{idx:02d}/{len(test_files):02d}] {f:<30} ... ", end="", flush=True)
 
         passed, duration, out = run_single_suite(f, verbose=args.verbose)
-        status_str = "PASS ✅" if passed else "FAIL ❌"
+        test_cnt = extract_test_count(out)
+        status_str = f"PASS ✅ ({test_cnt:>3} tests)" if passed else "FAIL ❌"
         print(f"{status_str} ({duration:.2f}s)")
 
         if args.verbose or not passed:
@@ -142,16 +157,25 @@ def main():
             if not passed:
                 print("    " + "-" * 60)
 
-        results.append((f, passed, duration))
+        results.append((f, passed, duration, test_cnt))
 
     total_time = time.time() - total_start
-    all_passed = all(p for _, p, _ in results)
-    pass_count = sum(1 for _, p, _ in results if p)
+    all_passed = all(p for _, p, _, _ in results)
+    pass_count = sum(1 for _, p, _, _ in results if p)
     fail_count = len(results) - pass_count
+    total_tests = sum(c for _, _, _, c in results)
 
     print("=" * 70)
+    print("📊 EXACT PASS COUNT PER PHASE FILE:")
+    print("-" * 70)
+    for f, passed, duration, count in results:
+        status_icon = "✅ PASS" if passed else "❌ FAIL"
+        print(f"  {status_icon} | {f:<28} | {count:>3} tests | {duration:.2f}s")
+    print("-" * 70)
+    print(f"Total Individual Tests / Checks Passed: {total_tests}")
+    print("=" * 70)
     if all_passed:
-        print(f"🎉 ALL TEST SUITES PASSED! ({pass_count}/{len(results)} suites in {total_time:.2f}s)")
+        print(f"🎉 ALL TEST SUITES PASSED! ({pass_count}/{len(results)} suites, {total_tests} tests in {total_time:.2f}s)")
     else:
         print(f"❌ TEST FAILURES DETECTED: {fail_count} failed, {pass_count} passed in {total_time:.2f}s")
     print("=" * 70)

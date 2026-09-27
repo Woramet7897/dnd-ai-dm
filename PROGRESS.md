@@ -1,6 +1,21 @@
 # PROGRESS.md — do not delete, read this first every session
 
-Last updated: 2026-09-26 (Phase 9 complete — All 7 Phase 9 systems verified, 15/15 phase9 tests + 81 regression tests passed)
+Last updated: 2026-09-27 (Phase 14.2 & Hotfix complete — 20/20 test suites, 469 individual checks passed)
+
+## Hotfix — Missing `Union` Import in `dungeon_manager.py` and `state_manager.py` (Root-Cause Analysis)
+
+- **Root Cause & Origin Commits:**
+  - `dungeon_manager.py`, line 106 (`steps: Union[int, Dict[str, Any]] = 1`): Introduced in commit `91d72827` (`feat(phase-12.3): implement food spoilage and camp cooking with full test coverage`) during Phase 12.3 implementation.
+  - `state_manager.py`, line 2058 (`ingredient_1: Union[str, Dict[str, Any]]`): Also introduced in commit `91d72827` (Phase 12.3) in `cook_meal()`.
+- **Why it occurred and whether regression suite was run:**
+  - After commit `91d72827`, the regression suite was indeed run in this Windows environment (`py -3.14`).
+  - **However, this environment runs Python 3.14**, where **PEP 649 (Deferred Evaluation of Annotations)** is enabled by default. Under PEP 649, type annotations are not evaluated at module import time or function definition time — they are compiled into deferred annotation code blocks (`__annotate__`) and only evaluated when `typing.get_type_hints()` is called.
+  - Because existing test suites imported modules and executed functions without calling `typing.get_type_hints()`, Python 3.14 deferred annotation evaluation and never raised a `NameError`.
+  - **Plain confirmation:** The regression suite *was* executed under Python 3.14, but **it was not run under Python <= 3.13**, nor did any test inspect function annotations via `typing.get_type_hints()`. In standard Python <= 3.13 without `from __future__ import annotations`, type annotations are eagerly evaluated during module import, causing `import dungeon_manager` and `import state_manager` to fail immediately with `NameError: name 'Union' is not defined`.
+- **Fix Applied:**
+  - Added `Union` to `from typing import ...` in [dungeon_manager.py](file:///C:/DnD/dungeon_manager.py#L15) and [state_manager.py](file:///C:/DnD/state_manager.py#L26).
+  - Standalone imports (`python3 -c "import dungeon_manager"` and `python3 -c "import state_manager"`) and `typing.get_type_hints()` now succeed cleanly.
+  - Full test runner `run_tests.py` ran all 20 test suites with 0 collection errors and 469 individual tests passed.
 
 | Phase | Status | Files written | Notes/deviations |
 |---|---|---|---|

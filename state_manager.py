@@ -23,7 +23,7 @@ import os
 import random
 import tempfile
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger("state_manager")
 if not logger.handlers:

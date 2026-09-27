@@ -12,7 +12,7 @@ import json
 import logging
 import os
 import random
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger("dungeon_manager")
 if not logger.handlers:
