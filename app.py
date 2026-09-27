@@ -1050,7 +1050,7 @@ def render_playing_view():
 
     # Story & Narrative Log
     st.markdown("### 📜 Narrative Log")
-    log_container = st.container(height=350)
+    log_container = st.container(height=520)
     with log_container:
         for entry in st.session_state["narrative_log"]:
             role = entry.get("role", "assistant")
@@ -1192,6 +1192,10 @@ def render_playing_view():
                     atk_map = {_fmt_atk(a): a for a in attacks}
                     chosen_atk_label = st.selectbox("⚔️ Weapon / Attack", list(atk_map.keys()), key=f"atk_sel_{round_num}")
                     selected_attack = atk_map[chosen_atk_label]
+                    atk_dmg = selected_attack.get("damage", "1d4")
+                    atk_dtype = selected_attack.get("damage_type", "").title()
+                    atk_rng = "Ranged" if selected_attack.get("ranged") else "Melee"
+                    st.caption(f"💥 Damage: **{atk_dmg} {atk_dtype}** ({atk_rng}) | Attack Bonus: **+{selected_attack.get('attack_bonus', 0)}**")
                 elif action_type == "💥 Weapon Action" and living_enemies:
                     target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
                     chosen_target_label = st.selectbox("🎯 Target Enemy", list(target_map.keys()), key=f"wact_target_sel_{round_num}")
@@ -1241,6 +1245,21 @@ def render_playing_view():
                     selected_spell_id = sp_map[chosen_sp_label]
                     chosen_sp_data = sp_catalog.get(selected_spell_id, {})
                     sp_type = chosen_sp_data.get("type", "attack_save")
+                    sp_eff = chosen_sp_data.get("effect", {})
+                    sp_desc = chosen_sp_data.get("description", "")
+                    sp_details = []
+                    if "damage" in sp_eff:
+                        sp_details.append(f"💥 Damage: {sp_eff['damage']} {sp_eff.get('damage_type', '')}".strip())
+                    if "heal" in sp_eff:
+                        sp_details.append(f"💚 Heal: {sp_eff['heal']}")
+                    if "save_stat" in sp_eff:
+                        sp_details.append(f"🛡️ Save: {sp_eff['save_stat']} DC {player.get('spell_save_dc', 13)}")
+                    if sp_eff.get("auto_hit"):
+                        sp_details.append("✨ Auto-hit")
+                    if sp_details:
+                        st.caption(f"{' | '.join(sp_details)} — *{sp_desc}*" if sp_desc else ' | '.join(sp_details))
+                    elif sp_desc:
+                        st.caption(f"*{sp_desc}*")
 
                     # Target selection based on spell type
                     if sp_type == "heal":
@@ -1467,27 +1486,41 @@ def render_playing_view():
                 st.markdown("##### 🧭 Navigation & Movement")
                 exits = dungeon_manager.get_available_exits(world)
                 
-                nav_cols = st.columns(2)
-                directions = [("North ⬆️", "north"), ("South ⬇️", "south"), ("East ➡️", "east"), ("West ⬅️", "west")]
-                
-                for idx, (label, dir_key) in enumerate(directions):
-                    col_idx = idx % 2
+                def _render_move_btn(dir_key, label):
                     dest_id = exits.get(dir_key)
-                    with nav_cols[col_idx]:
-                        if dest_id is not None:
-                            if st.button(label, key=f"move_{dir_key}", use_container_width=True):
-                                ok_m, msg_m, new_room = dungeon_manager.move_player(dir_key, world, player)
-                                if ok_m and new_room:
-                                    st.session_state.pop("pending_inspiration_reroll", None)
-                                    st.session_state["last_action_msg"] = msg_m
-                                    st.session_state["narrative_log"].append({
-                                        "role": "user",
-                                        "content": f"I move {dir_key} into {new_room.get('name')}."
-                                    })
-                                    auto_save()
-                                    st.rerun()
-                        else:
-                            st.button(label, key=f"move_disabled_{dir_key}", disabled=True, use_container_width=True)
+                    if dest_id is not None:
+                        if st.button(label, key=f"move_{dir_key}", use_container_width=True):
+                            ok_m, msg_m, new_room = dungeon_manager.move_player(dir_key, world, player)
+                            if ok_m and new_room:
+                                st.session_state.pop("pending_inspiration_reroll", None)
+                                st.session_state["last_action_msg"] = msg_m
+                                st.session_state["narrative_log"].append({
+                                    "role": "user",
+                                    "content": f"I move {dir_key} into {new_room.get('name')}."
+                                })
+                                auto_save()
+                                st.rerun()
+                    else:
+                        st.button(label, key=f"move_disabled_{dir_key}", disabled=True, use_container_width=True)
+
+                # Row 1: North
+                c_n1, c_n2, c_n3 = st.columns([1, 1, 1])
+                with c_n2:
+                    _render_move_btn("north", "⬆️ North")
+
+                # Row 2: West, Compass Center, East
+                c_w, c_mid, c_e = st.columns([1, 1, 1])
+                with c_w:
+                    _render_move_btn("west", "⬅️ West")
+                with c_mid:
+                    st.markdown("<div style='text-align: center; font-size: 1.5rem; line-height: 2.2rem;'>🧭</div>", unsafe_allow_html=True)
+                with c_e:
+                    _render_move_btn("east", "➡️ East")
+
+                # Row 3: South
+                c_s1, c_s2, c_s3 = st.columns([1, 1, 1])
+                with c_s2:
+                    _render_move_btn("south", "⬇️ South")
 
         with col_act:
             st.markdown("##### 🎭 Actions & Interaction")
@@ -1527,450 +1560,475 @@ def render_playing_view():
                         del st.session_state["pending_inspiration_reroll"]
                         st.rerun()
 
-            # Contextual Action Suggestions (Sub-phase 14.1 / Module D)
-            suggestions = st.session_state.get("action_suggestions") or list(llm_handler.DEFAULT_ACTION_SUGGESTIONS)
-            st.caption("💡 **Suggested Actions:**")
-            sug_cols = st.columns(3)
-            clicked_suggestion = None
-            for idx, sug_text in enumerate(suggestions[:3]):
-                with sug_cols[idx]:
-                    if st.button(f"✨ {sug_text}", key=f"sug_btn_{idx}", use_container_width=True):
-                        clicked_suggestion = sug_text
+            tab_act, tab_env, tab_town = st.tabs(["⚔️ แอ็กชัน & พูดคุย", "🔍 สำรวจฉาก & วัตถุ", "🏛️ สถานที่ & ร้านค้า"])
 
-            # Action Text Input Form
-            with st.form("action_form", clear_on_submit=True):
-                user_action = st.text_input("What do you want to do?", placeholder="e.g. Look around the room, talk to the merchant...")
-                sub_act = st.form_submit_button("Submit Action", use_container_width=True)
+            with tab_act:
+                # Contextual Action Suggestions (Sub-phase 14.1 / Module D)
+                suggestions = st.session_state.get("action_suggestions") or list(llm_handler.DEFAULT_ACTION_SUGGESTIONS)
+                st.caption("💡 **Suggested Actions:**")
+                sug_cols = st.columns(3)
+                clicked_suggestion = None
+                for idx, sug_text in enumerate(suggestions[:3]):
+                    with sug_cols[idx]:
+                        if st.button(f"✨ {sug_text}", key=f"sug_btn_{idx}", use_container_width=True):
+                            clicked_suggestion = sug_text
 
-            action_to_process = None
-            if clicked_suggestion:
-                action_to_process = clicked_suggestion.strip()
-            elif sub_act and user_action.strip():
-                action_to_process = user_action.strip()
+                # Action Text Input Form
+                with st.form("action_form", clear_on_submit=True):
+                    user_action = st.text_input("What do you want to do?", placeholder="e.g. Look around the room, talk to the merchant...")
+                    sub_act = st.form_submit_button("Submit Action", use_container_width=True)
 
-            if action_to_process:
-                st.session_state.pop("pending_inspiration_reroll", None)
-                st.session_state["narrative_log"].append({"role": "user", "content": action_to_process})
+                action_to_process = None
+                if clicked_suggestion:
+                    action_to_process = clicked_suggestion.strip()
+                elif sub_act and user_action.strip():
+                    action_to_process = user_action.strip()
 
-                # 1. Narrative Call
-                hist = st.session_state.get("history_buffer", [])
-                res = llm_handler.generate_narrative_response(
-                    user_input=action_to_process,
-                    player_state=player,
-                    world_state=world,
-                    history=hist,
-                )
-                narrative_text = res.get("narrative", "")
-                if res.get("suggestions"):
-                    st.session_state["action_suggestions"] = res["suggestions"]
+                if action_to_process:
+                    st.session_state.pop("pending_inspiration_reroll", None)
+                    st.session_state["narrative_log"].append({"role": "user", "content": action_to_process})
 
-                # 2. Extraction Call
-                ext_res = llm_handler.generate_extraction_response(
-                    narrative_text=narrative_text,
-                    player_state=player,
-                    world_state=world,
-                )
+                    # 1. Narrative Call
+                    hist = st.session_state.get("history_buffer", [])
+                    res = llm_handler.generate_narrative_response(
+                        user_input=action_to_process,
+                        player_state=player,
+                        world_state=world,
+                        history=hist,
+                    )
+                    narrative_text = res.get("narrative", "")
+                    if res.get("suggestions"):
+                        st.session_state["action_suggestions"] = res["suggestions"]
 
-                # 3. Apply state updates and events if present
-                if ext_res:
-                    if "state_updates" in ext_res and ext_res["state_updates"]:
-                        state_manager.apply_state_updates(ext_res["state_updates"], player, world)
-                    if "quest_updates" in ext_res and ext_res["quest_updates"]:
-                        state_manager.apply_quest_updates(ext_res["quest_updates"], world)
-                    if "combat_start" in ext_res and ext_res["combat_start"]:
-                        c_enemies = ext_res["combat_start"].get("enemies", [])
-                        if c_enemies:
-                            combat_manager.start_combat(c_enemies, player, world)
+                    # 2. Extraction Call
+                    ext_res = llm_handler.generate_extraction_response(
+                        narrative_text=narrative_text,
+                        player_state=player,
+                        world_state=world,
+                    )
+
+                    # 3. Apply state updates and events if present
+                    if ext_res:
+                        if "state_updates" in ext_res and ext_res["state_updates"]:
+                            state_manager.apply_state_updates(ext_res["state_updates"], player, world)
+                        if "quest_updates" in ext_res and ext_res["quest_updates"]:
+                            state_manager.apply_quest_updates(ext_res["quest_updates"], world)
+                        if "combat_start" in ext_res and ext_res["combat_start"]:
+                            c_enemies = ext_res["combat_start"].get("enemies", [])
+                            if c_enemies:
+                                combat_manager.start_combat(c_enemies, player, world)
+                                st.session_state["narrative_log"].append({
+                                    "role": "assistant",
+                                    "content": f"⚔️ Combat initiated against **{', '.join(e.replace('_', ' ').title() for e in c_enemies)}**!"
+                                })
+                        if "world_updates" in ext_res and ext_res["world_updates"]:
+                            w_up = ext_res["world_updates"]
+                            if "new_location" in w_up and w_up["new_location"]:
+                                ok_nl, reason_nl = dungeon_manager.register_new_location(w_up["new_location"], world)
+                                if ok_nl:
+                                    nl_name = w_up["new_location"].get("name", "New Area")
+                                    st.session_state["narrative_log"].append({
+                                        "role": "assistant",
+                                        "content": f"🗺️ **New Area Discovered:** {nl_name}!"
+                                    })
+                        if "requires_roll" in ext_res and ext_res["requires_roll"]:
+                            rr = ext_res["requires_roll"]
+                            stat = rr.get("stat", "STR")
+                            diff = rr.get("difficulty", "medium")
+                            chk_res = state_manager.resolve_check(stat, diff, player)
+                            succ_str = "SUCCESS ✅" if chk_res["success"] else "FAILURE ❌"
                             st.session_state["narrative_log"].append({
                                 "role": "assistant",
-                                "content": f"⚔️ Combat initiated against **{', '.join(e.replace('_', ' ').title() for e in c_enemies)}**!"
+                                "content": f"🎲 **Automatic Check ({diff.capitalize()} {stat} DC {chk_res['dc']})**: Rolled {chk_res['roll']} + {chk_res['modifier']} = **{chk_res['total']}** → **{succ_str}**"
                             })
-                    if "world_updates" in ext_res and ext_res["world_updates"]:
-                        w_up = ext_res["world_updates"]
-                        if "new_location" in w_up and w_up["new_location"]:
-                            ok_nl, reason_nl = dungeon_manager.register_new_location(w_up["new_location"], world)
-                            if ok_nl:
-                                nl_name = w_up["new_location"].get("name", "New Area")
-                                st.session_state["narrative_log"].append({
-                                    "role": "assistant",
-                                    "content": f"🗺️ **New Area Discovered:** {nl_name}!"
-                                })
-                    if "requires_roll" in ext_res and ext_res["requires_roll"]:
-                        rr = ext_res["requires_roll"]
-                        stat = rr.get("stat", "STR")
-                        diff = rr.get("difficulty", "medium")
-                        chk_res = state_manager.resolve_check(stat, diff, player)
-                        succ_str = "SUCCESS ✅" if chk_res["success"] else "FAILURE ❌"
-                        st.session_state["narrative_log"].append({
-                            "role": "assistant",
-                            "content": f"🎲 **Automatic Check ({diff.capitalize()} {stat} DC {chk_res['dc']})**: Rolled {chk_res['roll']} + {chk_res['modifier']} = **{chk_res['total']}** → **{succ_str}**"
-                        })
-                        if not chk_res["success"] and state_manager.get_inspiration(player) > 0:
-                            st.session_state["pending_inspiration_reroll"] = {
-                                "stat": stat,
-                                "difficulty": diff,
-                                "dc": chk_res["dc"],
-                                "modifier": chk_res["modifier"],
-                                "proficiency": chk_res.get("proficiency", 0),
-                                "bonus": chk_res.get("bonus", 0),
-                                "original_roll": chk_res["roll"],
-                                "original_total": chk_res["total"],
-                                "skill": chk_res.get("skill"),
-                            }
-                        else:
-                            st.session_state.pop("pending_inspiration_reroll", None)
+                            if not chk_res["success"] and state_manager.get_inspiration(player) > 0:
+                                st.session_state["pending_inspiration_reroll"] = {
+                                    "stat": stat,
+                                    "difficulty": diff,
+                                    "dc": chk_res["dc"],
+                                    "modifier": chk_res["modifier"],
+                                    "proficiency": chk_res.get("proficiency", 0),
+                                    "bonus": chk_res.get("bonus", 0),
+                                    "original_roll": chk_res["roll"],
+                                    "original_total": chk_res["total"],
+                                    "skill": chk_res.get("skill"),
+                                }
+                            else:
+                                st.session_state.pop("pending_inspiration_reroll", None)
 
-                st.session_state["narrative_log"].append({"role": "assistant", "content": narrative_text})
-                st.session_state["history_buffer"].append({"role": "user", "content": action_to_process})
-                st.session_state["history_buffer"].append({"role": "assistant", "content": narrative_text})
+                    st.session_state["narrative_log"].append({"role": "assistant", "content": narrative_text})
+                    st.session_state["history_buffer"].append({"role": "user", "content": action_to_process})
+                    st.session_state["history_buffer"].append({"role": "assistant", "content": narrative_text})
 
-                auto_save()
-                st.rerun()
+                    auto_save()
+                    st.rerun()
 
-            # Room Loot Interaction
-            room_id = current_room.get("id")
-            has_loot = bool(current_room.get("loot")) and (room_id not in world.get("collected_loot", []))
-            if has_loot:
-                if st.button("💎 Search / Loot Room", use_container_width=True, type="secondary"):
-                    looted = dungeon_manager.get_room_loot(room_id, world)
-                    if looted:
-                        item_cat = state_manager._get_item_catalog()
-                        looted_names = []
-                        for lit in looted:
-                            li_id = lit.get("item_id")
-                            li_qty = lit.get("quantity", 1)
-                            li_name = item_cat.get(li_id, {}).get("name", li_id)
-                            looted_names.append(f"{li_name} (x{li_qty})")
-                            pinv = player.setdefault("inventory", [])
-                            existing = next((i for i in pinv if isinstance(i, dict) and i.get("item_id") == li_id), None)
-                            if existing and existing.get("quantity") is not None:
-                                existing["quantity"] = existing.get("quantity", 1) + li_qty
-                            elif not existing:
-                                pinv.append({"item_id": li_id, "equipped": False, "quantity": li_qty})
-                        msg_loot = f"💎 You searched the room and found: **{', '.join(looted_names)}**!"
-                        st.session_state["narrative_log"].append({"role": "assistant", "content": msg_loot})
-                        auto_save()
-                        st.rerun()
+                st.markdown("---")
+                st.caption("🎲 **Manual Actions & Checks:**")
+                # Manual Ability Check, Spells & Combat Launchers
+                known_spells = player.get("known_spells", [])
+                has_ooc_spells = bool(known_spells)
+                room_npcs = current_room.get("npcs", [])
 
-            # Hidden Cache Search (Module C §2 Rumor)
-            has_hidden_cache = bool(current_room.get("hidden_cache")) and (f"{room_id}_hidden_cache" not in world.get("collected_loot", []))
-            if has_hidden_cache:
-                if st.button("🔍 Search Hidden Cache (Rumor)", use_container_width=True, type="secondary"):
-                    looted = dungeon_manager.get_room_loot(room_id, world)
-                    if looted:
-                        item_cat = state_manager._get_item_catalog()
-                        looted_names = []
-                        for lit in looted:
-                            li_id = lit.get("item_id")
-                            li_qty = lit.get("quantity", 1)
-                            li_name = item_cat.get(li_id, {}).get("name", li_id)
-                            looted_names.append(f"{li_name} (x{li_qty})")
-                            pinv = player.setdefault("inventory", [])
-                            existing = next((i for i in pinv if isinstance(i, dict) and i.get("item_id") == li_id), None)
-                            if existing and existing.get("quantity") is not None:
-                                existing["quantity"] = existing.get("quantity", 1) + li_qty
-                            elif not existing:
-                                pinv.append({"item_id": li_id, "equipped": False, "quantity": li_qty})
-                        msg_loot = f"🔍 You investigated the rumors and uncovered a secret cache: **{', '.join(looted_names)}**!"
-                        st.session_state["narrative_log"].append({"role": "assistant", "content": msg_loot})
-                        auto_save()
-                        st.rerun()
+                col_counts = 2
+                if has_ooc_spells:
+                    col_counts += 1
+                if room_npcs:
+                    col_counts += 1
+                cols_actions = st.columns(col_counts)
 
-            # Interactive Objects in Exploration (Spec Module A §1 & Module C)
-            interactive_objs = current_room.get("interactive_objects", []) if current_room else []
-            unused_objs = [obj for obj in interactive_objs if not obj.get("used")]
-            if unused_objs:
-                st.markdown("##### 🎯 Environmental Objects")
-                for obj in unused_objs:
-                    obj_id = obj.get("id")
-                    obj_name = obj.get("name", obj_id)
-                    obj_desc = obj.get("description", "")
-                    col_obj_txt, col_obj_act = st.columns([3, 1])
-                    with col_obj_txt:
-                        st.caption(f"**{obj_name}**: {obj_desc}")
-                    with col_obj_act:
-                        if st.button(f"🎯 ใช้งาน {obj_name}", key=f"exp_obj_{obj_id}", use_container_width=True):
-                            res_obj = dungeon_manager.interact_with_object(world, room_id, obj_id, character_state=player)
-                            if res_obj.get("success"):
-                                st.toast(f"ใช้งาน {obj_name} สำเร็จ!")
-                                st.session_state["narrative_log"].append({
-                                    "role": "assistant",
-                                    "content": f"🎯 **Interactive Object:** {res_obj['message']}"
-                                })
-                                auto_save()
-                                st.rerun()
-
-            # Manual Ability Check, Spells & Combat Launchers
-            known_spells = player.get("known_spells", [])
-            has_ooc_spells = bool(known_spells)
-            room_npcs = current_room.get("npcs", [])
-
-            col_counts = 2
-            if has_ooc_spells:
-                col_counts += 1
-            if room_npcs:
-                col_counts += 1
-            cols_actions = st.columns(col_counts)
-
-            c_idx = 0
-            with cols_actions[c_idx]:
-                c_idx += 1
-                with st.popover("🎲 Make Ability Check"):
-                    chk_stat = st.selectbox("Stat:", ["STR", "DEX", "CON", "INT", "WIS", "CHA"])
-                    chk_diff = st.selectbox("Difficulty:", ["easy", "medium", "hard", "very_hard"])
-                    chk_skill = st.text_input("Skill (optional, e.g. Arcana, Stealth, Athletics):", "")
-                    insp_count = state_manager.get_inspiration(player)
-                    use_insp = st.checkbox(f"Use Inspiration (Reroll, have {insp_count})", disabled=(insp_count <= 0))
-                    if st.button("Roll d20", use_container_width=True):
-                        chk_res = state_manager.resolve_check(
-                            chk_stat,
-                            chk_diff,
-                            player,
-                            skill=chk_skill.strip() if chk_skill else None,
-                            use_inspiration=use_insp,
-                        )
-                        succ_str = "SUCCESS ✅" if chk_res["success"] else "FAILURE ❌"
-                        insp_tag = " (Inspiration Used ✨)" if chk_res.get("inspiration_spent") else ""
-                        skill_tag = f" [{chk_res['skill']}]" if chk_res.get("skill") else ""
-                        roll_msg = (
-                            f"🎲 **{chk_stat}{skill_tag} Check ({chk_diff.capitalize()} DC {chk_res['dc']})**: "
-                            f"Rolled {chk_res['roll']} + mod {chk_res['modifier']} = **{chk_res['total']}** → **{succ_str}**{insp_tag}"
-                        )
-                        st.session_state["narrative_log"].append({"role": "assistant", "content": roll_msg})
-                        if not chk_res["success"] and state_manager.get_inspiration(player) > 0:
-                            st.session_state["pending_inspiration_reroll"] = {
-                                "stat": chk_stat,
-                                "difficulty": chk_diff,
-                                "dc": chk_res["dc"],
-                                "modifier": chk_res["modifier"],
-                                "proficiency": chk_res.get("proficiency", 0),
-                                "bonus": chk_res.get("bonus", 0),
-                                "original_roll": chk_res["roll"],
-                                "original_total": chk_res["total"],
-                                "skill": chk_skill.strip() if chk_skill else None,
-                            }
-                        else:
-                            st.session_state.pop("pending_inspiration_reroll", None)
-                        auto_save()
-                        st.rerun()
-
-            if room_npcs:
+                c_idx = 0
                 with cols_actions[c_idx]:
                     c_idx += 1
-                    with st.popover("🦹 Pickpocket"):
-                        st.caption("Attempt to steal from an NPC using Sleight of Hand.")
-                        target_npc = st.selectbox("Target NPC", room_npcs, key="pp_target_npc")
-                        st_item = st.selectbox("Item to Steal", ["gold", "healing_potion", "torch", "rope", "dagger"], key="pp_item")
-                        if st.button("🧤 Attempt Steal", use_container_width=True, key="btn_pp_steal"):
-                            pp_res = state_manager.attempt_pickpocket(player, target_npc, st_item, world_state=world)
-                            if pp_res["success"]:
-                                st.toast(pp_res["message"])
-                                st.session_state["narrative_log"].append({
-                                    "role": "assistant",
-                                    "content": f"🦹 **Pickpocket:** {pp_res['message']} (Rolled {pp_res['total']} vs DC {pp_res['dc']})"
-                                })
+                    with st.popover("🎲 Make Ability Check"):
+                        chk_stat = st.selectbox("Stat:", ["STR", "DEX", "CON", "INT", "WIS", "CHA"])
+                        chk_diff = st.selectbox("Difficulty:", ["easy", "medium", "hard", "very_hard"])
+                        chk_skill = st.text_input("Skill (optional, e.g. Arcana, Stealth, Athletics):", "")
+                        insp_count = state_manager.get_inspiration(player)
+                        use_insp = st.checkbox(f"Use Inspiration (Reroll, have {insp_count})", disabled=(insp_count <= 0))
+                        if st.button("Roll d20", use_container_width=True):
+                            chk_res = state_manager.resolve_check(
+                                chk_stat,
+                                chk_diff,
+                                player,
+                                skill=chk_skill.strip() if chk_skill else None,
+                                use_inspiration=use_insp,
+                            )
+                            succ_str = "SUCCESS ✅" if chk_res["success"] else "FAILURE ❌"
+                            insp_tag = " (Inspiration Used ✨)" if chk_res.get("inspiration_spent") else ""
+                            skill_tag = f" [{chk_res['skill']}]" if chk_res.get("skill") else ""
+                            roll_msg = (
+                                f"🎲 **{chk_stat}{skill_tag} Check ({chk_diff.capitalize()} DC {chk_res['dc']})**: "
+                                f"Rolled {chk_res['roll']} + mod {chk_res['modifier']} = **{chk_res['total']}** → **{succ_str}**{insp_tag}"
+                            )
+                            st.session_state["narrative_log"].append({"role": "assistant", "content": roll_msg})
+                            if not chk_res["success"] and state_manager.get_inspiration(player) > 0:
+                                st.session_state["pending_inspiration_reroll"] = {
+                                    "stat": chk_stat,
+                                    "difficulty": chk_diff,
+                                    "dc": chk_res["dc"],
+                                    "modifier": chk_res["modifier"],
+                                    "proficiency": chk_res.get("proficiency", 0),
+                                    "bonus": chk_res.get("bonus", 0),
+                                    "original_roll": chk_res["roll"],
+                                    "original_total": chk_res["total"],
+                                    "skill": chk_skill.strip() if chk_skill else None,
+                                }
                             else:
-                                st.error(pp_res["message"])
-                                st.session_state["narrative_log"].append({
-                                    "role": "assistant",
-                                    "content": f"🚨 **Caught!** {pp_res['message']} (Rolled {pp_res['total']} vs DC {pp_res['dc']})"
-                                })
+                                st.session_state.pop("pending_inspiration_reroll", None)
                             auto_save()
                             st.rerun()
 
-            with cols_actions[c_idx]:
-                c_idx += 1
-                if st.button("⚔️ Attack / Trigger Combat", use_container_width=True):
-                    # Check room encounter table or spawn default goblins
-                    enc_table = current_room.get("encounter_table", ["goblin_scout"])
-                    monster_id = enc_table[0] if enc_table else "goblin_scout"
-                    
-                    # Start combat idempotently
-                    combat_manager.start_combat([monster_id], player, world)
-                    auto_save()
-                    st.session_state["narrative_log"].append({
-                        "role": "assistant",
-                        "content": f"⚔️ Combat initiated against **{monster_id.replace('_', ' ').title()}**!"
-                    })
-                    st.rerun()
-
-            if has_ooc_spells:
-                with cols_actions[c_idx]:
-                    c_idx += 1
-                    with st.popover("✨ Cast Spell"):
-                        sp_cat = state_manager._get_spell_catalog()
-                        def _fmt_ooc_sp(sid):
-                            sinfo = sp_cat.get(sid, {})
-                            slvl = sinfo.get("level", 0)
-                            lvl_tag = "Cantrip" if slvl == 0 else f"Lvl {slvl}"
-                            return f"{sinfo.get('name', sid)} ({lvl_tag})"
-
-                        ooc_map = {_fmt_ooc_sp(s): s for s in known_spells}
-                        chosen_ooc_lbl = st.selectbox("Spell:", list(ooc_map.keys()), key="ooc_sp_sel")
-                        chosen_ooc_id = ooc_map[chosen_ooc_lbl]
-                        ooc_data = sp_cat.get(chosen_ooc_id, {})
-
-                        ooc_targets = {f"You ({player.get('name')})": player}
-                        for comp in world.get("party", {}).get("companions", []):
-                            ooc_targets[f"🤝 {comp.get('name')}"] = comp
-                        chosen_ooc_tgt_lbl = st.selectbox("Target:", list(ooc_targets.keys()), key="ooc_tgt_sel")
-                        chosen_ooc_tgt = ooc_targets[chosen_ooc_tgt_lbl]
-
-                        if st.button("Cast", key="ooc_cast_btn", use_container_width=True):
-                            c_res = state_manager.cast_spell(
-                                caster=player,
-                                target=chosen_ooc_tgt,
-                                spell_id=chosen_ooc_id,
-                                character_state=player,
-                                world_state=world,
-                            )
-                            if not c_res.get("success"):
-                                st.error(c_res.get("reason", "Failed to cast."))
-                            else:
-                                h_val = c_res.get("healed")
-                                if h_val:
-                                    st.toast(f"Cast {ooc_data.get('name')}! Restored {h_val} HP.")
+                if room_npcs:
+                    with cols_actions[c_idx]:
+                        c_idx += 1
+                        with st.popover("🦹 Pickpocket"):
+                            st.caption("Attempt to steal from an NPC using Sleight of Hand.")
+                            target_npc = st.selectbox("Target NPC", room_npcs, key="pp_target_npc")
+                            st_item = st.selectbox("Item to Steal", ["gold", "healing_potion", "torch", "rope", "dagger"], key="pp_item")
+                            if st.button("🧤 Attempt Steal", use_container_width=True, key="btn_pp_steal"):
+                                pp_res = state_manager.attempt_pickpocket(player, target_npc, st_item, world_state=world)
+                                if pp_res["success"]:
+                                    st.toast(pp_res["message"])
                                     st.session_state["narrative_log"].append({
                                         "role": "assistant",
-                                        "content": f"✨ You cast **{ooc_data.get('name')}** on **{chosen_ooc_tgt.get('name')}**, restoring {h_val} HP!"
+                                        "content": f"🦹 **Pickpocket:** {pp_res['message']} (Rolled {pp_res['total']} vs DC {pp_res['dc']})"
                                     })
                                 else:
-                                    st.toast(f"Cast {ooc_data.get('name')}!")
+                                    st.error(pp_res["message"])
                                     st.session_state["narrative_log"].append({
                                         "role": "assistant",
-                                        "content": f"✨ You cast **{ooc_data.get('name')}**!"
+                                        "content": f"🚨 **Caught!** {pp_res['message']} (Rolled {pp_res['total']} vs DC {pp_res['dc']})"
                                     })
                                 auto_save()
                                 st.rerun()
 
-            # Town Shops & Merchants UI
-            if current_room.get("shops"):
-                st.markdown("---")
-                st.markdown("##### 🏪 Town Shops & Merchants")
-                shop_cat = state_manager._get_shop_catalog()
-                gt = world.get("game_time", {})
-                cur_period = gt.get("period", "morning")
+                with cols_actions[c_idx]:
+                    c_idx += 1
+                    if st.button("⚔️ Attack / Trigger Combat", use_container_width=True):
+                        # Check room encounter table or spawn default goblins
+                        enc_table = current_room.get("encounter_table", ["goblin_scout"])
+                        monster_id = enc_table[0] if enc_table else "goblin_scout"
 
-                for shop_id in current_room["shops"]:
-                    s_data = shop_cat.get(shop_id)
-                    if not s_data:
-                        continue
-                    s_name = s_data.get("name", shop_id.title())
-                    s_desc = s_data.get("description", "")
-                    open_periods = s_data.get("open_periods", [])
-                    is_open = cur_period in open_periods
+                        # Start combat idempotently
+                        combat_manager.start_combat([monster_id], player, world)
+                        auto_save()
+                        st.session_state["narrative_log"].append({
+                            "role": "assistant",
+                            "content": f"⚔️ Combat initiated against **{monster_id.replace('_', ' ').title()}**!"
+                        })
+                        st.rerun()
 
-                    with st.expander(f"🏪 {s_name} ({'Open' if is_open else 'Closed'})", expanded=False):
-                        st.caption(f"*{s_desc}*")
-                        if not is_open:
-                            st.warning(f"This shop is closed for the {cur_period}. Open during: {', '.join(open_periods)}.")
-                        else:
-                            buy_tab, sell_tab = st.tabs(["🛍️ Buy Goods", "💰 Sell Items"])
-                            with buy_tab:
-                                sell_items = s_data.get("sell_items", [])
-                                item_cat = state_manager._get_item_catalog()
-                                for s_item_id in sell_items:
-                                    i_info = item_cat.get(s_item_id, {})
-                                    i_name = i_info.get("name", s_item_id)
-                                    i_val = i_info.get("value_gold", 0)
-                                    cost = math.ceil(i_val * s_data.get("sell_multiplier", 1.0))
-                                    col_b1, col_b2 = st.columns([3, 1])
-                                    with col_b1:
-                                        st.markdown(f"**{i_name}** — {cost} GP")
-                                        if i_info.get("description"):
-                                            st.caption(i_info["description"])
-                                    with col_b2:
-                                        can_afford = player.get("gold", 0) >= cost
-                                        if st.button(f"Buy ({cost} GP)", key=f"buy_{shop_id}_{s_item_id}", disabled=not can_afford, use_container_width=True):
-                                            ok_b, msg_b = state_manager.buy_item(s_item_id, shop_id, player, world)
-                                            if ok_b:
-                                                st.toast(msg_b)
-                                                auto_save()
-                                                st.rerun()
-                                            else:
-                                                st.error(msg_b)
+                if has_ooc_spells:
+                    with cols_actions[c_idx]:
+                        c_idx += 1
+                        with st.popover("✨ Cast Spell"):
+                            sp_cat = state_manager._get_spell_catalog()
+                            def _fmt_ooc_sp(sid):
+                                sinfo = sp_cat.get(sid, {})
+                                slvl = sinfo.get("level", 0)
+                                lvl_tag = "Cantrip" if slvl == 0 else f"Lvl {slvl}"
+                                return f"{sinfo.get('name', sid)} ({lvl_tag})"
 
-                            with sell_tab:
-                                inv = player.get("inventory", [])
-                                non_equipped = [i for i in inv if isinstance(i, dict) and not i.get("equipped")]
-                                if not non_equipped:
-                                    st.info("No unequipped items available to sell.")
+                            ooc_map = {_fmt_ooc_sp(s): s for s in known_spells}
+                            chosen_ooc_lbl = st.selectbox("Spell:", list(ooc_map.keys()), key="ooc_sp_sel")
+                            chosen_ooc_id = ooc_map[chosen_ooc_lbl]
+                            ooc_data = sp_cat.get(chosen_ooc_id, {})
+                            ooc_eff = ooc_data.get("effect", {})
+                            ooc_desc = ooc_data.get("description", "")
+                            ooc_details = []
+                            if "heal" in ooc_eff:
+                                ooc_details.append(f"💚 Heal: {ooc_eff['heal']}")
+                            if "damage" in ooc_eff:
+                                ooc_details.append(f"💥 Damage: {ooc_eff['damage']} {ooc_eff.get('damage_type', '')}".strip())
+                            if ooc_eff.get("auto_hit"):
+                                ooc_details.append("✨ Auto-hit")
+                            ooc_dt_line = " | ".join(ooc_details)
+                            st.caption(f"{ooc_dt_line} — *{ooc_desc}*" if ooc_dt_line else f"*{ooc_desc}*")
+
+                            ooc_targets = {f"You ({player.get('name')})": player}
+                            for comp in world.get("party", {}).get("companions", []):
+                                ooc_targets[f"🤝 {comp.get('name')}"] = comp
+                            chosen_ooc_tgt_lbl = st.selectbox("Target:", list(ooc_targets.keys()), key="ooc_tgt_sel")
+                            chosen_ooc_tgt = ooc_targets[chosen_ooc_tgt_lbl]
+
+                            if st.button("Cast", key="ooc_cast_btn", use_container_width=True):
+                                c_res = state_manager.cast_spell(
+                                    caster=player,
+                                    target=chosen_ooc_tgt,
+                                    spell_id=chosen_ooc_id,
+                                    character_state=player,
+                                    world_state=world,
+                                )
+                                if not c_res.get("success"):
+                                    st.error(c_res.get("reason", "Failed to cast."))
                                 else:
-                                    item_cat = state_manager._get_item_catalog()
-                                    for s_item in non_equipped:
-                                        s_iid = s_item.get("item_id")
-                                        s_qty = s_item.get("quantity", 1)
-                                        i_info = item_cat.get(s_iid, {})
-                                        i_name = i_info.get("name", s_iid)
-                                        i_val = i_info.get("value_gold", 0)
-                                        gain = math.floor(i_val * s_data.get("buy_multiplier", 0.5))
-                                        col_s1, col_s2 = st.columns([3, 1])
-                                        with col_s1:
-                                            st.markdown(f"**{i_name}** (x{s_qty}) — Sells for {gain} GP")
-                                        with col_s2:
-                                            if st.button(f"Sell (+{gain} GP)", key=f"sell_{shop_id}_{s_iid}", use_container_width=True):
-                                                ok_s, msg_s = state_manager.sell_item(s_iid, shop_id, player, world)
-                                                if ok_s:
-                                                    st.toast(msg_s)
-                                                    auto_save()
-                                                    st.rerun()
-                                                else:
-                                                    st.error(msg_s)
+                                    h_val = c_res.get("healed")
+                                    if h_val:
+                                        st.toast(f"Cast {ooc_data.get('name')}! Restored {h_val} HP.")
+                                        st.session_state["narrative_log"].append({
+                                            "role": "assistant",
+                                            "content": f"✨ You cast **{ooc_data.get('name')}** on **{chosen_ooc_tgt.get('name')}**, restoring {h_val} HP!"
+                                        })
+                                    else:
+                                        st.toast(f"Cast {ooc_data.get('name')}!")
+                                        st.session_state["narrative_log"].append({
+                                            "role": "assistant",
+                                            "content": f"✨ You cast **{ooc_data.get('name')}**!"
+                                        })
+                                    auto_save()
+                                    st.rerun()
 
-            # Tavern Notice Board UI (Module C §2 / Phase 13.5)
-            if current_room.get("id") in ("town_riverside", "tavern") or current_room.get("notice_board") is not None or "innkeeper_mira" in current_room.get("npcs", []):
-                st.markdown("---")
-                st.markdown("##### 📜 Tavern Notice Board")
-                nb_entries = dungeon_manager.get_notice_board(world)
-                if not nb_entries:
-                    st.caption("No notices currently posted. Check back in a few days!")
-                else:
-                    for entry in nb_entries:
-                        e_id = entry.get("id")
-                        e_type = entry.get("type", "quest")
-                        e_title = entry.get("title", "Notice")
-                        e_desc = entry.get("description", "")
-                        e_status = entry.get("status", "available")
-                        icon = "🗡️" if e_type == "bounty" else ("📦" if e_type == "delivery" else "🗺️")
 
-                        with st.expander(f"{icon} {e_title} [{e_status.capitalize()}]", expanded=(e_status == "available")):
-                            st.write(e_desc)
-                            if entry.get("reward_gold"):
-                                st.caption(f"💰 Reward: **{entry['reward_gold']} GP**")
-                            if entry.get("target_room_name"):
-                                st.caption(f"📍 Location: **{entry['target_room_name']}**")
+            with tab_env:
+                # Room Loot Interaction
+                room_id = current_room.get("id")
+                has_loot = bool(current_room.get("loot")) and (room_id not in world.get("collected_loot", []))
+                if has_loot:
+                    if st.button("💎 Search / Loot Room", use_container_width=True, type="secondary"):
+                        looted = dungeon_manager.get_room_loot(room_id, world)
+                        if looted:
+                            item_cat = state_manager._get_item_catalog()
+                            looted_names = []
+                            for lit in looted:
+                                li_id = lit.get("item_id")
+                                li_qty = lit.get("quantity", 1)
+                                li_name = item_cat.get(li_id, {}).get("name", li_id)
+                                looted_names.append(f"{li_name} (x{li_qty})")
+                                pinv = player.setdefault("inventory", [])
+                                existing = next((i for i in pinv if isinstance(i, dict) and i.get("item_id") == li_id), None)
+                                if existing and existing.get("quantity") is not None:
+                                    existing["quantity"] = existing.get("quantity", 1) + li_qty
+                                elif not existing:
+                                    pinv.append({"item_id": li_id, "equipped": False, "quantity": li_qty})
+                            msg_loot = f"💎 You searched the room and found: **{', '.join(looted_names)}**!"
+                            st.session_state["narrative_log"].append({"role": "assistant", "content": msg_loot})
+                            auto_save()
+                            st.rerun()
 
-                            if e_status == "available":
-                                if st.button(f"📜 Accept Quest", key=f"acc_nb_{e_id}", use_container_width=True):
-                                    res_acc = dungeon_manager.accept_notice_board_quest(world, e_id)
-                                    st.toast(res_acc["message"])
+                # Hidden Cache Search (Module C §2 Rumor)
+                has_hidden_cache = bool(current_room.get("hidden_cache")) and (f"{room_id}_hidden_cache" not in world.get("collected_loot", []))
+                if has_hidden_cache:
+                    if st.button("🔍 Search Hidden Cache (Rumor)", use_container_width=True, type="secondary"):
+                        looted = dungeon_manager.get_room_loot(room_id, world)
+                        if looted:
+                            item_cat = state_manager._get_item_catalog()
+                            looted_names = []
+                            for lit in looted:
+                                li_id = lit.get("item_id")
+                                li_qty = lit.get("quantity", 1)
+                                li_name = item_cat.get(li_id, {}).get("name", li_id)
+                                looted_names.append(f"{li_name} (x{li_qty})")
+                                pinv = player.setdefault("inventory", [])
+                                existing = next((i for i in pinv if isinstance(i, dict) and i.get("item_id") == li_id), None)
+                                if existing and existing.get("quantity") is not None:
+                                    existing["quantity"] = existing.get("quantity", 1) + li_qty
+                                elif not existing:
+                                    pinv.append({"item_id": li_id, "equipped": False, "quantity": li_qty})
+                            msg_loot = f"🔍 You investigated the rumors and uncovered a secret cache: **{', '.join(looted_names)}**!"
+                            st.session_state["narrative_log"].append({"role": "assistant", "content": msg_loot})
+                            auto_save()
+                            st.rerun()
+
+                # Interactive Objects in Exploration (Spec Module A §1 & Module C)
+                interactive_objs = current_room.get("interactive_objects", []) if current_room else []
+                unused_objs = [obj for obj in interactive_objs if not obj.get("used")]
+                if unused_objs:
+                    st.markdown("##### 🎯 Environmental Objects")
+                    for obj in unused_objs:
+                        obj_id = obj.get("id")
+                        obj_name = obj.get("name", obj_id)
+                        obj_desc = obj.get("description", "")
+                        col_obj_txt, col_obj_act = st.columns([3, 1])
+                        with col_obj_txt:
+                            st.caption(f"**{obj_name}**: {obj_desc}")
+                        with col_obj_act:
+                            if st.button(f"🎯 ใช้งาน {obj_name}", key=f"exp_obj_{obj_id}", use_container_width=True):
+                                res_obj = dungeon_manager.interact_with_object(world, room_id, obj_id, character_state=player)
+                                if res_obj.get("success"):
+                                    st.toast(f"ใช้งาน {obj_name} สำเร็จ!")
                                     st.session_state["narrative_log"].append({
                                         "role": "assistant",
-                                        "content": f"📜 **Accepted Quest from Notice Board:** {e_title}"
+                                        "content": f"🎯 **Interactive Object:** {res_obj['message']}"
                                     })
                                     auto_save()
                                     st.rerun()
-                            elif e_status == "accepted":
-                                if e_type == "delivery":
-                                    tgt_item = entry.get("target_item")
-                                    has_it = any(isinstance(it, dict) and it.get("item_id") == tgt_item for it in player.get("inventory", []))
-                                    if st.button(f"📦 Complete Delivery ({entry.get('reward_gold')} GP)", key=f"comp_nb_{e_id}", disabled=not has_it, use_container_width=True):
-                                        res_cmp = dungeon_manager.complete_notice_board_quest(world, e_id, player)
-                                        if res_cmp["success"]:
-                                            st.toast(res_cmp["message"])
-                                            st.session_state["narrative_log"].append({
-                                                "role": "assistant",
-                                                "content": f"🎉 **Quest Completed:** {res_cmp['message']}"
-                                            })
-                                            auto_save()
-                                            st.rerun()
-                                        else:
-                                            st.error(res_cmp["message"])
-                                else:
-                                    st.info("Status: Quest active in your quest log! Fulfill the objectives to earn the bounty.")
-                            elif e_status == "completed":
-                                st.success("✅ Quest Completed!")
 
+                if not has_loot and not has_hidden_cache and not unused_objs:
+                    st.caption("🔍 ไม่มีวัตถุหรือหีบสมบัติพิเศษในบริเวณนี้")
+
+            with tab_town:
+                # Town Shops & Merchants UI
+                if current_room.get("shops"):
+                    st.markdown("---")
+                    st.markdown("##### 🏪 Town Shops & Merchants")
+                    shop_cat = state_manager._get_shop_catalog()
+                    gt = world.get("game_time", {})
+                    cur_period = gt.get("period", "morning")
+
+                    for shop_id in current_room["shops"]:
+                        s_data = shop_cat.get(shop_id)
+                        if not s_data:
+                            continue
+                        s_name = s_data.get("name", shop_id.title())
+                        s_desc = s_data.get("description", "")
+                        open_periods = s_data.get("open_periods", [])
+                        is_open = cur_period in open_periods
+
+                        with st.expander(f"🏪 {s_name} ({'Open' if is_open else 'Closed'})", expanded=False):
+                            st.caption(f"*{s_desc}*")
+                            if not is_open:
+                                st.warning(f"This shop is closed for the {cur_period}. Open during: {', '.join(open_periods)}.")
+                            else:
+                                buy_tab, sell_tab = st.tabs(["🛍️ Buy Goods", "💰 Sell Items"])
+                                with buy_tab:
+                                    sell_items = s_data.get("sell_items", [])
+                                    item_cat = state_manager._get_item_catalog()
+                                    for s_item_id in sell_items:
+                                        i_info = item_cat.get(s_item_id, {})
+                                        i_name = i_info.get("name", s_item_id)
+                                        i_val = i_info.get("value_gold", 0)
+                                        cost = math.ceil(i_val * s_data.get("sell_multiplier", 1.0))
+                                        col_b1, col_b2 = st.columns([3, 1])
+                                        with col_b1:
+                                            st.markdown(f"**{i_name}** — {cost} GP")
+                                            if i_info.get("description"):
+                                                st.caption(i_info["description"])
+                                        with col_b2:
+                                            can_afford = player.get("gold", 0) >= cost
+                                            if st.button(f"Buy ({cost} GP)", key=f"buy_{shop_id}_{s_item_id}", disabled=not can_afford, use_container_width=True):
+                                                ok_b, msg_b = state_manager.buy_item(s_item_id, shop_id, player, world)
+                                                if ok_b:
+                                                    st.toast(msg_b)
+                                                    auto_save()
+                                                    st.rerun()
+                                                else:
+                                                    st.error(msg_b)
+
+                                with sell_tab:
+                                    inv = player.get("inventory", [])
+                                    non_equipped = [i for i in inv if isinstance(i, dict) and not i.get("equipped")]
+                                    if not non_equipped:
+                                        st.info("No unequipped items available to sell.")
+                                    else:
+                                        item_cat = state_manager._get_item_catalog()
+                                        for s_item in non_equipped:
+                                            s_iid = s_item.get("item_id")
+                                            s_qty = s_item.get("quantity", 1)
+                                            i_info = item_cat.get(s_iid, {})
+                                            i_name = i_info.get("name", s_iid)
+                                            i_val = i_info.get("value_gold", 0)
+                                            gain = math.floor(i_val * s_data.get("buy_multiplier", 0.5))
+                                            col_s1, col_s2 = st.columns([3, 1])
+                                            with col_s1:
+                                                st.markdown(f"**{i_name}** (x{s_qty}) — Sells for {gain} GP")
+                                            with col_s2:
+                                                if st.button(f"Sell (+{gain} GP)", key=f"sell_{shop_id}_{s_iid}", use_container_width=True):
+                                                    ok_s, msg_s = state_manager.sell_item(s_iid, shop_id, player, world)
+                                                    if ok_s:
+                                                        st.toast(msg_s)
+                                                        auto_save()
+                                                        st.rerun()
+                                                    else:
+                                                        st.error(msg_s)
+
+                # Tavern Notice Board UI (Module C §2 / Phase 13.5)
+                if current_room.get("id") in ("town_riverside", "tavern") or current_room.get("notice_board") is not None or "innkeeper_mira" in current_room.get("npcs", []):
+                    st.markdown("---")
+                    st.markdown("##### 📜 Tavern Notice Board")
+                    nb_entries = dungeon_manager.get_notice_board(world)
+                    if not nb_entries:
+                        st.caption("No notices currently posted. Check back in a few days!")
+                    else:
+                        for entry in nb_entries:
+                            e_id = entry.get("id")
+                            e_type = entry.get("type", "quest")
+                            e_title = entry.get("title", "Notice")
+                            e_desc = entry.get("description", "")
+                            e_status = entry.get("status", "available")
+                            icon = "🗡️" if e_type == "bounty" else ("📦" if e_type == "delivery" else "🗺️")
+
+                            with st.expander(f"{icon} {e_title} [{e_status.capitalize()}]", expanded=(e_status == "available")):
+                                st.write(e_desc)
+                                if entry.get("reward_gold"):
+                                    st.caption(f"💰 Reward: **{entry['reward_gold']} GP**")
+                                if entry.get("target_room_name"):
+                                    st.caption(f"📍 Location: **{entry['target_room_name']}**")
+
+                                if e_status == "available":
+                                    if st.button(f"📜 Accept Quest", key=f"acc_nb_{e_id}", use_container_width=True):
+                                        res_acc = dungeon_manager.accept_notice_board_quest(world, e_id)
+                                        st.toast(res_acc["message"])
+                                        st.session_state["narrative_log"].append({
+                                            "role": "assistant",
+                                            "content": f"📜 **Accepted Quest from Notice Board:** {e_title}"
+                                        })
+                                        auto_save()
+                                        st.rerun()
+                                elif e_status == "accepted":
+                                    if e_type == "delivery":
+                                        tgt_item = entry.get("target_item")
+                                        has_it = any(isinstance(it, dict) and it.get("item_id") == tgt_item for it in player.get("inventory", []))
+                                        if st.button(f"📦 Complete Delivery ({entry.get('reward_gold')} GP)", key=f"comp_nb_{e_id}", disabled=not has_it, use_container_width=True):
+                                            res_cmp = dungeon_manager.complete_notice_board_quest(world, e_id, player)
+                                            if res_cmp["success"]:
+                                                st.toast(res_cmp["message"])
+                                                st.session_state["narrative_log"].append({
+                                                    "role": "assistant",
+                                                    "content": f"🎉 **Quest Completed:** {res_cmp['message']}"
+                                                })
+                                                auto_save()
+                                                st.rerun()
+                                            else:
+                                                st.error(res_cmp["message"])
+                                    else:
+                                        st.info("Status: Quest active in your quest log! Fulfill the objectives to earn the bounty.")
+                                elif e_status == "completed":
+                                    st.success("✅ Quest Completed!")
+
+
+                if not current_room.get("shops") and not (current_room.get("id") in ("town_riverside", "tavern") or current_room.get("notice_board") is not None or "innkeeper_mira" in current_room.get("npcs", [])):
+                    st.caption("🏛️ ไม่มีร้านค้าหรือกระดานประกาศในบริเวณนี้ (มีเฉพาะในเมืองหรือโรงเตี๊ยม)")
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Main Routing
