@@ -125,6 +125,14 @@ def _compute_ac(character_state: Dict[str, Any]) -> int:
 
             if "ac_bonus" in effects:
                 ac_bonus_total += effects.get("ac_bonus", 0)
+            if "ac_penalty" in effects:
+                ac_bonus_total -= effects.get("ac_penalty", 0)
+
+            curse_eff = item.get("curse_effect") or info.get("curse_effect", {})
+            if "ac_bonus" in curse_eff and "ac_bonus" not in effects:
+                ac_bonus_total += curse_eff.get("ac_bonus", 0)
+            if "ac_penalty" in curse_eff and "ac_penalty" not in effects:
+                ac_bonus_total -= curse_eff.get("ac_penalty", 0)
 
     if equipped_chest is not None:
         chest_effects = equipped_chest.get("effects", {})
@@ -169,12 +177,18 @@ def get_active_effects(character_state: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(item, dict) and item.get("equipped") is True:
             item_id = item.get("item_id")
             info = catalog.get(item_id, {})
-            effects = info.get("effects", {})
+            effects = dict(info.get("effects", {}))
+            if "effects" in item and isinstance(item["effects"], dict):
+                effects.update(item["effects"])
 
             if "ac_bonus" in effects:
                 ac_bonus_total += effects["ac_bonus"]
+            if "ac_penalty" in effects:
+                ac_bonus_total -= effects["ac_penalty"]
             if "saving_throw_bonus" in effects:
                 saving_throw_bonus += effects["saving_throw_bonus"]
+            if "saving_throw_penalty" in effects:
+                saving_throw_bonus -= effects["saving_throw_penalty"]
             if "attack_bonus" in effects:
                 attack_bonus += effects["attack_bonus"]
             if "enables_spellcasting" in effects and effects["enables_spellcasting"]:
@@ -182,6 +196,16 @@ def get_active_effects(character_state: Dict[str, Any]) -> Dict[str, Any]:
             if "skill_bonus" in effects and isinstance(effects["skill_bonus"], dict):
                 for sk, bon in effects["skill_bonus"].items():
                     skill_bonus[sk] = skill_bonus.get(sk, 0) + bon
+
+            curse_eff = item.get("curse_effect") or info.get("curse_effect", {})
+            if "ac_bonus" in curse_eff and "ac_bonus" not in effects:
+                ac_bonus_total += curse_eff["ac_bonus"]
+            if "ac_penalty" in curse_eff and "ac_penalty" not in effects:
+                ac_bonus_total -= curse_eff["ac_penalty"]
+            if "saving_throw_bonus" in curse_eff and "saving_throw_bonus" not in effects:
+                saving_throw_bonus += curse_eff["saving_throw_bonus"]
+            if "saving_throw_penalty" in curse_eff and "saving_throw_penalty" not in effects:
+                saving_throw_bonus -= curse_eff["saving_throw_penalty"]
 
     return {
         "ac_bonus_total": ac_bonus_total,
@@ -192,12 +216,20 @@ def get_active_effects(character_state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def equip_item(item_id: str, character_state: Dict[str, Any]) -> Tuple[bool, str]:
+def equip_item(
+    item_id: str,
+    character_state: Dict[str, Any],
+    world_state: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, str]:
     """
     Equip an item from character inventory.
-    Spec Section 7b:
+    Spec Section 7b & Module B §2:
     - Fail if not carried, or if item type is not 'wearable' or 'weapon'.
-    - If another equipped item occupies the same slot, unequip it first.
+    - If another equipped item occupies the same slot:
+        - If that item has cannot_unequip = True, reject equip (cannot displace cursed item).
+        - Otherwise unequip it first.
+    - If item is cursed and NOT identified:
+        locks cannot_unequip = True.
     - Set target item's 'equipped': True.
     - Recompute character_state['ac'] in place.
     - Return (True, "") or (False, reason). Never partially apply.
@@ -214,8 +246,10 @@ def equip_item(item_id: str, character_state: Dict[str, Any]) -> Tuple[bool, str
 
     catalog = _get_item_catalog()
     item_info = catalog.get(item_id)
+    if not item_info and world_state:
+        item_info = world_state.get("generated_items", {}).get(item_id)
     if not item_info:
-        return False, f"Item '{item_id}' not found in item catalog."
+        item_info = target_item
 
     item_type = item_info.get("type")
     if item_type not in ("wearable", "weapon"):
@@ -228,7 +262,19 @@ def equip_item(item_id: str, character_state: Dict[str, Any]) -> Tuple[bool, str
                 other_id = other_item.get("item_id")
                 other_info = catalog.get(other_id, {})
                 if other_info.get("slot") == target_slot:
+                    if other_item.get("cannot_unequip") is True:
+                        return False, f"Cannot equip '{item_id}': slot '{target_slot}' is occupied by cursed item '{other_id}' which cannot be unequipped."
                     other_item["equipped"] = False
+
+    # Module B §2 / Phase 12.2: cursed + unidentified locks cannot_unequip = True
+    is_cursed = bool(target_item.get("cursed", False) or item_info.get("cursed", False))
+    is_identified = target_item.get("identified")
+    if is_identified is None:
+        is_identified = item_info.get("identified", True)
+
+    if is_cursed and not is_identified:
+        target_item["cannot_unequip"] = True
+        logger.warning(f"equip_item: equipped unidentified cursed item '{item_id}'. Locked cannot_unequip = True!")
 
     target_item["equipped"] = True
     character_state["ac"] = _compute_ac(character_state)
@@ -239,7 +285,8 @@ def equip_item(item_id: str, character_state: Dict[str, Any]) -> Tuple[bool, str
 def unequip_item(item_id: str, character_state: Dict[str, Any]) -> Tuple[bool, str]:
     """
     Unequip an item in character inventory.
-    Spec Section 7b:
+    Spec Section 7b & Module B §2:
+    - If item has cannot_unequip = True, reject with clean error (cannot unequip cursed item).
     - Set 'equipped': False (no-op success if already unequipped).
     - Recompute character_state['ac'].
     - Return (True, "") or (False, reason).
@@ -254,10 +301,108 @@ def unequip_item(item_id: str, character_state: Dict[str, Any]) -> Tuple[bool, s
     if target_item is None:
         return False, f"Item '{item_id}' not found in inventory."
 
+    if target_item.get("cannot_unequip") is True:
+        return False, f"Cannot unequip '{item_id}': item is cursed and bound to the wearer."
+
     target_item["equipped"] = False
     character_state["ac"] = _compute_ac(character_state)
     logger.debug(f"unequip_item: unequipped '{item_id}'. New AC: {character_state['ac']}.")
     return True, ""
+
+
+def identify_item(
+    player_state: Dict[str, Any],
+    item_id: str,
+    roll_total: int,
+    world_state: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """
+    Attempt to identify an item in inventory (Module B §2 / Phase 12.2).
+    - Checks roll_total against identify_dc (default 13).
+    - If roll_total >= DC:
+        reveals true name/properties:
+        - target_item['identified'] = True
+        - returns True.
+    - If roll_total < DC:
+        returns False.
+    """
+    inventory = player_state.get("inventory", [])
+    target_item = None
+    for item in inventory:
+        if isinstance(item, dict) and item.get("item_id") == item_id:
+            target_item = item
+            break
+
+    catalog = _get_item_catalog()
+    item_info = catalog.get(item_id, {})
+    if not item_info and world_state:
+        item_info = world_state.get("generated_items", {}).get(item_id, {})
+
+    if target_item is None and not item_info:
+        logger.debug(f"identify_item: item '{item_id}' not found in inventory or catalog.")
+        return False
+
+    dc = 13
+    if target_item and "identify_dc" in target_item:
+        dc = target_item["identify_dc"]
+    elif item_info and "identify_dc" in item_info:
+        dc = item_info["identify_dc"]
+
+    if roll_total >= dc:
+        if target_item is not None:
+            target_item["identified"] = True
+            if "name" in item_info:
+                target_item["name"] = item_info["name"]
+        if item_info:
+            item_info["identified"] = True
+        logger.info(f"identify_item: successfully identified '{item_id}' (roll {roll_total} >= DC {dc}).")
+        return True
+    else:
+        logger.info(f"identify_item: failed to identify '{item_id}' (roll {roll_total} < DC {dc}).")
+        return False
+
+
+def remove_curse(
+    character_state: Dict[str, Any],
+    item_id: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """
+    Remove curse from one or all equipped/carried items (Module B §2 / Phase 12.2).
+    Clears cannot_unequip flag so the item can be unequipped.
+    """
+    inventory = character_state.get("inventory", [])
+    found = False
+    for item in inventory:
+        if isinstance(item, dict):
+            if item_id is None or item.get("item_id") == item_id:
+                if item.get("cannot_unequip"):
+                    item["cannot_unequip"] = False
+                    found = True
+                item["cursed"] = False
+
+    if item_id and not found:
+        return False, f"No cursed bound item '{item_id}' found in inventory."
+    return True, "Curse removed successfully."
+
+
+def pay_cleric_remove_curse(
+    character_state: Dict[str, Any],
+    item_id: Optional[str] = None,
+    world_state: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, str]:
+    """
+    Pay 50 gold at a town cleric to remove curse (Module B §2 / Phase 12.2).
+    """
+    gold = character_state.get("gold", 0)
+    if gold < 50:
+        return False, f"Insufficient gold. Town cleric requires 50 GP to remove a curse (have {gold} GP)."
+
+    character_state["gold"] = gold - 50
+    ok, msg = remove_curse(character_state, item_id)
+    if ok:
+        logger.info(f"pay_cleric_remove_curse: paid 50 GP to cleric. {msg}")
+        return True, "Paid 50 GP to the town cleric. Curse has been lifted!"
+    return False, msg
 
 
 def use_consumable(item_id: str, character_state: Dict[str, Any]) -> Tuple[bool, str, Dict[str, Any]]:
@@ -1521,6 +1666,17 @@ def cast_spell(
             "healed":      heal_val,
             "target_hp_after": t_hp["current"],
             "success":     True,
+        }
+    elif s_type == "utility" and spell.get("effect", {}).get("remove_curse"):
+        target_state = target if target and "inventory" in target else character_state
+        remove_curse(target_state)
+        res = {
+            "caster_name": caster.get("name", "Caster"),
+            "target_name": target.get("name", "Target") if target else caster.get("name", "Caster"),
+            "spell_name":  spell.get("name", "Spell"),
+            "success":     True,
+            "effect":      "remove_curse",
+            "message":     "Curse lifted from target.",
         }
     else:
         res = {

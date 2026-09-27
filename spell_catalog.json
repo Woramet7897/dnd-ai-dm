@@ -126,5 +126,14 @@
     "effect": {"damage": "1d8", "damage_type": "lightning"},
     "slot_cost": 0,
     "description": "Lightning springs from your hand to deliver a shock to a creature you try to touch. Make a melee spell attack. On a hit, 1d8 lightning damage."
+  },
+  "remove_curse": {
+    "name": "Remove Curse",
+    "level": 3,
+    "class": ["Cleric", "Wizard"],
+    "type": "utility",
+    "effect": {"remove_curse": true},
+    "slot_cost": 3,
+    "description": "At your touch, all curses affecting one creature or object end."
   }
 }

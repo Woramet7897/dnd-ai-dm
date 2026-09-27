@@ -352,6 +352,7 @@ def render_sidebar():
             st.info("Inventory is empty.")
         else:
             catalog = state_manager._get_item_catalog()
+            bound_cursed_items = []
             for idx, item in enumerate(inventory):
                 if not isinstance(item, dict):
                     continue
@@ -359,25 +360,64 @@ def render_sidebar():
                 qty = item.get("quantity", 1)
                 is_equipped = item.get("equipped", False)
                 info = catalog.get(item_id, {})
-                item_name = info.get("name", item_id.replace("_", " ").title())
+                if not info and world:
+                    info = world.get("generated_items", {}).get(item_id, {})
+
+                is_id = item.get("identified", info.get("identified", True))
+                is_bound = item.get("cannot_unequip", False)
+                if is_bound:
+                    bound_cursed_items.append((item_id, info.get("name", item_id)))
+
+                if not is_id:
+                    item_name = info.get("unidentified_name", item.get("unidentified_name", "Unidentified Item"))
+                    id_tag = " ❓ *(Unidentified)*"
+                else:
+                    item_name = info.get("name", item.get("name", item_id.replace("_", " ").title()))
+                    id_tag = ""
+
                 itype = info.get("type", "misc")
                 islot = info.get("slot", "")
                 slot_tag = f" [{islot}]" if islot else ""
                 status_tag = " *(Equipped)*" if is_equipped else ""
+                curse_tag = " 🔒 *(Bound)*" if is_bound else ""
 
                 col_i1, col_i2 = st.columns([3, 2])
                 with col_i1:
-                    st.markdown(f"**{item_name}** x{qty}{slot_tag}{status_tag}")
+                    st.markdown(f"**{item_name}** x{qty}{slot_tag}{status_tag}{curse_tag}{id_tag}")
                 with col_i2:
-                    if itype in ("wearable", "weapon"):
+                    if not is_id:
+                        if st.button("Identify", key=f"inv_id_{idx}_{item_id}", use_container_width=True):
+                            chk = state_manager.resolve_check("INT", "medium", player, skill="Arcana")
+                            ok_id = state_manager.identify_item(player, item_id, chk["total"], world)
+                            if ok_id:
+                                st.toast(f"Identified {item_name}!")
+                                st.session_state["narrative_log"].append({
+                                    "role": "assistant",
+                                    "content": f"🔍 You studied the item (Arcana {chk['total']} vs DC {info.get('identify_dc', 13)}) and successfully identified it as **{info.get('name', item_id)}**!"
+                                })
+                            else:
+                                st.toast(f"Failed to identify {item_name}.")
+                                st.session_state["narrative_log"].append({
+                                    "role": "assistant",
+                                    "content": f"🔍 You examined the item (Arcana {chk['total']} vs DC {info.get('identify_dc', 13)}), but its true nature remains shrouded in mystery."
+                                })
+                            auto_save()
+                            st.rerun()
+                    elif itype in ("wearable", "weapon"):
                         if is_equipped:
                             if st.button("Unequip", key=f"inv_unequip_{idx}_{item_id}", use_container_width=True):
-                                state_manager.unequip_item(item_id, player)
+                                ok_un, msg_un = state_manager.unequip_item(item_id, player)
+                                if not ok_un:
+                                    st.error(msg_un)
+                                    st.toast(msg_un)
                                 auto_save()
                                 st.rerun()
                         else:
                             if st.button("Equip", key=f"inv_equip_{idx}_{item_id}", use_container_width=True):
-                                state_manager.equip_item(item_id, player)
+                                ok_eq, msg_eq = state_manager.equip_item(item_id, player, world)
+                                if not ok_eq:
+                                    st.error(msg_eq)
+                                    st.toast(msg_eq)
                                 auto_save()
                                 st.rerun()
                     elif itype == "consumable":
@@ -394,6 +434,24 @@ def render_sidebar():
                                 st.error(msg_u)
                             auto_save()
                             st.rerun()
+
+            if bound_cursed_items:
+                st.markdown("---")
+                st.caption("🔒 You bear cursed items that cannot be removed.")
+                is_town_or_safe = current_room.get("is_safe") or current_room.get("type") == "town"
+                if is_town_or_safe:
+                    if st.button("⛪ Town Cleric: Remove Curse (50 GP)", use_container_width=True):
+                        ok_c, msg_c = state_manager.pay_cleric_remove_curse(player, world_state=world)
+                        if ok_c:
+                            st.toast(msg_c)
+                            st.session_state["narrative_log"].append({
+                                "role": "assistant",
+                                "content": f"⛪ {msg_c} (Gold remaining: {player.get('gold', 0)} GP)"
+                            })
+                        else:
+                            st.error(msg_c)
+                        auto_save()
+                        st.rerun()
 
     # ── Quest Log Expander ───────────────────────────────────────────────────────
     with st.sidebar.expander("📜 Quest Log", expanded=False):

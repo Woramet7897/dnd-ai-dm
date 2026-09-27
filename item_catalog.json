@@ -196,5 +196,37 @@
     "rarity": "common",
     "value_gold": 5,
     "description": "A sacred medallion channel for divine spellcasting."
+  },
+  "cursed_ring_of_burden": {
+    "name": "Ring of the Burdened",
+    "unidentified_name": "Ornate Gold Ring",
+    "type": "wearable",
+    "slot": "ring",
+    "identified": false,
+    "identify_dc": 13,
+    "identify_skill": "Arcana",
+    "cursed": true,
+    "curse_effect": {"ac_penalty": 1},
+    "cannot_unequip": false,
+    "effects": {},
+    "rarity": "uncommon",
+    "value_gold": 30,
+    "description": "A cursed ring that feels heavy on the finger, penalizing the wearer's defenses."
+  },
+  "cursed_berserker_axe": {
+    "name": "Berserker Axe",
+    "unidentified_name": "Gleaming Battleaxe",
+    "type": "weapon",
+    "slot": "main_hand",
+    "identified": false,
+    "identify_dc": 15,
+    "identify_skill": "Arcana",
+    "cursed": true,
+    "curse_effect": {"attack_disadvantage": true},
+    "cannot_unequip": false,
+    "effects": {"attack_bonus": 0, "damage": "1d12", "damage_type": "slashing"},
+    "rarity": "rare",
+    "value_gold": 100,
+    "description": "An axe cursed with blinding fury that refuses to leave its wielder's grip."
   }
 }
