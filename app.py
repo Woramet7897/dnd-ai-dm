@@ -138,6 +138,36 @@ def load_game(char_name: str, client: Optional[Any] = None) -> bool:
 # Character Creation / Landing View
 # ────────────────────────────────────────────────────────────────────────────────
 
+CLASS_PRIORITY = {
+    "Fighter": ["STR", "CON", "DEX", "WIS", "INT", "CHA"],
+    "Wizard":  ["INT", "DEX", "CON", "WIS", "CHA", "STR"],
+    "Rogue":   ["DEX", "CON", "INT", "CHA", "WIS", "STR"],
+    "Cleric":  ["WIS", "CON", "STR", "DEX", "CHA", "INT"],
+    "Bard":    ["CHA", "DEX", "CON", "WIS", "INT", "STR"],
+}
+
+
+def get_recommended_stats(cls_name: str, race_name: str) -> Dict[str, int]:
+    """Return an optimal 27-point buy distribution tailored to class and racial stat bonuses."""
+    races_cat = character_creator._load_catalog("races_catalog.json")
+    race_key = race_name.lower().replace("-", "_").replace(" ", "_")
+    r_bonuses = races_cat.get(race_key, {}).get("stat_bonuses", {})
+    prio = CLASS_PRIORITY.get(cls_name, CLASS_PRIORITY["Fighter"])
+
+    base = {s: 8 for s in character_creator.STAT_NAMES}
+    values = [15, 14, 13, 12, 10, 8]
+    for stat, val in zip(prio, values):
+        base[stat] = val
+
+    s1, s2 = prio[0], prio[1]
+    b1, b2 = r_bonuses.get(s1, 0), r_bonuses.get(s2, 0)
+    if b1 == 2 and b2 == 1:
+        base[s1] = 14
+        base[s2] = 15
+
+    return base
+
+
 def render_landing_view():
     st.title("🎲 D&D 5e AI DM Engine (MVP Milestone)")
     st.markdown("Welcome, adventurer. Select an existing save or create a new character to begin.")
@@ -158,80 +188,139 @@ def render_landing_view():
 
     with col2:
         st.subheader("✨ Create New Character")
-        with st.form("character_creation_form"):
-            char_name = st.text_input("Character Name:", value="Valeros")
-            
-            race = st.selectbox("Race:", ["Human", "Elf", "Dwarf", "Halfling", "Tiefling", "Half-Orc", "Dragonborn"])
-            cls_name = st.selectbox("Class:", ["Fighter", "Wizard", "Rogue", "Cleric", "Bard"])
-            bg = st.selectbox("Background:", ["Folk Hero", "Acolyte", "Criminal", "Noble", "Sage", "Soldier"])
+        char_name = st.text_input("Character Name:", value="Valeros", key="input_char_name")
 
-            st.markdown("##### Ability Scores (Point-Buy: 27 Points Total)")
-            c_str = st.slider("STR", 8, 15, 14)
-            c_dex = st.slider("DEX", 8, 15, 14)
-            c_con = st.slider("CON", 8, 15, 12)
-            c_int = st.slider("INT", 8, 15, 10)
-            c_wis = st.slider("WIS", 8, 15, 10)
-            c_cha = st.slider("CHA", 8, 15, 8)
+        col_r, col_c = st.columns(2)
+        with col_r:
+            race = st.selectbox(
+                "Race:",
+                ["Human", "Elf", "Dwarf", "Halfling", "Tiefling", "Half-Orc", "Dragonborn"],
+                key="select_race",
+            )
+        with col_c:
+            cls_name = st.selectbox(
+                "Class:",
+                ["Fighter", "Wizard", "Rogue", "Cleric", "Bard"],
+                key="select_class",
+            )
+        bg = st.selectbox(
+            "Background:",
+            ["Folk Hero", "Acolyte", "Criminal", "Noble", "Sage", "Soldier"],
+            key="select_bg",
+        )
 
-            stats_alloc = {"STR": c_str, "DEX": c_dex, "CON": c_con, "INT": c_int, "WIS": c_wis, "CHA": c_cha}
-            total_spent = sum(character_creator.POINT_BUY_COST.get(v, 0) for v in stats_alloc.values())
-            remaining = character_creator.POINT_BUY_BUDGET - total_spent
+        st.markdown("##### Ability Scores (Point-Buy: 27 Points Total)")
 
-            ok_pts, pts_msg = character_creator.validate_point_buy(stats_alloc)
-            if not ok_pts:
-                st.warning(f"⚠️ Point-Buy Allocation: {pts_msg}")
+        rec_stats = get_recommended_stats(cls_name, race)
+        races_cat = character_creator._load_catalog("races_catalog.json")
+        race_key = race.lower().replace("-", "_").replace(" ", "_")
+        r_bonuses = races_cat.get(race_key, {}).get("stat_bonuses", {})
+
+        stats_alloc = {}
+        for s in character_creator.STAT_NAMES:
+            bonus = r_bonuses.get(s, 0)
+            bonus_lbl = f" (+{bonus} {race})" if bonus > 0 else ""
+            default_val = rec_stats.get(s, 10)
+            val = st.slider(
+                f"{s}{bonus_lbl}",
+                min_value=8,
+                max_value=15,
+                value=default_val,
+                key=f"pb_{cls_name}_{race}_{s}",
+            )
+            stats_alloc[s] = val
+
+        # Live Point-Buy status calculation
+        total_spent = sum(character_creator.POINT_BUY_COST.get(v, 0) for v in stats_alloc.values())
+        remaining = character_creator.POINT_BUY_BUDGET - total_spent
+
+        col_pb1, col_pb2 = st.columns(2)
+        with col_pb1:
+            st.metric("Point-Buy Used", f"{total_spent} / 27")
+        with col_pb2:
+            st.metric("Points Remaining", f"{remaining} แต้ม")
+
+        ok_pts, pts_msg = character_creator.validate_point_buy(stats_alloc)
+        if not ok_pts:
+            st.error(f"⚠️ Point-Buy: {pts_msg}")
+        elif remaining > 0:
+            st.info(f"💡 ใช้แต้มไป {total_spent} / 27 แต้ม (คงเหลือ {remaining} แต้ม — สามารถเพิ่มคะแนนได้)")
+        else:
+            st.success("✅ Point-Buy Valid: ใช้ครบ 27 / 27 แต้มพอดี!")
+
+        # Real-time Final Ability Score summary row
+        st.caption("Final Scores (Base + Racial Bonus):")
+        cols_summary = st.columns(6)
+        for idx, s in enumerate(character_creator.STAT_NAMES):
+            base_v = stats_alloc[s]
+            r_b = r_bonuses.get(s, 0)
+            final_v = base_v + r_b
+            mod = character_creator.get_modifier(final_v)
+            with cols_summary[idx]:
+                st.metric(
+                    label=s,
+                    value=final_v,
+                    delta=f"{mod:+d}",
+                )
+
+        col_reset, col_submit = st.columns([1, 2])
+        with col_reset:
+            if st.button("🔄 Reset Preset", use_container_width=True):
+                for s in character_creator.STAT_NAMES:
+                    st.session_state[f"pb_{cls_name}_{race}_{s}"] = rec_stats[s]
+                st.rerun()
+
+        with col_submit:
+            submitted = st.button("⚔️ Create Character", type="primary", use_container_width=True)
+
+        if submitted:
+            if not char_name.strip():
+                st.error("Please enter a character name.")
+            elif not ok_pts:
+                st.error("Invalid point-buy stats allocation.")
             else:
-                st.success(f"✅ Point-Buy Valid: ใช้แต้มไป {total_spent} / 27 แต้ม (คงเหลือ {remaining} แต้ม)")
+                try:
+                    # Build character
+                    player = character_creator.create_character(
+                        name=char_name.strip(),
+                        race=race,
+                        class_name=cls_name,
+                        background=bg,
+                        stats=stats_alloc,
+                    )
+                    # Add starting trail_rations if not present
+                    inv = player.setdefault("inventory", [])
+                    if not any(i.get("item_id") == "trail_rations" for i in inv):
+                        inv.append({"item_id": "trail_rations", "equipped": False, "quantity": 3})
 
-            submitted = st.form_submit_button("⚔️ Create Character", use_container_width=True)
-            if submitted:
-                if not char_name.strip():
-                    st.error("Please enter a character name.")
-                elif not ok_pts:
-                    st.error("Invalid point-buy stats allocation.")
-                else:
-                    try:
-                        # Build character
-                        player = character_creator.create_character(
-                            name=char_name.strip(),
-                            race=race,
-                            class_name=cls_name,
-                            background=bg,
-                            stats=stats_alloc,
-                        )
-                        # Add starting trail_rations if not present
-                        inv = player.setdefault("inventory", [])
-                        if not any(i.get("item_id") == "trail_rations" for i in inv):
-                            inv.append({"item_id": "trail_rations", "equipped": False, "quantity": 3})
+                    world = {
+                        "schema_version": 4,
+                        "character_name": char_name.strip(),
+                        "current_location": "town_riverside",
+                        "visited_rooms": ["town_riverside"],
+                        "cleared_rooms": [],
+                        "collected_loot": [],
+                        "dynamic_rooms": {},
+                        "game_time": {"day": 1, "period": "morning", "steps_since_period_start": 0},
+                        "quest_log": {"main": [], "side": []},
+                        "combat_state": None,
+                    }
 
-                        world = {
-                            "schema_version": 4,
-                            "character_name": char_name.strip(),
-                            "current_location": "town_riverside",
-                            "visited_rooms": ["town_riverside"],
-                            "cleared_rooms": [],
-                            "collected_loot": [],
-                            "dynamic_rooms": {},
-                            "game_time": {"day": 1, "period": "morning", "steps_since_period_start": 0},
-                            "quest_log": {"main": [], "side": []},
-                            "combat_state": None,
-                        }
+                    state_manager.save_character(char_name.strip(), player)
+                    state_manager.save_world(char_name.strip(), world)
 
-                        state_manager.save_character(char_name.strip(), player)
-                        state_manager.save_world(char_name.strip(), world)
+                    st.session_state["player_state"] = player
+                    st.session_state["world_state"] = world
+                    st.session_state["current_char_name"] = char_name.strip()
+                    st.session_state["narrative_log"] = [{
+                        "role": "assistant",
+                        "content": f"Welcome to Riverside Village, **{char_name.strip()}**! Your journey begins here.",
+                    }]
 
-                        st.session_state["player_state"] = player
-                        st.session_state["world_state"] = world
-                        st.session_state["current_char_name"] = char_name.strip()
-                        st.session_state["narrative_log"] = [{
-                            "role": "assistant",
-                            "content": f"Welcome to Riverside Village, **{char_name.strip()}**! Your journey begins here."
-                        }]
-
-                        st.success(f"Character '{char_name.strip()}' created successfully!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error creating character: {e}")
+                    st.success(f"Character '{char_name.strip()}' created successfully!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error creating character: {e}")
 
 
 # ────────────────────────────────────────────────────────────────────────────────
