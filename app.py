@@ -807,30 +807,28 @@ def render_sidebar():
         ration_qty = sum(i.get("quantity", 1) for i in inventory if isinstance(i, dict) and i.get("item_id") == "trail_rations")
 
         curr = state_manager._ensure_currency(player)
-        pouch_html = f"""
-        <div style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); padding-bottom: 6px;">
-                <span style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; font-weight: 700;">Coin Pouch</span>
-                <span style="font-size: 0.75rem; color: #e2e8f0; background: rgba(51, 65, 85, 0.6); padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(148, 163, 184, 0.25);">
-                    Rations: <strong style="color: #bef264;">{ration_qty}</strong>
-                </span>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center;">
-                <div style="background: rgba(30, 41, 59, 0.6); border-radius: 6px; padding: 6px 2px; border: 1px solid rgba(234, 179, 8, 0.35);">
-                    <div style="font-size: 0.68rem; color: #facc15; font-weight: 700; letter-spacing: 0.05em;">GP</div>
-                    <div style="font-size: 1.1rem; font-weight: 700; color: #fef08a; line-height: 1.2;">{curr['gp']}</div>
-                </div>
-                <div style="background: rgba(30, 41, 59, 0.6); border-radius: 6px; padding: 6px 2px; border: 1px solid rgba(203, 213, 225, 0.35);">
-                    <div style="font-size: 0.68rem; color: #cbd5e1; font-weight: 700; letter-spacing: 0.05em;">SP</div>
-                    <div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc; line-height: 1.2;">{curr['sp']}</div>
-                </div>
-                <div style="background: rgba(30, 41, 59, 0.6); border-radius: 6px; padding: 6px 2px; border: 1px solid rgba(249, 115, 22, 0.35);">
-                    <div style="font-size: 0.68rem; color: #fb923c; font-weight: 700; letter-spacing: 0.05em;">CP</div>
-                    <div style="font-size: 1.1rem; font-weight: 700; color: #fed7aa; line-height: 1.2;">{curr['cp']}</div>
-                </div>
-            </div>
-        </div>
-        """
+        pouch_html = (
+            '<div style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px;">'
+            '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); padding-bottom: 6px;">'
+            '<span style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; font-weight: 700;">Coin Pouch</span>'
+            f'<span style="font-size: 0.75rem; color: #e2e8f0; background: rgba(51, 65, 85, 0.6); padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(148, 163, 184, 0.25);">Rations: <strong style="color: #bef264;">{ration_qty}</strong></span>'
+            '</div>'
+            '<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center;">'
+            '<div style="background: rgba(30, 41, 59, 0.6); border-radius: 6px; padding: 6px 2px; border: 1px solid rgba(234, 179, 8, 0.35);">'
+            '<div style="font-size: 0.68rem; color: #facc15; font-weight: 700; letter-spacing: 0.05em;">GP</div>'
+            f'<div style="font-size: 1.1rem; font-weight: 700; color: #fef08a; line-height: 1.2;">{curr["gp"]}</div>'
+            '</div>'
+            '<div style="background: rgba(30, 41, 59, 0.6); border-radius: 6px; padding: 6px 2px; border: 1px solid rgba(203, 213, 225, 0.35);">'
+            '<div style="font-size: 0.68rem; color: #cbd5e1; font-weight: 700; letter-spacing: 0.05em;">SP</div>'
+            f'<div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc; line-height: 1.2;">{curr["sp"]}</div>'
+            '</div>'
+            '<div style="background: rgba(30, 41, 59, 0.6); border-radius: 6px; padding: 6px 2px; border: 1px solid rgba(249, 115, 22, 0.35);">'
+            '<div style="font-size: 0.68rem; color: #fb923c; font-weight: 700; letter-spacing: 0.05em;">CP</div>'
+            f'<div style="font-size: 1.1rem; font-weight: 700; color: #fed7aa; line-height: 1.2;">{curr["cp"]}</div>'
+            '</div>'
+            '</div>'
+            '</div>'
+        )
         st.markdown(pouch_html, unsafe_allow_html=True)
 
         if not inventory:
@@ -1726,24 +1724,11 @@ def render_playing_view():
                         avail_routes.append((d_k, d_icon, d_name, d_type))
 
                 if avail_routes:
-                    r_items = ""
-                    for r_dir, r_icon, r_name, r_type in avail_routes:
-                        type_str = f" <span style='font-size: 0.72rem; color: #64748b;'>({r_type})</span>" if r_type else ""
-                        r_items += f"""
-                        <div style="font-size: 0.82rem; padding: 4px 0; border-top: 1px solid rgba(148, 163, 184, 0.1); display: flex; align-items: baseline;">
-                            <span style="color: #38bdf8; font-weight: 700; min-width: 65px;">{r_icon} {r_dir.capitalize()}:</span>
-                            <span style="color: #f1f5f9; font-weight: 500; margin-left: 4px;">{r_name}{type_str}</span>
-                        </div>
-                        """
-                    r_html = f"""
-                    <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; padding: 8px 12px; margin-top: 10px;">
-                        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; font-weight: 700; margin-bottom: 6px;">
-                            🧭 ทางที่เปิดออก (Exits)
-                        </div>
-                        {r_items}
-                    </div>
-                    """
-                    st.markdown(r_html, unsafe_allow_html=True)
+                    with st.container(border=True):
+                        st.caption("🧭 **เส้นทางที่เปิดออก (Exits)**")
+                        for r_dir, r_icon, r_name, r_type in avail_routes:
+                            type_badge = f" *({r_type})*" if r_type else ""
+                            st.markdown(f"**{r_icon} {r_dir.capitalize()}:** {r_name}{type_badge}")
                 else:
                     st.caption("⛔ บริเวณนี้ไม่มีทางออกที่ชัดเจน (Dead End)")
 
