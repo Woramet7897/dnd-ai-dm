@@ -95,7 +95,11 @@ def resolve_model(model: Optional[str] = None, client: Optional[Any] = None) -> 
     if installed:
         if "llama3" in installed or "llama3:latest" in installed:
             return "llama3"
-        # Look for typhoon model or llama model first
+        # Prioritize qwen models first for speed, Thai support, and optimal VRAM fit
+        qwen_candidates = [m for m in installed if "qwen" in m.lower()]
+        if qwen_candidates:
+            return qwen_candidates[0]
+        # Look for typhoon model or llama model
         typhoon_candidates = [m for m in installed if "typhoon2-8b" in m]
         if typhoon_candidates:
             return typhoon_candidates[0]
