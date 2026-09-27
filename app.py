@@ -637,6 +637,38 @@ def render_sidebar():
                 auto_save()
                 st.rerun()
 
+    # ── Ollama Engine Status & Model Selector ──────────────────────────────────
+    installed_models = llm_handler.get_installed_models()
+    with st.sidebar.expander("🤖 Dungeon Master AI (Ollama)", expanded=not bool(installed_models)):
+        if installed_models:
+            st.markdown("🟢 **สถานะ:** เชื่อมต่อสำเร็จ (Online)")
+            if "selected_model" not in st.session_state or st.session_state["selected_model"] not in installed_models:
+                st.session_state["selected_model"] = llm_handler.resolve_model()
+
+            curr_idx = installed_models.index(st.session_state["selected_model"]) if st.session_state["selected_model"] in installed_models else 0
+            chosen_m = st.selectbox(
+                "โมเดลที่ใช้งาน:",
+                options=installed_models,
+                index=curr_idx,
+                key="sb_model_selector",
+                help="เลือกโมเดล AI ในเครื่องที่จะใช้บรรยายเนื้อเรื่อง"
+            )
+            if chosen_m != st.session_state.get("selected_model"):
+                st.session_state["selected_model"] = chosen_m
+                st.toast(f"เปลี่ยนโมเดล AI เป็น: {chosen_m}")
+        else:
+            st.markdown("🔴 **สถานะ:** ขาดการเชื่อมต่อ (Offline)")
+            st.caption("ระบบไม่พบ Ollama ที่กำลังทำงานอยู่ กรุณาเปิดโปรแกรม Ollama หรือคลิกปุ่มด้านล่างเพื่อเปิดระบบอัตโนมัติ")
+            if st.button("🚀 สตาร์ต Ollama อัตโนมัติ", use_container_width=True):
+                try:
+                    import subprocess
+                    subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    st.toast("กำลังเริ่มต้น Ollama Service...")
+                    time.sleep(2)
+                    st.rerun()
+                except Exception as ex:
+                    st.error(f"ไม่สามารถเริ่ม Ollama ได้: {ex}")
+
     st.sidebar.markdown("---")
 
     # ── Sidebar Tabs ───────────────────────────────────────────────────────────
@@ -1483,12 +1515,14 @@ def render_playing_view():
 
                 # 3. EXACTLY ONE narrative LLM call for the entire round
                 hist = st.session_state.get("history_buffer", [])
+                chosen_m = st.session_state.get("selected_model")
                 narrative_res = llm_handler.generate_narrative_response(
                     user_input="",
                     player_state=player,
                     world_state=world,
                     history=hist,
                     round_result=narration_block,
+                    model=chosen_m if chosen_m else llm_handler.DEFAULT_MODEL,
                 )
 
                 narration_text = narrative_res.get("narrative", "")
@@ -1737,11 +1771,14 @@ def render_playing_view():
 
                     # 1. Narrative Call
                     hist = st.session_state.get("history_buffer", [])
+                    chosen_m = st.session_state.get("selected_model")
+                    active_model = chosen_m if chosen_m else llm_handler.DEFAULT_MODEL
                     res = llm_handler.generate_narrative_response(
                         user_input=action_to_process,
                         player_state=player,
                         world_state=world,
                         history=hist,
+                        model=active_model,
                     )
                     narrative_text = res.get("narrative", "")
                     if res.get("suggestions"):
@@ -1752,6 +1789,7 @@ def render_playing_view():
                         narrative_text=narrative_text,
                         user_input=action_to_process,
                         world_state=world,
+                        model=active_model,
                     )
 
                     # 3. Apply state updates and events if present

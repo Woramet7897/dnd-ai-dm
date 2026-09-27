@@ -40,6 +40,73 @@ DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "llama3")
 DEFAULT_NUM_CTX = 4096
 MAX_PROMPT_RATIO = 0.70  # 70% of num_ctx for system prompt + history budget
 
+
+def get_installed_models(client: Optional[Any] = None) -> List[str]:
+    """Retrieve list of locally installed model names from Ollama."""
+    try:
+        if client is not None:
+            if hasattr(client, "list") and callable(client.list):
+                res = client.list()
+            else:
+                return []
+        else:
+            import ollama
+            res = ollama.list()
+
+        models = []
+        raw_list = getattr(res, "models", None)
+        if raw_list is None and isinstance(res, dict):
+            raw_list = res.get("models", [])
+        if raw_list:
+            for m in raw_list:
+                name = getattr(m, "model", None) or getattr(m, "name", None)
+                if not name and isinstance(m, dict):
+                    name = m.get("model") or m.get("name")
+                if name:
+                    models.append(str(name))
+        return models
+    except Exception:
+        return []
+
+
+def resolve_model(model: Optional[str] = None, client: Optional[Any] = None) -> str:
+    """
+    Resolve model to use:
+    - If client is provided (unit tests/mock), preserve specified model or DEFAULT_MODEL.
+    - If model is explicitly specified and not None/empty and not DEFAULT_MODEL, use it.
+    - If OLLAMA_MODEL is set in os.environ, use it.
+    - Otherwise, query installed Ollama models:
+      - If 'llama3' is installed, use 'llama3'.
+      - Else if any typhoon model is installed (e.g. 'scb10x/llama3.1-typhoon2-8b-instruct:latest'), use it.
+      - Else if any other models are installed, use the first installed model.
+    - Fall back to DEFAULT_MODEL ("llama3").
+    """
+    if client is not None:
+        return model if model else DEFAULT_MODEL
+
+    env_m = os.environ.get("OLLAMA_MODEL")
+    if env_m:
+        return env_m
+
+    if model and model != "llama3" and model != DEFAULT_MODEL:
+        return model
+
+    installed = get_installed_models()
+    if installed:
+        if "llama3" in installed or "llama3:latest" in installed:
+            return "llama3"
+        # Look for typhoon model or llama model first
+        typhoon_candidates = [m for m in installed if "typhoon2-8b" in m]
+        if typhoon_candidates:
+            return typhoon_candidates[0]
+        # Any other non-gemma typhoon or installed model
+        for m in installed:
+            if "typhoon" in m and "gemma" not in m:
+                return m
+        return installed[0]
+
+    return model if model else DEFAULT_MODEL
+
 # ── Tier 4: Condensed Rules Cheat-Sheet (Spec 12a #5) ──────────────────────────
 # Bullet-point form containing only the essential facts the model needs for narration.
 # Replaces the full prose ruleset to save tokens (the single biggest token saving).
@@ -435,15 +502,16 @@ def generate_narrative_response(
 
     options = {"num_ctx": num_ctx, "temperature": 0.7}
 
-    logger.debug(f"Calling Ollama narrative model='{model}', num_ctx={num_ctx}, msg_count={len(messages)}.")
+    effective_model = resolve_model(model, client=client)
+    logger.debug(f"Calling Ollama narrative model='{effective_model}', num_ctx={num_ctx}, msg_count={len(messages)}.")
     start_t = time.time()
 
     try:
         if client is not None:
-            response = client.chat(model=model, messages=messages, options=options)
+            response = client.chat(model=effective_model, messages=messages, options=options)
         else:
             import ollama  # type: ignore
-            response = ollama.chat(model=model, messages=messages, options=options)
+            response = ollama.chat(model=effective_model, messages=messages, options=options)
 
         elapsed = time.time() - start_t
         raw_text = response.get("message", {}).get("content", "")
@@ -556,16 +624,17 @@ def extract_state_updates(
     messages = [{"role": "user", "content": extraction_prompt}]
     options = {"num_ctx": num_ctx, "temperature": 0.1}
 
-    logger.debug(f"Calling Ollama extraction model='{model}', num_ctx={num_ctx}.")
+    effective_model = resolve_model(model, client=client)
+    logger.debug(f"Calling Ollama extraction model='{effective_model}', num_ctx={num_ctx}.")
     start_t = time.time()
 
     def do_call(msgs: List[Dict[str, str]]) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
         try:
             if client is not None:
-                resp = client.chat(model=model, messages=msgs, format="json", options=options)
+                resp = client.chat(model=effective_model, messages=msgs, format="json", options=options)
             else:
                 import ollama  # type: ignore
-                resp = ollama.chat(model=model, messages=msgs, format="json", options=options)
+                resp = ollama.chat(model=effective_model, messages=msgs, format="json", options=options)
 
             m = {
                 "eval_count": resp.get("eval_count", 0),
@@ -704,10 +773,11 @@ def generate_camp_dialogue(
     messages = [{"role": "user", "content": camp_prompt}]
     options = {"temperature": 0.7, "num_ctx": num_ctx}
 
+    effective_model = resolve_model(model, client=client)
     parsed_json = None
     if client is not None:
         try:
-            resp = client.chat(model=model, messages=messages, format="json", options=options)
+            resp = client.chat(model=effective_model, messages=messages, format="json", options=options)
             content = resp.get("message", {}).get("content", "")
             parsed_json = json.loads(content)
         except Exception as ex:
@@ -722,7 +792,7 @@ def generate_camp_dialogue(
     if parsed_json is None and client is None and os.environ.get("OLLAMA_HOST"):
         try:
             import ollama
-            resp = ollama.chat(model=model, messages=messages, format="json", options=options)
+            resp = ollama.chat(model=effective_model, messages=messages, format="json", options=options)
             content = resp.get("message", {}).get("content", "")
             parsed_json = json.loads(content)
         except Exception as ex:
