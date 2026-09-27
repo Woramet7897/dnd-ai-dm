@@ -245,68 +245,40 @@ def render_sidebar():
     if not player or not world:
         return
 
+    combat_active = world.get("combat_state") is not None
+
+    # ── Pinned Always-Visible Top Section ──────────────────────────────────────
     st.sidebar.title(f"🛡️ {player.get('name', 'Adventurer')}")
     st.sidebar.caption(f"Level {player.get('level', 1)} {player.get('race', '')} {player.get('class_name', player.get('class', ''))}")
 
-    # HP Progress Bar
+    # HP Progress Bar & Key Vitals
     hp_info = player.get("hp", {"current": 10, "max": 10})
     cur_hp = hp_info.get("current", 0)
     max_hp = hp_info.get("max", 10)
     hp_pct = max(0.0, min(1.0, cur_hp / max(1, max_hp)))
-    st.sidebar.markdown(f"**HP:** {cur_hp} / {max_hp}")
+
+    col_hp, col_ac = st.sidebar.columns(2)
+    with col_hp:
+        st.metric("HP", f"{cur_hp} / {max_hp}")
+    with col_ac:
+        st.metric("AC", player.get("ac", 10))
     st.sidebar.progress(hp_pct)
 
-    # XP & Level Display
-    xp_cur = player.get("xp_current", 0)
-    lvl = player.get("level", 1)
-    next_xp = state_manager.LEVEL_THRESHOLDS.get(lvl + 1, "MAX")
-    st.sidebar.markdown(f"**XP:** {xp_cur} / {next_xp}")
-
-    col_ac, col_gold = st.sidebar.columns(2)
-    with col_ac:
-        st.markdown(f"**AC:** {player.get('ac', 10)}")
-    with col_gold:
-        st.markdown(f"**Gold:** {player.get('gold', 0)} GP")
-
-    insp = state_manager.get_inspiration(player)
-    max_insp = player.get("max_inspiration", state_manager.MAX_INSPIRATION)
-    pips = "🟡 " * insp + "⚪ " * max(0, max_insp - insp)
-    st.sidebar.markdown(f"✨ **Inspiration:** {pips.strip()} ({insp}/{max_insp})")
-
-    # Ability Stats & Mods
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("##### Ability Stats")
-    stats = player.get("stats", {})
-    cols_s1, cols_s2, cols_s3 = st.sidebar.columns(3)
-    with cols_s1:
-        str_val = stats.get("STR", 10)
-        st.markdown(f"**STR:** {str_val} ({state_manager.get_modifier(str_val):+d})")
-        int_val = stats.get("INT", 10)
-        st.markdown(f"**INT:** {int_val} ({state_manager.get_modifier(int_val):+d})")
-    with cols_s2:
-        dex_val = stats.get("DEX", 10)
-        st.markdown(f"**DEX:** {dex_val} ({state_manager.get_modifier(dex_val):+d})")
-        wis_val = stats.get("WIS", 10)
-        st.markdown(f"**WIS:** {wis_val} ({state_manager.get_modifier(wis_val):+d})")
-    with cols_s3:
-        con_val = stats.get("CON", 10)
-        st.markdown(f"**CON:** {con_val} ({state_manager.get_modifier(con_val):+d})")
-        cha_val = stats.get("CHA", 10)
-        st.markdown(f"**CHA:** {cha_val} ({state_manager.get_modifier(cha_val):+d})")
-
     # Time & Location
-    st.sidebar.markdown("---")
     gt = world.get("game_time", {})
     day = gt.get("day", 1)
     period = gt.get("period", "morning").capitalize()
-    st.sidebar.markdown(f"**Time:** Day {day}, {period}")
-
     current_room = dungeon_manager.get_current_room(world)
     room_name = current_room.get("name", "Unknown") if current_room else "Unknown"
     room_type = current_room.get("type", "wilderness").capitalize() if current_room else ""
-    st.sidebar.markdown(f"**Location:** {room_name} ({room_type})")
 
-    # Active Conditions & Rations
+    col_loc, col_time = st.sidebar.columns(2)
+    with col_loc:
+        st.caption(f"📍 **{room_name}** ({room_type})")
+    with col_time:
+        st.caption(f"⏳ **Day {day}**, {period}")
+
+    # Active Conditions & Wanted Notice
     active_conds = player.get("active_conditions", [])
     if active_conds:
         formatted_conds = []
@@ -319,38 +291,6 @@ def render_sidebar():
                 formatted_conds.append(f"{c_name} ({dur} rds)" if dur else c_name)
         st.sidebar.warning(f"⚠️ Conditions: {', '.join(formatted_conds)}")
 
-    # Party Companions & Dismissal UI
-    party = world.get("party", {})
-    companions = party.get("companions", [])
-    if companions:
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("##### 👥 Party Companions")
-        for comp in companions:
-            c_name = comp.get("name", comp.get("id", "Companion"))
-            c_id = comp.get("id", c_name)
-            c_app = state_manager.get_companion_approval(world, c_id)
-            c_approval = c_app.get("approval", 50)
-            col_c_info, col_c_btn = st.sidebar.columns([2, 1])
-            with col_c_info:
-                st.markdown(f"• **{c_name}** ({c_approval}/100)")
-            with col_c_btn:
-                with st.popover("Dismiss"):
-                    st.write(f"Dismiss {c_name}?")
-                    if st.button("Confirm Dismiss", key=f"dismiss_{c_id}", use_container_width=True):
-                        try:
-                            state_manager.dismiss_companion(c_id, world)
-                            auto_save()
-                            st.toast(f"{c_name} has left your party.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-
-    # Rations count
-    inventory = player.get("inventory", [])
-    ration_qty = sum(i.get("quantity", 1) for i in inventory if isinstance(i, dict) and i.get("item_id") == "trail_rations")
-    st.sidebar.markdown(f"🍞 **Trail Rations:** {ration_qty}")
-
-    # Wanted / Bounty Status
     if player.get("is_wanted") or player.get("bounty", 0) > 0:
         bounty_val = player.get("bounty", 0)
         st.sidebar.error(f"🚨 **WANTED!** Bounty: **{bounty_val} GP**")
@@ -368,8 +308,149 @@ def render_sidebar():
                 auto_save()
                 st.rerun()
 
-    # ── Inventory & Equipment Expander ──────────────────────────────────────────
-    with st.sidebar.expander("🎒 Inventory & Equipment", expanded=False):
+    st.sidebar.markdown("---")
+
+    # ── Sidebar Tabs ───────────────────────────────────────────────────────────
+    with st.sidebar:
+        tab_char, tab_inv, tab_quests, tab_spells = st.tabs([
+            "👤 Character",
+            "🎒 Inventory",
+            "📜 Quests",
+            "✨ Spells",
+        ])
+
+    # ── TAB 1: CHARACTER ───────────────────────────────────────────────────────
+    with tab_char:
+        # XP & Inspiration Metrics
+        xp_cur = player.get("xp_current", 0)
+        lvl = player.get("level", 1)
+        next_xp = state_manager.LEVEL_THRESHOLDS.get(lvl + 1, "MAX")
+        insp = state_manager.get_inspiration(player)
+        max_insp = player.get("max_inspiration", state_manager.MAX_INSPIRATION)
+
+        col_xp, col_insp = st.columns(2)
+        with col_xp:
+            st.metric("XP", f"{xp_cur} / {next_xp}")
+        with col_insp:
+            st.metric("Inspiration", f"{insp} / {max_insp}")
+
+        # Ability Stats
+        st.markdown("##### Ability Scores")
+        stats = player.get("stats", {})
+        col_s1, col_s2, col_s3 = st.columns(3)
+        with col_s1:
+            str_val = stats.get("STR", 10)
+            st.metric("STR", str_val, f"{state_manager.get_modifier(str_val):+d}")
+            int_val = stats.get("INT", 10)
+            st.metric("INT", int_val, f"{state_manager.get_modifier(int_val):+d}")
+        with col_s2:
+            dex_val = stats.get("DEX", 10)
+            st.metric("DEX", dex_val, f"{state_manager.get_modifier(dex_val):+d}")
+            wis_val = stats.get("WIS", 10)
+            st.metric("WIS", wis_val, f"{state_manager.get_modifier(wis_val):+d}")
+        with col_s3:
+            con_val = stats.get("CON", 10)
+            st.metric("CON", con_val, f"{state_manager.get_modifier(con_val):+d}")
+            cha_val = stats.get("CHA", 10)
+            st.metric("CHA", cha_val, f"{state_manager.get_modifier(cha_val):+d}")
+
+        # Party Companions & Approval
+        party = world.get("party", {})
+        companions = party.get("companions", [])
+        if companions:
+            st.markdown("---")
+            st.markdown("##### 👥 Companions")
+            for comp in companions:
+                c_name = comp.get("name", comp.get("id", "Companion"))
+                c_id = comp.get("id", c_name)
+                c_app = state_manager.get_companion_approval(world, c_id)
+                c_approval = c_app.get("approval", 50)
+                col_c_info, col_c_btn = st.columns([2, 1])
+                with col_c_info:
+                    st.markdown(f"**{c_name}** ({c_approval}/100)")
+                with col_c_btn:
+                    with st.popover("Dismiss"):
+                        st.write(f"Dismiss {c_name}?")
+                        if st.button("Confirm Dismiss", key=f"dismiss_{c_id}", use_container_width=True):
+                            try:
+                                state_manager.dismiss_companion(c_id, world)
+                                auto_save()
+                                st.toast(f"{c_name} has left your party.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error: {e}")
+
+            # Camp Companion Dialogue
+            if not combat_active and dungeon_manager.is_camp_context(world):
+                st.markdown("##### 🏕️ Camp Dialogue")
+                active_dlg = st.session_state.get("active_camp_dialogue")
+                if active_dlg:
+                    c_name = active_dlg.get("companion_name", "Companion")
+                    st.markdown(f"**{c_name}:** *\"{active_dlg.get('statement', '')}\"*")
+                    col_ag, col_dis, col_neu = st.columns(3)
+                    with col_ag:
+                        if st.button("Agree (+5)", key="camp_resp_agree", use_container_width=True):
+                            res = state_manager.respond_to_camp_dialogue(
+                                active_dlg["companion_id"], "agree", world, active_dlg
+                            )
+                            st.session_state["narrative_log"].append({
+                                "role": "assistant",
+                                "content": f"🏕️ **Camp Conversation:** You agreed with {c_name}. ({c_name}'s approval increased to {res['new_approval']}/100)"
+                            })
+                            st.session_state["active_camp_dialogue"] = None
+                            auto_save()
+                            st.rerun()
+                    with col_dis:
+                        if st.button("Disagree (-5)", key="camp_resp_disagree", use_container_width=True):
+                            res = state_manager.respond_to_camp_dialogue(
+                                active_dlg["companion_id"], "disagree", world, active_dlg
+                            )
+                            st.session_state["narrative_log"].append({
+                                "role": "assistant",
+                                "content": f"🏕️ **Camp Conversation:** You disagreed with {c_name}. ({c_name}'s approval decreased to {res['new_approval']}/100)"
+                            })
+                            st.session_state["active_camp_dialogue"] = None
+                            auto_save()
+                            st.rerun()
+                    with col_neu:
+                        if st.button("Neutral (0)", key="camp_resp_neutral", use_container_width=True):
+                            res = state_manager.respond_to_camp_dialogue(
+                                active_dlg["companion_id"], "neutral", world, active_dlg
+                            )
+                            st.session_state["narrative_log"].append({
+                                "role": "assistant",
+                                "content": f"🏕️ **Camp Conversation:** You had a calm, neutral exchange with {c_name}. (Approval: {res['new_approval']}/100)"
+                            })
+                            st.session_state["active_camp_dialogue"] = None
+                            auto_save()
+                            st.rerun()
+                else:
+                    mm = memory_manager.MemoryManager(player.get("name", "Adventurer"))
+                    for comp in companions:
+                        cid = comp.get("id") or comp.get("name")
+                        c_name = comp.get("name", cid)
+                        c_app = state_manager.get_companion_approval(world, cid)
+                        is_pending = c_app.get("camp_dialogue_pending", True)
+                        if is_pending:
+                            if st.button(f"💬 Talk with {c_name}", key=f"btn_camp_dlg_{cid}", use_container_width=True):
+                                dlg = state_manager.generate_camp_dialogue(cid, mm, player, world)
+                                if dlg:
+                                    st.session_state["active_camp_dialogue"] = dlg
+                                    st.rerun()
+                        else:
+                            st.caption(f"✓ Spoke with {c_name} this rest.")
+
+    # ── TAB 2: INVENTORY ───────────────────────────────────────────────────────
+    with tab_inv:
+        inventory = player.get("inventory", [])
+        ration_qty = sum(i.get("quantity", 1) for i in inventory if isinstance(i, dict) and i.get("item_id") == "trail_rations")
+
+        col_g, col_r = st.columns(2)
+        with col_g:
+            st.metric("Gold", f"{player.get('gold', 0)} GP")
+        with col_r:
+            st.metric("Rations", ration_qty)
+
         if not inventory:
             st.info("Inventory is empty.")
         else:
@@ -402,7 +483,7 @@ def render_sidebar():
                 slot_tag = f" [{islot}]" if islot else ""
                 status_tag = " *(Equipped)*" if is_equipped else ""
                 curse_tag = " 🔒 *(Bound)*" if is_bound else ""
-                fresh_tag = f" ⏳ ({item['freshness_days']}d fresh)" if "freshness_days" in item and not is_bound and is_id else ""
+                fresh_tag = f" ⏳ ({item['freshness_days']}d)" if "freshness_days" in item and not is_bound and is_id else ""
 
                 col_i1, col_i2 = st.columns([3, 2])
                 with col_i1:
@@ -468,7 +549,7 @@ def render_sidebar():
             if bound_cursed_items:
                 st.markdown("---")
                 st.caption("🔒 You bear cursed items that cannot be removed.")
-                is_town_or_safe = current_room.get("is_safe") or current_room.get("type") == "town"
+                is_town_or_safe = current_room and (current_room.get("is_safe") or current_room.get("type") == "town")
                 if is_town_or_safe:
                     if st.button("⛪ Town Cleric: Remove Curse (50 GP)", use_container_width=True):
                         ok_c, msg_c = state_manager.pay_cleric_remove_curse(player, world_state=world)
@@ -483,8 +564,44 @@ def render_sidebar():
                         auto_save()
                         st.rerun()
 
-    # ── Quest Log Expander ───────────────────────────────────────────────────────
-    with st.sidebar.expander("📜 Quest Log", expanded=False):
+        # Camp Cooking inside Inventory tab
+        if not combat_active:
+            st.markdown("---")
+            st.markdown("##### 🍳 Camp Cooking")
+            food_candidates = [
+                i for i in inventory
+                if isinstance(i, dict) and (
+                    i.get("raw_food") or i.get("type") in ("raw_food", "food", "rotten_food")
+                    or "freshness_days" in i or i.get("item_id") in ("raw_food", "raw_meat", "wild_vegetables", "rotten_food", "trail_rations")
+                )
+            ]
+            if len(food_candidates) == 0:
+                st.caption("No cooking ingredients. Forage or hunt to find food.")
+            else:
+                f_names = [f"{it.get('name', it.get('item_id'))} (x{it.get('quantity', 1)})" for it in food_candidates]
+                c_idx1 = st.selectbox("Ingredient 1", range(len(food_candidates)), format_func=lambda x: f_names[x], key="camp_cook_ing1")
+                c_idx2 = st.selectbox("Ingredient 2", range(len(food_candidates)), format_func=lambda x: f_names[x], key="camp_cook_ing2")
+                if st.button("🍲 Cook Meal (DC 12)", use_container_width=True, key="btn_camp_cook"):
+                    res_c = state_manager.cook_meal(player, food_candidates[c_idx1], food_candidates[c_idx2])
+                    if res_c.get("success"):
+                        st.toast("Cooked Hearty Stew!")
+                        st.session_state["narrative_log"].append({
+                            "role": "assistant",
+                            "content": f"🍲 **Camp Cooking:** {res_c['message']}"
+                        })
+                    elif res_c.get("burned"):
+                        st.toast("Burned the meal!")
+                        st.session_state["narrative_log"].append({
+                            "role": "assistant",
+                            "content": f"🔥 **Camp Cooking:** {res_c['message']}"
+                        })
+                    else:
+                        st.error(res_c.get("message", "Cooking failed."))
+                    auto_save()
+                    st.rerun()
+
+    # ── TAB 3: QUESTS ──────────────────────────────────────────────────────────
+    with tab_quests:
         q_log = world.get("quest_log", {})
         main_q = q_log.get("main", [])
         side_q = q_log.get("side", [])
@@ -510,16 +627,18 @@ def render_sidebar():
                         chk = "✅" if obj.get("done") else "⬜"
                         st.markdown(f"- {chk} {obj.get('description', 'Objective')}")
 
-    # ── Spell Slots Display (if caster) ─────────────────────────────────────────
-    spell_slots = player.get("spell_slots", {})
-    known_spells = player.get("known_spells", [])
-    if spell_slots or known_spells:
-        with st.sidebar.expander("✨ Spellbook & Slots", expanded=False):
+    # ── TAB 4: SPELLS ──────────────────────────────────────────────────────────
+    with tab_spells:
+        spell_slots = player.get("spell_slots", {})
+        known_spells = player.get("known_spells", [])
+        if not spell_slots and not known_spells:
+            st.info("No spellcasting ability or known spells.")
+        else:
             if spell_slots:
                 st.markdown("##### Spell Slots")
-                for lvl, sinfo in spell_slots.items():
+                for lvl_s, sinfo in spell_slots.items():
                     if isinstance(sinfo, dict):
-                        st.markdown(f"Level {lvl}: **{sinfo.get('current', 0)} / {sinfo.get('max', 0)}**")
+                        st.markdown(f"Level {lvl_s}: **{sinfo.get('current', 0)} / {sinfo.get('max', 0)}**")
             if known_spells:
                 st.markdown("##### Known Spells")
                 sp_cat = state_manager._get_spell_catalog()
@@ -530,7 +649,8 @@ def render_sidebar():
                     lvl_lbl = "Cantrip" if sp_lvl == 0 else f"Lvl {sp_lvl}"
                     st.markdown(f"- **{sp_name}** ({lvl_lbl})")
 
-    # Rest Actions
+    # ── Pinned Bottom Controls (Rest & Save/Exit) ──────────────────────────────
+    st.sidebar.markdown("---")
     if not combat_active:
         if st.sidebar.button("☕ Take Short Rest (1 hr)", use_container_width=True):
             state_manager.perform_short_rest(player, world)
@@ -541,114 +661,16 @@ def render_sidebar():
             })
             st.rerun()
 
-        # Camp Cooking
-        with st.sidebar.expander("🍳 Camp Cooking", expanded=False):
-            food_candidates = [
-                i for i in inventory
-                if isinstance(i, dict) and (
-                    i.get("raw_food") or i.get("type") in ("raw_food", "food", "rotten_food")
-                    or "freshness_days" in i or i.get("item_id") in ("raw_food", "raw_meat", "wild_vegetables", "rotten_food", "trail_rations")
-                )
-            ]
-            if len(food_candidates) == 0:
-                st.info("No cooking ingredients in inventory. Forage or hunt to find food!")
-            else:
-                f_names = [f"{it.get('name', it.get('item_id'))} (x{it.get('quantity', 1)})" for it in food_candidates]
-                c_idx1 = st.selectbox("Ingredient 1", range(len(food_candidates)), format_func=lambda x: f_names[x], key="camp_cook_ing1")
-                c_idx2 = st.selectbox("Ingredient 2", range(len(food_candidates)), format_func=lambda x: f_names[x], key="camp_cook_ing2")
-                if st.button("🍲 Cook Meal (Survival DC 12)", use_container_width=True, key="btn_camp_cook"):
-                    res_c = state_manager.cook_meal(player, food_candidates[c_idx1], food_candidates[c_idx2])
-                    if res_c.get("success"):
-                        st.toast("Cooked Hearty Stew!")
-                        st.session_state["narrative_log"].append({
-                            "role": "assistant",
-                            "content": f"🍲 **Camp Cooking:** {res_c['message']}"
-                        })
-                    elif res_c.get("burned"):
-                        st.toast("Burned the meal!")
-                        st.session_state["narrative_log"].append({
-                            "role": "assistant",
-                            "content": f"🔥 **Camp Cooking:** {res_c['message']}"
-                        })
-                    else:
-                        st.error(res_c.get("message", "Cooking failed."))
-                    auto_save()
-                    st.rerun()
+        if current_room and current_room.get("type") == "town":
+            if st.sidebar.button("⛺ Take Long Rest (Town)", use_container_width=True):
+                state_manager.long_rest(world, player)
+                auto_save()
+                st.session_state["narrative_log"].append({
+                    "role": "assistant",
+                    "content": f"You spend the night resting comfortably at Riverside Village. HP fully restored! Time is now **Day {world['game_time']['day']}, Morning**."
+                })
+                st.rerun()
 
-        # Phase 14.2: Camp Companion Dialogue
-        if companions and dungeon_manager.is_camp_context(world):
-            with st.sidebar.expander("🏕️ Camp Companion Dialogue", expanded=bool(st.session_state.get("active_camp_dialogue"))):
-                active_dlg = st.session_state.get("active_camp_dialogue")
-                if active_dlg:
-                    c_name = active_dlg.get("companion_name", "Companion")
-                    st.markdown(f"**{c_name}:** *\"{active_dlg.get('statement', '')}\"*")
-                    opts = active_dlg.get("options", {})
-                    col_ag, col_dis, col_neu = st.columns(3)
-                    with col_ag:
-                        if st.button("Agree (+5)", key="camp_resp_agree", use_container_width=True):
-                            res = state_manager.respond_to_camp_dialogue(
-                                active_dlg["companion_id"], "agree", world, active_dlg
-                            )
-                            st.session_state["narrative_log"].append({
-                                "role": "assistant",
-                                "content": f"🏕️ **Camp Conversation:** You agreed with {c_name}. ({c_name}'s approval increased to {res['new_approval']}/100)"
-                            })
-                            st.session_state["active_camp_dialogue"] = None
-                            auto_save()
-                            st.rerun()
-                    with col_dis:
-                        if st.button("Disagree (-5)", key="camp_resp_disagree", use_container_width=True):
-                            res = state_manager.respond_to_camp_dialogue(
-                                active_dlg["companion_id"], "disagree", world, active_dlg
-                            )
-                            st.session_state["narrative_log"].append({
-                                "role": "assistant",
-                                "content": f"🏕️ **Camp Conversation:** You disagreed with {c_name}. ({c_name}'s approval decreased to {res['new_approval']}/100)"
-                            })
-                            st.session_state["active_camp_dialogue"] = None
-                            auto_save()
-                            st.rerun()
-                    with col_neu:
-                        if st.button("Neutral (0)", key="camp_resp_neutral", use_container_width=True):
-                            res = state_manager.respond_to_camp_dialogue(
-                                active_dlg["companion_id"], "neutral", world, active_dlg
-                            )
-                            st.session_state["narrative_log"].append({
-                                "role": "assistant",
-                                "content": f"🏕️ **Camp Conversation:** You had a calm, neutral exchange with {c_name}. (Approval: {res['new_approval']}/100)"
-                            })
-                            st.session_state["active_camp_dialogue"] = None
-                            auto_save()
-                            st.rerun()
-                else:
-                    mm = memory_manager.MemoryManager(player.get("name", "Adventurer"))
-                    for comp in companions:
-                        cid = comp.get("id") or comp.get("name")
-                        c_name = comp.get("name", cid)
-                        c_app = state_manager.get_companion_approval(world, cid)
-                        is_pending = c_app.get("camp_dialogue_pending", True)
-                        if is_pending:
-                            if st.button(f"💬 Talk with {c_name}", key=f"btn_camp_dlg_{cid}", use_container_width=True):
-                                dlg = state_manager.generate_camp_dialogue(cid, mm, player, world)
-                                if dlg:
-                                    st.session_state["active_camp_dialogue"] = dlg
-                                    st.rerun()
-                        else:
-                            st.caption(f"✓ Spoke with {c_name} this rest.")
-
-    # Town Actions
-    if current_room and current_room.get("type") == "town":
-        if st.sidebar.button("⛺ Take Long Rest (Town)", use_container_width=True):
-            state_manager.long_rest(world, player)
-            auto_save()
-            st.session_state["narrative_log"].append({
-                "role": "assistant",
-                "content": f"You spend the night resting comfortably at Riverside Village. HP fully restored! Time is now **Day {world['game_time']['day']}, Morning**."
-            })
-            st.rerun()
-
-    # Save & Exit Controls
-    st.sidebar.markdown("---")
     col_save, col_exit = st.sidebar.columns(2)
     with col_save:
         if st.button("💾 Save Game", use_container_width=True):
@@ -801,25 +823,62 @@ def render_playing_view():
 
         with col_c1:
             st.markdown(f"##### Round {round_num} — Active Combatants")
-            p_cur_hp = player_c.get("hp", {}).get("current", 0)
-            p_max_hp = player_c.get("hp", {}).get("max", 10)
+            p_cur_hp = max(0, player_c.get("hp", {}).get("current", 0))
+            p_max_hp = max(1, player_c.get("hp", {}).get("max", 10))
+            p_pct = max(0.0, min(1.0, p_cur_hp / p_max_hp))
             p_hg = " [⛰️ High Ground]" if player_c.get("has_high_ground") else ""
-            st.markdown(f"🧑 **{player_c.get('name', 'Adventurer')}** (You) | HP: {p_cur_hp}/{p_max_hp} | AC: {player_c.get('ac', 10)}{p_hg}")
+            col_p1, col_p2 = st.columns([1, 1])
+            with col_p1:
+                st.markdown(f"🧑 **{player_c.get('name', 'Adventurer')}** (You) | AC: {player_c.get('ac', 10)}{p_hg}")
+            with col_p2:
+                st.progress(p_pct, text=f"{p_cur_hp}/{p_max_hp} HP")
 
             for comp in companions:
                 c_hp = comp.get("hp", {})
+                c_cur = max(0, c_hp.get("current", 0))
+                c_max = max(1, c_hp.get("max", 10))
+                c_pct = max(0.0, min(1.0, c_cur / c_max))
                 c_hg = " [⛰️ High Ground]" if comp.get("has_high_ground") else ""
-                st.markdown(f"🤝 **{comp.get('name', 'Companion')}** | HP: {c_hp.get('current', 0)}/{c_hp.get('max', 10)} | AC: {comp.get('ac', 10)}{c_hg}")
+                col_comp1, col_comp2 = st.columns([1, 1])
+                with col_comp1:
+                    st.markdown(f"🤝 **{comp.get('name', 'Companion')}** | AC: {comp.get('ac', 10)}{c_hg}")
+                with col_comp2:
+                    st.progress(c_pct, text=f"{c_cur}/{c_max} HP")
 
             st.markdown("---")
-            for enemy in enemies:
-                e_id = enemy.get("id", "enemy")
-                e_name = enemy.get("name", e_id)
-                e_hp = enemy.get("hp", {})
-                cur_e_hp = e_hp.get("current", 0)
-                max_e_hp = e_hp.get("max", 1)
-                e_hg = " [⛰️ High Ground]" if enemy.get("has_high_ground") else ""
-                st.markdown(f"👹 **{e_name}** | HP: {cur_e_hp}/{max_e_hp} | AC: {enemy.get('ac', 10)}{e_hg}")
+            st.markdown("###### Foes")
+            if enemies:
+                num_e_cols = min(len(enemies), 3) if len(enemies) > 1 else 1
+                if num_e_cols > 1:
+                    e_cols = st.columns(num_e_cols)
+                    for idx, enemy in enumerate(enemies):
+                        with e_cols[idx % num_e_cols]:
+                            e_id = enemy.get("id", "enemy")
+                            e_name = enemy.get("name", e_id)
+                            e_hp = enemy.get("hp", {})
+                            cur_e_hp = max(0, e_hp.get("current", 0))
+                            max_e_hp = max(1, e_hp.get("max", 1))
+                            pct = max(0.0, min(1.0, cur_e_hp / max_e_hp))
+                            e_hg = " [⛰️ High Ground]" if enemy.get("has_high_ground") else ""
+                            conds = f" *({', '.join(enemy.get('conditions', []))})*" if enemy.get("conditions") else ""
+                            st.markdown(f"👹 **{e_name}**{e_hg}")
+                            st.caption(f"AC: {enemy.get('ac', 10)}{conds}")
+                            st.progress(pct, text=f"{cur_e_hp}/{max_e_hp} HP")
+                else:
+                    for enemy in enemies:
+                        e_id = enemy.get("id", "enemy")
+                        e_name = enemy.get("name", e_id)
+                        e_hp = enemy.get("hp", {})
+                        cur_e_hp = max(0, e_hp.get("current", 0))
+                        max_e_hp = max(1, e_hp.get("max", 1))
+                        pct = max(0.0, min(1.0, cur_e_hp / max_e_hp))
+                        e_hg = " [⛰️ High Ground]" if enemy.get("has_high_ground") else ""
+                        conds = f" *({', '.join(enemy.get('conditions', []))})*" if enemy.get("conditions") else ""
+                        col_e1, col_e2 = st.columns([1, 1])
+                        with col_e1:
+                            st.markdown(f"👹 **{e_name}** | AC: {enemy.get('ac', 10)}{e_hg}{conds}")
+                        with col_e2:
+                            st.progress(pct, text=f"{cur_e_hp}/{max_e_hp} HP")
 
         living_enemies = [e for e in enemies if e.get("hp", {}).get("current", 0) > 0]
         player_alive = player_c.get("hp", {}).get("current", 0) > 0

@@ -97,6 +97,15 @@ Status values to use: NOT_STARTED / IN_PROGRESS / DONE
 
 ## If IN_PROGRESS when a session ends, note exactly what's left here:
 ALL PHASES ARE 100% COMPLETE! Every phase from Phase 0 through Phase 14.2 (Final Phase) has been fully implemented, verified, wired into the Streamlit UI, and tested (20/20 test suites, 475 tests passing with zero regressions per line 3). The D&D AI DM project roadmap is completely achieved!
+## UI Polish — Streamlit Layout & Visual Hierarchy (Cosmetic pass on app.py)
+- **Zero Logic Changes**: All function calls, session_state keys, signatures, and data flows were preserved unchanged. Full test runner `run_tests.py` ran all 20 test suites (475 individual tests) with 100% pass before and after.
+- **Sidebar Organization with `st.tabs()`**: Replaced stacked expanders with 4 tabs (`👤 Character`, `🎒 Inventory`, `📜 Quests`, `✨ Spells`), eliminating the long wall of text.
+- **Pinned Top Vitals**: Kept always-needed stats outside the tabs pinned at the top of the sidebar (character name/class/level, HP & AC metric cards, HP progress bar, current location, game time, active conditions, and wanted/bounty notices).
+- **Stat Cards with `st.metric()`**: Replaced bare text lines with `st.metric()` stat cards for HP, AC, Gold, XP, Inspiration, Trail Rations, and the 6 ability scores (STR, DEX, CON, INT, WIS, CHA) with modifier deltas.
+- **Combat Panel Relative Health Bars**: Replaced plain text HP numbers with `st.progress()` bars and `st.columns()`:
+  - Enemies laid out side-by-side using columns when multiple foes are present, showing relative health at a glance.
+  - Player and companion HP displayed side-by-side with visual progress bars.
+- **Header Emoji Polish**: Cleaned up section headers to ensure a maximum of one emoji per section header for a clean, non-cluttered look.
 
 ## Phase 10 deferred items (explicitly out of scope until Phase 10)
 - Session recap on load (Section 14a / BUILD_ORDER.md Phase 10): generate a "previously in your story…" paragraph from recent major_lore entries on save load. NOT implemented in Phase 5. Owner: Phase 10 (optional polish).
