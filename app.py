@@ -346,6 +346,24 @@ def render_sidebar():
     ration_qty = sum(i.get("quantity", 1) for i in inventory if isinstance(i, dict) and i.get("item_id") == "trail_rations")
     st.sidebar.markdown(f"🍞 **Trail Rations:** {ration_qty}")
 
+    # Wanted / Bounty Status
+    if player.get("is_wanted") or player.get("bounty", 0) > 0:
+        bounty_val = player.get("bounty", 0)
+        st.sidebar.error(f"🚨 **WANTED!** Bounty: **{bounty_val} GP**")
+        if current_room and current_room.get("type") == "town":
+            if st.sidebar.button(f"🏛️ Pay Off Bounty ({bounty_val} GP)", use_container_width=True):
+                ok_b, msg_b = state_manager.pay_bounty(player)
+                if ok_b:
+                    st.toast(msg_b)
+                    st.session_state["narrative_log"].append({
+                        "role": "assistant",
+                        "content": f"🏛️ {msg_b}"
+                    })
+                else:
+                    st.sidebar.error(msg_b)
+                auto_save()
+                st.rerun()
+
     # ── Inventory & Equipment Expander ──────────────────────────────────────────
     with st.sidebar.expander("🎒 Inventory & Equipment", expanded=False):
         if not inventory:
@@ -908,34 +926,72 @@ def render_playing_view():
 
         with col_nav:
             if player.get("status") == "captive":
-                st.markdown("##### 🔒 Captive — Attempt Escape")
-                st.info("You are held captive! Normal movement is disabled until you escape.")
-                if st.button("🔓 Attempt Escape", use_container_width=True, type="primary"):
-                    # One resolve_check against hard difficulty (DC 16)
-                    esc_res = state_manager.resolve_check("DEX", "hard", player)
-                    
-                    # Advance time by 1 step (costs a turn)
-                    time_res = dungeon_manager.advance_time(world, steps=1)
-                    if time_res.get("period_changed"):
-                        state_manager.handle_period_change(world, player)
+                cap_reason = player.get("captivity_reason", "combat_defeat")
+                if cap_reason == "crime":
+                    st.markdown("##### ⚖️ Imprisoned in Town Jail")
+                    days_left = player.get("prison_days_left", 1)
+                    st.warning(f"You are locked in a jail cell! Remaining sentence: **{days_left} day(s)**.")
+                    confiscated = player.get("confiscated_items", [])
+                    if confiscated:
+                        st.caption(f"🔒 {len(confiscated)} personal item(s) locked in the evidence chest.")
 
-                    if esc_res["success"]:
-                        player["status"] = "normal"
-                        safe_room = dungeon_manager.find_nearest_visited_safe_room(world)
-                        world["current_location"] = safe_room
-                        st.success("🎉 Escape Successful!")
-                        st.session_state["narrative_log"].append({
-                            "role": "assistant",
-                            "content": f"🔓 **Escape Successful!** (Rolled {esc_res['total']} vs DC {esc_res['dc']}). You broke free from your bonds and fled to **{safe_room}**."
-                        })
-                    else:
-                        st.error("❌ Escape Failed!")
-                        st.session_state["narrative_log"].append({
-                            "role": "assistant",
-                            "content": f"🔒 **Escape Failed!** (Rolled {esc_res['total']} vs DC {esc_res['dc']}). The guards catch you. Time passes..."
-                        })
-                    auto_save()
-                    st.rerun()
+                    col_srv, col_brk = st.columns(2)
+                    with col_srv:
+                        if st.button("⚖️ Serve Time", use_container_width=True, type="primary"):
+                            res_s = state_manager.serve_prison_time(player, world)
+                            st.toast("Sentence completed!")
+                            st.session_state["narrative_log"].append({
+                                "role": "assistant",
+                                "content": f"⚖️ **Sentence Served:** {res_s['message']}"
+                            })
+                            auto_save()
+                            st.rerun()
+                    with col_brk:
+                        if st.button("🔓 Lockpick Escape", use_container_width=True):
+                            res_e = state_manager.attempt_lockpick_escape(player, world)
+                            if res_e["success"]:
+                                st.toast("Escape Successful!")
+                                st.session_state["narrative_log"].append({
+                                    "role": "assistant",
+                                    "content": f"🎉 **Prison Break:** {res_e['message']}"
+                                })
+                            else:
+                                st.error(res_e["message"])
+                                st.session_state["narrative_log"].append({
+                                    "role": "assistant",
+                                    "content": f"❌ **Prison Break Failed:** {res_e['message']}"
+                                })
+                            auto_save()
+                            st.rerun()
+                else:
+                    st.markdown("##### 🔒 Captive — Attempt Escape")
+                    st.info("You are held captive! Normal movement is disabled until you escape.")
+                    if st.button("🔓 Attempt Escape", use_container_width=True, type="primary"):
+                        # One resolve_check against hard difficulty (DC 16)
+                        esc_res = state_manager.resolve_check("DEX", "hard", player)
+                        
+                        # Advance time by 1 step (costs a turn)
+                        time_res = dungeon_manager.advance_time(world, steps=1, character_state=player)
+                        if time_res.get("period_changed"):
+                            state_manager.handle_period_change(world, player)
+
+                        if esc_res["success"]:
+                            player["status"] = "normal"
+                            safe_room = dungeon_manager.find_nearest_visited_safe_room(world)
+                            world["current_location"] = safe_room
+                            st.success("🎉 Escape Successful!")
+                            st.session_state["narrative_log"].append({
+                                "role": "assistant",
+                                "content": f"🔓 **Escape Successful!** (Rolled {esc_res['total']} vs DC {esc_res['dc']}). You broke free from your bonds and fled to **{safe_room}**."
+                            })
+                        else:
+                            st.error("❌ Escape Failed!")
+                            st.session_state["narrative_log"].append({
+                                "role": "assistant",
+                                "content": f"🔒 **Escape Failed!** (Rolled {esc_res['total']} vs DC {esc_res['dc']}). The guards catch you. Time passes..."
+                            })
+                        auto_save()
+                        st.rerun()
             else:
                 st.markdown("##### 🧭 Navigation & Movement")
                 exits = dungeon_manager.get_available_exits(world)
@@ -1077,11 +1133,18 @@ def render_playing_view():
             # Manual Ability Check, Spells & Combat Launchers
             known_spells = player.get("known_spells", [])
             has_ooc_spells = bool(known_spells)
+            room_npcs = current_room.get("npcs", [])
 
-            col_counts = 3 if has_ooc_spells else 2
+            col_counts = 2
+            if has_ooc_spells:
+                col_counts += 1
+            if room_npcs:
+                col_counts += 1
             cols_actions = st.columns(col_counts)
 
-            with cols_actions[0]:
+            c_idx = 0
+            with cols_actions[c_idx]:
+                c_idx += 1
                 with st.popover("🎲 Make Ability Check"):
                     chk_stat = st.selectbox("Stat:", ["STR", "DEX", "CON", "INT", "WIS", "CHA"])
                     chk_diff = st.selectbox("Difficulty:", ["easy", "medium", "hard", "very_hard"])
@@ -1107,7 +1170,32 @@ def render_playing_view():
                         auto_save()
                         st.rerun()
 
-            with cols_actions[1]:
+            if room_npcs:
+                with cols_actions[c_idx]:
+                    c_idx += 1
+                    with st.popover("🦹 Pickpocket"):
+                        st.caption("Attempt to steal from an NPC using Sleight of Hand.")
+                        target_npc = st.selectbox("Target NPC", room_npcs, key="pp_target_npc")
+                        st_item = st.selectbox("Item to Steal", ["gold", "healing_potion", "torch", "rope", "dagger"], key="pp_item")
+                        if st.button("🧤 Attempt Steal", use_container_width=True, key="btn_pp_steal"):
+                            pp_res = state_manager.attempt_pickpocket(player, target_npc, st_item, world_state=world)
+                            if pp_res["success"]:
+                                st.toast(pp_res["message"])
+                                st.session_state["narrative_log"].append({
+                                    "role": "assistant",
+                                    "content": f"🦹 **Pickpocket:** {pp_res['message']} (Rolled {pp_res['total']} vs DC {pp_res['dc']})"
+                                })
+                            else:
+                                st.error(pp_res["message"])
+                                st.session_state["narrative_log"].append({
+                                    "role": "assistant",
+                                    "content": f"🚨 **Caught!** {pp_res['message']} (Rolled {pp_res['total']} vs DC {pp_res['dc']})"
+                                })
+                            auto_save()
+                            st.rerun()
+
+            with cols_actions[c_idx]:
+                c_idx += 1
                 if st.button("⚔️ Attack / Trigger Combat", use_container_width=True):
                     # Check room encounter table or spawn default goblins
                     enc_table = current_room.get("encounter_table", ["goblin_scout"])
@@ -1123,7 +1211,8 @@ def render_playing_view():
                     st.rerun()
 
             if has_ooc_spells:
-                with cols_actions[2]:
+                with cols_actions[c_idx]:
+                    c_idx += 1
                     with st.popover("✨ Cast Spell"):
                         sp_cat = state_manager._get_spell_catalog()
                         def _fmt_ooc_sp(sid):

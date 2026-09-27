@@ -135,5 +135,19 @@
     "gold_drop": {"min": 0, "max": 8},
     "challenge_rating": 0.125,
     "active_conditions": []
+  },
+  "town_guard": {
+    "name": "Town Guard",
+    "hp": {"current": 16, "max": 16},
+    "ac": 16,
+    "stats": {"STR": 13, "DEX": 12, "CON": 12, "INT": 10, "WIS": 11, "CHA": 10},
+    "attacks": [
+      {"name": "Spear", "attack_bonus": 3, "damage": "1d6+1", "damage_type": "piercing", "applies_condition": null}
+    ],
+    "xp_value": 50,
+    "gold_drop": {"min": 1, "max": 6},
+    "challenge_rating": 0.25,
+    "active_conditions": []
   }
 }
+

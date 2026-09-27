@@ -116,5 +116,22 @@
     "is_safe": false,
     "loot": [{"item_id": "gold", "amount_min": 10, "amount_max": 30}, {"item_id": "dagger", "quantity": 1}],
     "encounter_table": ["goblin_scout", "goblin_warrior", "orc"]
+  },
+  "town_jail": {
+    "id": "town_jail",
+    "name": "Town Jail Cell",
+    "type": "dungeon",
+    "description": "Cold iron bars and damp stone walls. A heavy iron evidence chest sits beside the warden's desk, holding confiscated goods.",
+    "exits": {
+      "north": null,
+      "south": null,
+      "east": null,
+      "west": "town_riverside"
+    },
+    "shops": [],
+    "npcs": ["jailer_karr"],
+    "is_safe": false,
+    "loot": []
   }
 }
+
