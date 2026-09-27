@@ -297,6 +297,24 @@ class TestPhase12_1Inspiration(unittest.TestCase):
         self.assertIn("max_inspiration", sheet)
         self.assertEqual(sheet["max_inspiration"], 4)
 
+    def test_case_insensitive_skill_proficiency_and_trigger(self):
+        """Passing lowercase skill still applies proficiency bonus and triggers background."""
+        crim = {
+            "background": "Criminal",
+            "inspiration": 0,
+            "max_inspiration": 4,
+            "stats": {"DEX": 14},  # +2 mod
+            "proficiency_bonus": 2,
+            "proficient_skills": ["Sleight of Hand"],
+        }
+        with patch("state_manager._roll_d20", return_value=10):
+            res = state_manager.resolve_check("DEX", "medium", crim, skill="sleight of hand")
+
+        self.assertEqual(res["proficiency"], 2)
+        self.assertEqual(res["total"], 14)  # 10 + 2 + 2 = 14 >= DC 13
+        self.assertTrue(res["success"])
+        self.assertEqual(state_manager.get_inspiration(crim), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

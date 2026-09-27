@@ -432,7 +432,11 @@ def is_proficient(skill_or_save: str, state: Dict[str, Any]) -> bool:
     """
     skills = state.get("proficient_skills", [])
     saves  = state.get("proficient_saves", [])
-    return skill_or_save in skills or skill_or_save in saves
+    target = str(skill_or_save).strip().lower()
+    return (
+        any(target == str(s).strip().lower() for s in skills)
+        or any(target == str(s).strip().lower() for s in saves)
+    )
 
 
 def _roll_d20() -> int:
@@ -615,7 +619,7 @@ def resolve_check(
     modifier = get_modifier(stat_value)
 
     if skill and not proficient:
-        if skill in state.get("proficient_skills", []):
+        if is_proficient(skill, state):
             proficient = True
 
     prof_bonus = state.get("proficiency_bonus", 2)
