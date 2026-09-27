@@ -51,6 +51,8 @@ def init_session_state():
         st.session_state["current_char_name"] = None
     if "last_action_msg" not in st.session_state:
         st.session_state["last_action_msg"] = None
+    if "action_suggestions" not in st.session_state:
+        st.session_state["action_suggestions"] = list(llm_handler.DEFAULT_ACTION_SUGGESTIONS)
 
 
 def auto_save():
@@ -112,6 +114,8 @@ def load_game(char_name: str, client: Optional[Any] = None) -> bool:
                             client=client,
                         )
                         recap_narrative = res.get("narrative", "")
+                        if res.get("suggestions"):
+                            st.session_state["action_suggestions"] = res["suggestions"]
                         if recap_narrative:
                             if not recap_narrative.startswith("Previously"):
                                 recap_narrative = f"Previously, in your story...\n{recap_narrative}"
@@ -154,8 +158,8 @@ def render_landing_view():
         with st.form("character_creation_form"):
             char_name = st.text_input("Character Name:", value="Valeros")
             
-            race = st.selectbox("Race:", ["Human", "Elf", "Dwarf", "Halfling", "Dragonborn"])
-            cls_name = st.selectbox("Class:", ["Fighter", "Wizard", "Rogue", "Cleric"])
+            race = st.selectbox("Race:", ["Human", "Elf", "Dwarf", "Halfling", "Tiefling", "Half-Orc", "Dragonborn"])
+            cls_name = st.selectbox("Class:", ["Fighter", "Wizard", "Rogue", "Cleric", "Bard"])
             bg = st.selectbox("Background:", ["Folk Hero", "Acolyte", "Criminal", "Noble", "Sage", "Soldier"])
 
             st.markdown("##### Ability Scores (Point-Buy: 27 Points Total)")
@@ -167,11 +171,14 @@ def render_landing_view():
             c_cha = st.slider("CHA", 8, 15, 8)
 
             stats_alloc = {"STR": c_str, "DEX": c_dex, "CON": c_con, "INT": c_int, "WIS": c_wis, "CHA": c_cha}
+            total_spent = sum(character_creator.POINT_BUY_COST.get(v, 0) for v in stats_alloc.values())
+            remaining = character_creator.POINT_BUY_BUDGET - total_spent
+
             ok_pts, pts_msg = character_creator.validate_point_buy(stats_alloc)
             if not ok_pts:
                 st.warning(f"⚠️ Point-Buy Allocation: {pts_msg}")
             else:
-                st.success(f"✅ {pts_msg}")
+                st.success(f"✅ Point-Buy Valid: ใช้แต้มไป {total_spent} / 27 แต้ม (คงเหลือ {remaining} แต้ม)")
 
             submitted = st.form_submit_button("⚔️ Create Character", use_container_width=True)
             if submitted:
@@ -435,6 +442,8 @@ def render_playing_view():
                 )
 
                 narration_text = narrative_res.get("narrative", "")
+                if narrative_res.get("suggestions"):
+                    st.session_state["action_suggestions"] = narrative_res["suggestions"]
                 full_combat_msg = f"{narration_block}\n\n*{narration_text}*"
 
                 # 3. Append turn to narrative log & history buffer
@@ -471,6 +480,12 @@ def render_playing_view():
 
                 auto_save()
                 st.rerun()
+
+            # Display active combat suggestions
+            combat_suggestions = st.session_state.get("action_suggestions") or list(llm_handler.DEFAULT_ACTION_SUGGESTIONS)
+            st.caption("💡 **Tactical Suggestions:**")
+            for csug in combat_suggestions[:3]:
+                st.markdown(f"- *{csug}*")
 
     # ────────────────────────────────────────────────────────────────────────────
     # EXPLORATION PANEL (when NOT in combat)
@@ -536,45 +551,63 @@ def render_playing_view():
 
         with col_act:
             st.markdown("##### 🎭 Actions & Interaction")
-            
+
+            # Contextual Action Suggestions (Sub-phase 14.1 / Module D)
+            suggestions = st.session_state.get("action_suggestions") or list(llm_handler.DEFAULT_ACTION_SUGGESTIONS)
+            st.caption("💡 **Suggested Actions:**")
+            sug_cols = st.columns(3)
+            clicked_suggestion = None
+            for idx, sug_text in enumerate(suggestions[:3]):
+                with sug_cols[idx]:
+                    if st.button(f"✨ {sug_text}", key=f"sug_btn_{idx}", use_container_width=True):
+                        clicked_suggestion = sug_text
+
             # Action Text Input Form
             with st.form("action_form", clear_on_submit=True):
                 user_action = st.text_input("What do you want to do?", placeholder="e.g. Look around the room, talk to the merchant...")
                 sub_act = st.form_submit_button("Submit Action", use_container_width=True)
-                
-                if sub_act and user_action.strip():
-                    st.session_state["narrative_log"].append({"role": "user", "content": user_action.strip()})
-                    
-                    # 1. Narrative Call
-                    hist = st.session_state.get("history_buffer", [])
-                    res = llm_handler.generate_narrative_response(
-                        user_input=user_action.strip(),
-                        player_state=player,
-                        world_state=world,
-                        history=hist,
-                    )
-                    narrative_text = res.get("narrative", "")
-                    
-                    # 2. Extraction Call
-                    ext_res = llm_handler.generate_extraction_response(
-                        narrative_text=narrative_text,
-                        player_state=player,
-                        world_state=world,
-                    )
-                    
-                    # 3. Apply state updates if present
-                    if ext_res:
-                        if "state_updates" in ext_res and ext_res["state_updates"]:
-                            state_manager.apply_state_updates(ext_res["state_updates"], player, world)
-                        if "quest_updates" in ext_res and ext_res["quest_updates"]:
-                            state_manager.apply_quest_updates(ext_res["quest_updates"], world)
 
-                    st.session_state["narrative_log"].append({"role": "assistant", "content": narrative_text})
-                    st.session_state["history_buffer"].append({"role": "user", "content": user_action.strip()})
-                    st.session_state["history_buffer"].append({"role": "assistant", "content": narrative_text})
+            action_to_process = None
+            if clicked_suggestion:
+                action_to_process = clicked_suggestion.strip()
+            elif sub_act and user_action.strip():
+                action_to_process = user_action.strip()
 
-                    auto_save()
-                    st.rerun()
+            if action_to_process:
+                st.session_state["narrative_log"].append({"role": "user", "content": action_to_process})
+
+                # 1. Narrative Call
+                hist = st.session_state.get("history_buffer", [])
+                res = llm_handler.generate_narrative_response(
+                    user_input=action_to_process,
+                    player_state=player,
+                    world_state=world,
+                    history=hist,
+                )
+                narrative_text = res.get("narrative", "")
+                if res.get("suggestions"):
+                    st.session_state["action_suggestions"] = res["suggestions"]
+
+                # 2. Extraction Call
+                ext_res = llm_handler.generate_extraction_response(
+                    narrative_text=narrative_text,
+                    player_state=player,
+                    world_state=world,
+                )
+
+                # 3. Apply state updates if present
+                if ext_res:
+                    if "state_updates" in ext_res and ext_res["state_updates"]:
+                        state_manager.apply_state_updates(ext_res["state_updates"], player, world)
+                    if "quest_updates" in ext_res and ext_res["quest_updates"]:
+                        state_manager.apply_quest_updates(ext_res["quest_updates"], world)
+
+                st.session_state["narrative_log"].append({"role": "assistant", "content": narrative_text})
+                st.session_state["history_buffer"].append({"role": "user", "content": action_to_process})
+                st.session_state["history_buffer"].append({"role": "assistant", "content": narrative_text})
+
+                auto_save()
+                st.rerun()
 
             # Manual Ability Check & Combat Launchers
             col_chk, col_cmbt = st.columns(2)

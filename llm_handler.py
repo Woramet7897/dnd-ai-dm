@@ -285,6 +285,87 @@ def format_llm_history(history: Optional[List[Dict[str, str]]], max_turns: int =
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# ACTION SUGGESTIONS CONFIG & HELPERS (Sub-phase 14.1 / Module D)
+# ════════════════════════════════════════════════════════════════════════════════
+
+DEFAULT_ACTION_SUGGESTIONS: List[str] = [
+    "โจมตีศัตรูที่ใกล้ที่สุด",
+    "ตั้งท่าป้องกัน (Dodge)",
+    "สำรวจหาจุดได้เปรียบ",
+]
+
+SUGGESTIONS_DIRECTIVE: str = (
+    "\n\n[Action Suggestions Directive]\n"
+    "At the very end of your response, provide exactly 3 short suggested actions "
+    "(under 8 words each, concrete, context-appropriate to the scene just narrated, in Thai, in first-person or imperative). "
+    "Output them strictly as a trailing JSON block:\n"
+    "```json\n"
+    '{"suggestions": ["<action 1>", "<action 2>", "<action 3>"]}\n'
+    "```"
+)
+
+
+def extract_and_strip_suggestions(raw_text: str) -> Tuple[str, List[str]]:
+    """
+    Extract trailing action suggestions JSON block and strip all JSON leakage from narrative.
+    Guarantees exactly 3 suggestions (truncates if > 3, pads with defaults if < 3).
+    Falls back cleanly to DEFAULT_ACTION_SUGGESTIONS if missing or malformed.
+    """
+    suggestions: List[str] = []
+
+    # 1. Search for fenced or raw JSON block containing "suggestions"
+    fence_pattern = r"```(?:json)?\s*(\{[\s\S]*?\"suggestions\"[\s\S]*?\})\s*```"
+    match = re.search(fence_pattern, raw_text, flags=re.DOTALL | re.IGNORECASE)
+
+    json_candidate = None
+    if match:
+        json_candidate = match.group(1).strip()
+    else:
+        raw_pattern = r"(\{[\s\r\n]*\"suggestions\"[\s\S]*?\})"
+        match_raw = re.search(raw_pattern, raw_text, flags=re.DOTALL | re.IGNORECASE)
+        if match_raw:
+            json_candidate = match_raw.group(1).strip()
+
+    if json_candidate:
+        try:
+            sanitized = re.sub(r",\s*([\]}])", r"\1", json_candidate)
+            data = json.loads(sanitized)
+            if isinstance(data, dict) and "suggestions" in data:
+                raw_list = data["suggestions"]
+                if isinstance(raw_list, list):
+                    for item in raw_list:
+                        s = str(item).strip()
+                        if s:
+                            suggestions.append(s)
+        except Exception as parse_err:
+            logger.debug(f"Action suggestions parse failed: {parse_err}")
+
+    # 2. Guarantee exactly 3 suggestions (truncate / pad with defaults)
+    cleaned_suggestions: List[str] = []
+    for s in suggestions:
+        if len(cleaned_suggestions) < 3 and s not in cleaned_suggestions:
+            cleaned_suggestions.append(s)
+
+    for default_s in DEFAULT_ACTION_SUGGESTIONS:
+        if len(cleaned_suggestions) >= 3:
+            break
+        if default_s not in cleaned_suggestions:
+            cleaned_suggestions.append(default_s)
+
+    while len(cleaned_suggestions) < 3:
+        cleaned_suggestions.append(DEFAULT_ACTION_SUGGESTIONS[len(cleaned_suggestions)])
+
+    # 3. Strip any JSON block leakage from narrative text (both fenced blocks and raw suggestions JSON)
+    clean_narrative = raw_text
+    clean_narrative = re.sub(r"```json\s*[\s\S]*?```", "", clean_narrative, flags=re.DOTALL).strip()
+    clean_narrative = re.sub(r"```\s*\{[\s\S]*?\}\s*```", "", clean_narrative, flags=re.DOTALL).strip()
+    raw_sug_pattern = r"\{[\s\r\n]*\"suggestions\"[\s\S]*?\}"
+    clean_narrative = re.sub(raw_sug_pattern, "", clean_narrative, flags=re.DOTALL | re.IGNORECASE).strip()
+
+    return clean_narrative, cleaned_suggestions
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # NARRATIVE CALL (Spec Section 12a / Part 11a)
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -297,6 +378,7 @@ def generate_narrative_response(
     companions_present: Optional[List[Dict[str, Any]]] = None,
     roll_result: Optional[str] = None,
     round_result: Optional[str] = None,
+    include_suggestions: bool = True,
     model: str = DEFAULT_MODEL,
     num_ctx: int = DEFAULT_NUM_CTX,
     client: Optional[Any] = None,
@@ -304,6 +386,7 @@ def generate_narrative_response(
     """
     Generate narrative response from Ollama.
     Streams/returns plain text narrative with NO JSON leakage.
+    Appends trailing action suggestions block instruction and extracts suggestions.
 
     Args:
       user_input: action text typed by the player.
@@ -314,12 +397,13 @@ def generate_narrative_response(
       companions_present: active companions in current room.
       roll_result: system roll injection block (e.g. '[System: Roll Result] ...').
       round_result: system combat round narration block (e.g. '[System: Round Result] ...').
+      include_suggestions: whether to request action suggestions (default True).
       model: Ollama model name (default llama3).
       num_ctx: explicit context window size.
       client: optional mock/custom Ollama client for unit tests.
 
     Returns:
-      Dict with 'narrative', 'metrics', 'token_costs', 'dropped_tiers'.
+      Dict with 'narrative', 'metrics', 'token_costs', 'dropped_tiers', 'suggestions'.
     """
     system_prompt, tier_costs, dropped_logs = assemble_system_prompt(
         player_state=player_state,
@@ -339,6 +423,8 @@ def generate_narrative_response(
         content_parts.append(user_input.strip())
 
     user_content = "\n\n".join(content_parts) if content_parts else "The scene continues."
+    if include_suggestions:
+        user_content += SUGGESTIONS_DIRECTIVE
 
     # Build Ollama message payload: system prompt + 6-turn history window + current user turn
     messages = [{"role": "system", "content": system_prompt}]
@@ -360,8 +446,8 @@ def generate_narrative_response(
         elapsed = time.time() - start_t
         raw_text = response.get("message", {}).get("content", "")
 
-        # Spec 12a: Strip any accidental JSON block leakage from narrative output
-        clean_narrative = re.sub(r"```json\s*.*?```", "", raw_text, flags=re.DOTALL).strip()
+        # Extract suggestions and strip all JSON block leakage
+        clean_narrative, suggestions = extract_and_strip_suggestions(raw_text)
 
         metrics = {
             "eval_count": response.get("eval_count", 0),
@@ -382,6 +468,7 @@ def generate_narrative_response(
             "metrics": metrics,
             "token_costs": tier_costs,
             "dropped_tiers": dropped_logs,
+            "suggestions": suggestions,
         }
 
     except Exception as e:
@@ -392,6 +479,7 @@ def generate_narrative_response(
             "metrics": {"eval_count": 0, "prompt_eval_count": 0, "eval_duration": 0, "elapsed_seconds": elapsed},
             "token_costs": tier_costs,
             "dropped_tiers": dropped_logs,
+            "suggestions": list(DEFAULT_ACTION_SUGGESTIONS),
             "error": str(e),
         }
 
