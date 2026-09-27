@@ -1659,42 +1659,46 @@ def render_playing_view():
             else:
                 st.markdown("##### 🧭 Navigation & Movement")
                 exits = dungeon_manager.get_available_exits(world)
-                
-                def _render_move_btn(dir_key, label):
+
+                def _render_move_btn(dir_key, icon):
                     dest_id = exits.get(dir_key)
                     if dest_id is not None:
-                        if st.button(label, key=f"move_{dir_key}", use_container_width=True):
+                        dest_room = dungeon_manager._get_room(dest_id, world)
+                        dest_name = dest_room.get("name", dest_id) if dest_room else dest_id
+                        btn_label = f"{icon} {dir_key.capitalize()}\n👉 {dest_name}"
+                        if st.button(btn_label, key=f"move_{dir_key}", use_container_width=True, help=f"เดินไปทางทิศ {dir_key.capitalize()}: {dest_name}"):
                             ok_m, msg_m, new_room = dungeon_manager.move_player(dir_key, world, player)
                             if ok_m and new_room:
                                 st.session_state.pop("pending_inspiration_reroll", None)
+                                st.session_state.pop("active_visiting_shop", None)
                                 st.session_state["last_action_msg"] = msg_m
                                 st.session_state["narrative_log"].append({
                                     "role": "user",
-                                    "content": f"I move {dir_key} into {new_room.get('name')}."
+                                    "content": f"ฉันออกเดินทางไปทางทิศ {dir_key} มุ่งหน้าสู่ {new_room.get('name')}."
                                 })
                                 auto_save()
                                 st.rerun()
                     else:
-                        st.button(label, key=f"move_disabled_{dir_key}", disabled=True, use_container_width=True)
+                        st.button(f"{icon} {dir_key.capitalize()}\n⛔ ทางตัน", key=f"move_disabled_{dir_key}", disabled=True, use_container_width=True)
 
                 # Row 1: North
-                c_n1, c_n2, c_n3 = st.columns([1, 1, 1])
+                c_n1, c_n2, c_n3 = st.columns([1, 2, 1])
                 with c_n2:
-                    _render_move_btn("north", "⬆️ North")
+                    _render_move_btn("north", "⬆️")
 
                 # Row 2: West, Compass Center, East
-                c_w, c_mid, c_e = st.columns([1, 1, 1])
+                c_w, c_mid, c_e = st.columns([1.5, 0.6, 1.5])
                 with c_w:
-                    _render_move_btn("west", "⬅️ West")
+                    _render_move_btn("west", "⬅️")
                 with c_mid:
-                    st.markdown("<div style='text-align: center; font-size: 1.5rem; line-height: 2.2rem;'>🧭</div>", unsafe_allow_html=True)
+                    st.markdown("<div style='text-align: center; font-size: 1.6rem; padding-top: 10px;'>🧭</div>", unsafe_allow_html=True)
                 with c_e:
-                    _render_move_btn("east", "➡️ East")
+                    _render_move_btn("east", "➡️")
 
                 # Row 3: South
-                c_s1, c_s2, c_s3 = st.columns([1, 1, 1])
+                c_s1, c_s2, c_s3 = st.columns([1, 2, 1])
                 with c_s2:
-                    _render_move_btn("south", "⬇️ South")
+                    _render_move_btn("south", "⬇️")
 
         with col_act:
             st.markdown("##### 🎭 Actions & Interaction")
@@ -2091,71 +2095,110 @@ def render_playing_view():
                     gt = world.get("game_time", {})
                     cur_period = gt.get("period", "morning")
 
-                    for shop_id in current_room["shops"]:
-                        s_data = shop_cat.get(shop_id)
-                        if not s_data:
-                            continue
-                        s_name = s_data.get("name", shop_id.title())
+                    active_shop = st.session_state.get("active_visiting_shop")
+                    if active_shop and active_shop in current_room["shops"]:
+                        s_data = shop_cat.get(active_shop, {})
+                        s_name = s_data.get("name", active_shop.title())
                         s_desc = s_data.get("description", "")
                         open_periods = s_data.get("open_periods", [])
                         is_open = cur_period in open_periods
 
-                        with st.expander(f"🏪 {s_name} ({'Open' if is_open else 'Closed'})", expanded=False):
+                        col_sh_h, col_sh_exit = st.columns([3, 1])
+                        with col_sh_h:
+                            st.markdown(f"#### 🏪 {s_name}")
                             st.caption(f"*{s_desc}*")
-                            if not is_open:
-                                st.warning(f"This shop is closed for the {cur_period}. Open during: {', '.join(open_periods)}.")
-                            else:
-                                buy_tab, sell_tab = st.tabs(["🛍️ Buy Goods", "💰 Sell Items"])
-                                with buy_tab:
-                                    sell_items = s_data.get("sell_items", [])
+                        with col_sh_exit:
+                            if st.button("⬅️ เดินออกจากร้าน", use_container_width=True, key="btn_exit_shop"):
+                                st.session_state["active_visiting_shop"] = None
+                                st.session_state["narrative_log"].append({
+                                    "role": "assistant",
+                                    "content": f"🚶‍♂️ คุณเดินก้าวเท้าออกจากร้าน **{s_name}** กลับมายังบริเวณจัตุรัส"
+                                })
+                                auto_save()
+                                st.rerun()
+
+                        if not is_open:
+                            st.warning(f"ขณะนี้ร้านปิดให้บริการสำหรับช่วง {cur_period} (เปิดให้บริการช่วง: {', '.join(open_periods)})")
+                        else:
+                            buy_tab, sell_tab = st.tabs(["🛍️ Buy Goods (ซื้อสินค้า)", "💰 Sell Items (ขายของ)"])
+                            with buy_tab:
+                                sell_items = s_data.get("sell_items", [])
+                                item_cat = state_manager._get_item_catalog()
+                                for s_item_id in sell_items:
+                                    i_info = item_cat.get(s_item_id, {})
+                                    i_name = i_info.get("name", s_item_id)
+                                    i_val = i_info.get("value_gold", 0)
+                                    cost = math.ceil(i_val * s_data.get("sell_multiplier", 1.0))
+                                    col_b1, col_b2 = st.columns([3, 1])
+                                    with col_b1:
+                                        st.markdown(f"**{i_name}** — {cost} GP")
+                                        if i_info.get("description"):
+                                            st.caption(i_info["description"])
+                                    with col_b2:
+                                        can_afford = state_manager.can_afford(player, gp=cost)
+                                        if st.button(f"Buy ({cost} GP)", key=f"buy_{active_shop}_{s_item_id}", disabled=not can_afford, use_container_width=True):
+                                            ok_b, msg_b = state_manager.buy_item(s_item_id, active_shop, player, world)
+                                            if ok_b:
+                                                st.toast(msg_b)
+                                                auto_save()
+                                                st.rerun()
+                                            else:
+                                                st.error(msg_b)
+
+                            with sell_tab:
+                                inv = player.get("inventory", [])
+                                non_equipped = [i for i in inv if isinstance(i, dict) and not i.get("equipped")]
+                                if not non_equipped:
+                                    st.info("No unequipped items available to sell.")
+                                else:
                                     item_cat = state_manager._get_item_catalog()
-                                    for s_item_id in sell_items:
-                                        i_info = item_cat.get(s_item_id, {})
-                                        i_name = i_info.get("name", s_item_id)
+                                    for s_item in non_equipped:
+                                        s_iid = s_item.get("item_id")
+                                        s_qty = s_item.get("quantity", 1)
+                                        i_info = item_cat.get(s_iid, {})
+                                        i_name = i_info.get("name", s_iid)
                                         i_val = i_info.get("value_gold", 0)
-                                        cost = math.ceil(i_val * s_data.get("sell_multiplier", 1.0))
-                                        col_b1, col_b2 = st.columns([3, 1])
-                                        with col_b1:
-                                            st.markdown(f"**{i_name}** — {cost} GP")
-                                            if i_info.get("description"):
-                                                st.caption(i_info["description"])
-                                        with col_b2:
-                                            can_afford = state_manager.can_afford(player, gp=cost)
-                                            if st.button(f"Buy ({cost} GP)", key=f"buy_{shop_id}_{s_item_id}", disabled=not can_afford, use_container_width=True):
-                                                ok_b, msg_b = state_manager.buy_item(s_item_id, shop_id, player, world)
-                                                if ok_b:
-                                                    st.toast(msg_b)
+                                        gain = math.floor(i_val * s_data.get("buy_multiplier", 0.5))
+                                        col_s1, col_s2 = st.columns([3, 1])
+                                        with col_s1:
+                                            st.markdown(f"**{i_name}** (x{s_qty}) — Sells for {gain} GP")
+                                        with col_s2:
+                                            if st.button(f"Sell (+{gain} GP)", key=f"sell_{active_shop}_{s_iid}", use_container_width=True):
+                                                ok_s, msg_s = state_manager.sell_item(s_iid, active_shop, player, world)
+                                                if ok_s:
+                                                    st.toast(msg_s)
                                                     auto_save()
                                                     st.rerun()
                                                 else:
-                                                    st.error(msg_b)
+                                                    st.error(msg_s)
+                    else:
+                        st.caption("เลือกร้านค้าในบริเวณเพื่อก้าวเท้าเดินเข้าไปติดต่อซื้อขาย:")
+                        for shop_id in current_room["shops"]:
+                            s_data = shop_cat.get(shop_id)
+                            if not s_data:
+                                continue
+                            s_name = s_data.get("name", shop_id.title())
+                            s_desc = s_data.get("description", "")
+                            open_periods = s_data.get("open_periods", [])
+                            is_open = cur_period in open_periods
+                            open_status = "🟢 เปิดให้บริการ" if is_open else f"🔴 ปิดบริการ (เปิดช่วง: {', '.join(open_periods)})"
 
-                                with sell_tab:
-                                    inv = player.get("inventory", [])
-                                    non_equipped = [i for i in inv if isinstance(i, dict) and not i.get("equipped")]
-                                    if not non_equipped:
-                                        st.info("No unequipped items available to sell.")
-                                    else:
-                                        item_cat = state_manager._get_item_catalog()
-                                        for s_item in non_equipped:
-                                            s_iid = s_item.get("item_id")
-                                            s_qty = s_item.get("quantity", 1)
-                                            i_info = item_cat.get(s_iid, {})
-                                            i_name = i_info.get("name", s_iid)
-                                            i_val = i_info.get("value_gold", 0)
-                                            gain = math.floor(i_val * s_data.get("buy_multiplier", 0.5))
-                                            col_s1, col_s2 = st.columns([3, 1])
-                                            with col_s1:
-                                                st.markdown(f"**{i_name}** (x{s_qty}) — Sells for {gain} GP")
-                                            with col_s2:
-                                                if st.button(f"Sell (+{gain} GP)", key=f"sell_{shop_id}_{s_iid}", use_container_width=True):
-                                                    ok_s, msg_s = state_manager.sell_item(s_iid, shop_id, player, world)
-                                                    if ok_s:
-                                                        st.toast(msg_s)
-                                                        auto_save()
-                                                        st.rerun()
-                                                    else:
-                                                        st.error(msg_s)
+                            col_s_card, col_s_btn = st.columns([3, 1])
+                            with col_s_card:
+                                st.markdown(f"**🏪 {s_name}** &bull; <span style='font-size: 0.85rem; color: #94a3b8;'>{open_status}</span>", unsafe_allow_html=True)
+                                st.caption(f"*{s_desc}*")
+                            with col_s_btn:
+                                if is_open:
+                                    if st.button("🚶‍♂️ แวะเข้าร้าน", key=f"btn_enter_{shop_id}", use_container_width=True):
+                                        st.session_state["active_visiting_shop"] = shop_id
+                                        st.session_state["narrative_log"].append({
+                                            "role": "assistant",
+                                            "content": f"🚶‍♂️ คุณก้าวเท้าเดินเข้าไปในร้าน **{s_name}** กลิ่นอายและบรรยากาศในร้านต้อนรับการมาเยือน พ่อค้ามองมาที่คุณพร้อมบริการ"
+                                        })
+                                        auto_save()
+                                        st.rerun()
+                                else:
+                                    st.button("🔒 ร้านปิด", key=f"btn_closed_{shop_id}", disabled=True, use_container_width=True)
 
                 # Tavern Notice Board UI (Module C §2 / Phase 13.5)
                 if current_room.get("id") in ("town_riverside", "tavern") or current_room.get("notice_board") is not None or "innkeeper_mira" in current_room.get("npcs", []):
