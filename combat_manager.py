@@ -1552,6 +1552,19 @@ def check_combat_end(combat_state: Dict[str, Any], world_state: Optional[Dict[st
         if not teammate_lost and p_state.get("hp", {}).get("current", 0) > 0:
             state_manager.check_inspiration_trigger(p_state, "combat_victory_no_casualties", {"success": True})
 
+        # Check active notice board bounties completion
+        if world_state and isinstance(world_state, dict):
+            cur_loc = world_state.get("current_location")
+            enemy_names = [e.get("monster_id", e.get("id", "")) for e in enemies]
+            nb = world_state.get("notice_board", {})
+            for entry in list(nb.get("entries", [])):
+                if entry.get("type") == "bounty" and entry.get("status") == "accepted":
+                    t_room = entry.get("target_room_id")
+                    t_mon = entry.get("target_monster")
+                    if (not t_room or t_room == cur_loc) and any(t_mon in en for en in enemy_names):
+                        import dungeon_manager
+                        dungeon_manager.complete_notice_board_quest(world_state, entry["id"], p_state)
+
         for key in ("gold", "status", "xp_current", "level", "proficiency_bonus", "ac", "inspiration"):
             if key in p_state:
                 player_c[key] = p_state[key]

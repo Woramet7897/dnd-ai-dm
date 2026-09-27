@@ -266,6 +266,18 @@
     "effects": {"temp_hp": 5, "clear_exhaustion": 1},
     "value_gold": 5,
     "description": "A thick, steaming bowl of savory camp stew. Provides +5 temporary HP and relieves exhaustion."
+  },
+  "herbs": {
+    "name": "Medicinal Herbs",
+    "type": "consumable",
+    "value_gold": 10,
+    "description": "Fragrant dried herbs used for brewing tonics and treating ailments."
+  },
+  "rations": {
+    "name": "Rations",
+    "type": "ration",
+    "value_gold": 4,
+    "description": "Preserved food rations suitable for a journey."
   }
 }
 

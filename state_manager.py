@@ -2706,3 +2706,32 @@ def pay_bounty(player_state: Dict[str, Any]) -> Tuple[bool, str]:
     return True, f"Paid {bounty} GP bounty. You are no longer wanted by the law!"
 
 
+# ────────────────────────────────────────────────────────────────────────────────
+# PHASE 13.5 — NOTICE BOARD FORWARDERS
+# ────────────────────────────────────────────────────────────────────────────────
+
+def refresh_notice_board(*args, **kwargs):
+    """Forwarder to dungeon_manager.refresh_notice_board."""
+    import dungeon_manager
+    return dungeon_manager.refresh_notice_board(*args, **kwargs)
+
+
+def get_notice_board(*args, **kwargs):
+    """Forwarder to dungeon_manager.get_notice_board."""
+    import dungeon_manager
+    return dungeon_manager.get_notice_board(*args, **kwargs)
+
+
+def accept_notice_board_quest(*args, **kwargs):
+    """Forwarder to dungeon_manager.accept_notice_board_quest."""
+    import dungeon_manager
+    return dungeon_manager.accept_notice_board_quest(*args, **kwargs)
+
+
+def complete_notice_board_quest(*args, **kwargs):
+    """Forwarder to dungeon_manager.complete_notice_board_quest."""
+    import dungeon_manager
+    return dungeon_manager.complete_notice_board_quest(*args, **kwargs)
+
+
+

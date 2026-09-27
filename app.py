@@ -1130,6 +1130,30 @@ def render_playing_view():
                         auto_save()
                         st.rerun()
 
+            # Hidden Cache Search (Module C §2 Rumor)
+            has_hidden_cache = bool(current_room.get("hidden_cache")) and (f"{room_id}_hidden_cache" not in world.get("collected_loot", []))
+            if has_hidden_cache:
+                if st.button("🔍 Search Hidden Cache (Rumor)", use_container_width=True, type="secondary"):
+                    looted = dungeon_manager.get_room_loot(room_id, world)
+                    if looted:
+                        item_cat = state_manager._get_item_catalog()
+                        looted_names = []
+                        for lit in looted:
+                            li_id = lit.get("item_id")
+                            li_qty = lit.get("quantity", 1)
+                            li_name = item_cat.get(li_id, {}).get("name", li_id)
+                            looted_names.append(f"{li_name} (x{li_qty})")
+                            pinv = player.setdefault("inventory", [])
+                            existing = next((i for i in pinv if isinstance(i, dict) and i.get("item_id") == li_id), None)
+                            if existing and existing.get("quantity") is not None:
+                                existing["quantity"] = existing.get("quantity", 1) + li_qty
+                            elif not existing:
+                                pinv.append({"item_id": li_id, "equipped": False, "quantity": li_qty})
+                        msg_loot = f"🔍 You investigated the rumors and uncovered a secret cache: **{', '.join(looted_names)}**!"
+                        st.session_state["narrative_log"].append({"role": "assistant", "content": msg_loot})
+                        auto_save()
+                        st.rerun()
+
             # Manual Ability Check, Spells & Combat Launchers
             known_spells = player.get("known_spells", [])
             has_ooc_spells = bool(known_spells)
@@ -1332,6 +1356,60 @@ def render_playing_view():
                                                     st.rerun()
                                                 else:
                                                     st.error(msg_s)
+
+            # Tavern Notice Board UI (Module C §2 / Phase 13.5)
+            if current_room.get("id") in ("town_riverside", "tavern") or current_room.get("notice_board") is not None or "innkeeper_mira" in current_room.get("npcs", []):
+                st.markdown("---")
+                st.markdown("##### 📜 Tavern Notice Board")
+                nb_entries = dungeon_manager.get_notice_board(world)
+                if not nb_entries:
+                    st.caption("No notices currently posted. Check back in a few days!")
+                else:
+                    for entry in nb_entries:
+                        e_id = entry.get("id")
+                        e_type = entry.get("type", "quest")
+                        e_title = entry.get("title", "Notice")
+                        e_desc = entry.get("description", "")
+                        e_status = entry.get("status", "available")
+                        icon = "🗡️" if e_type == "bounty" else ("📦" if e_type == "delivery" else "🗺️")
+
+                        with st.expander(f"{icon} {e_title} [{e_status.capitalize()}]", expanded=(e_status == "available")):
+                            st.write(e_desc)
+                            if entry.get("reward_gold"):
+                                st.caption(f"💰 Reward: **{entry['reward_gold']} GP**")
+                            if entry.get("target_room_name"):
+                                st.caption(f"📍 Location: **{entry['target_room_name']}**")
+
+                            if e_status == "available":
+                                if st.button(f"📜 Accept Quest", key=f"acc_nb_{e_id}", use_container_width=True):
+                                    res_acc = dungeon_manager.accept_notice_board_quest(world, e_id)
+                                    st.toast(res_acc["message"])
+                                    st.session_state["narrative_log"].append({
+                                        "role": "assistant",
+                                        "content": f"📜 **Accepted Quest from Notice Board:** {e_title}"
+                                    })
+                                    auto_save()
+                                    st.rerun()
+                            elif e_status == "accepted":
+                                if e_type == "delivery":
+                                    tgt_item = entry.get("target_item")
+                                    has_it = any(isinstance(it, dict) and it.get("item_id") == tgt_item for it in player.get("inventory", []))
+                                    if st.button(f"📦 Complete Delivery ({entry.get('reward_gold')} GP)", key=f"comp_nb_{e_id}", disabled=not has_it, use_container_width=True):
+                                        res_cmp = dungeon_manager.complete_notice_board_quest(world, e_id, player)
+                                        if res_cmp["success"]:
+                                            st.toast(res_cmp["message"])
+                                            st.session_state["narrative_log"].append({
+                                                "role": "assistant",
+                                                "content": f"🎉 **Quest Completed:** {res_cmp['message']}"
+                                            })
+                                            auto_save()
+                                            st.rerun()
+                                        else:
+                                            st.error(res_cmp["message"])
+                                else:
+                                    st.info("Status: Quest active in your quest log! Fulfill the objectives to earn the bounty.")
+                            elif e_status == "completed":
+                                st.success("✅ Quest Completed!")
 
 
 # ────────────────────────────────────────────────────────────────────────────────
