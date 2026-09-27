@@ -807,15 +807,31 @@ def render_sidebar():
         ration_qty = sum(i.get("quantity", 1) for i in inventory if isinstance(i, dict) and i.get("item_id") == "trail_rations")
 
         curr = state_manager._ensure_currency(player)
-        col_gp, col_sp, col_cp, col_r = st.columns(4)
-        with col_gp:
-            st.metric("Gold", f"{curr['gp']} GP")
-        with col_sp:
-            st.metric("Silver", f"{curr['sp']} SP")
-        with col_cp:
-            st.metric("Copper", f"{curr['cp']} CP")
-        with col_r:
-            st.metric("Rations", ration_qty)
+        pouch_html = f"""
+        <div style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); padding-bottom: 6px;">
+                <span style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: #94a3b8; font-weight: 700;">Coin Pouch</span>
+                <span style="font-size: 0.75rem; color: #e2e8f0; background: rgba(51, 65, 85, 0.6); padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(148, 163, 184, 0.25);">
+                    Rations: <strong style="color: #bef264;">{ration_qty}</strong>
+                </span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center;">
+                <div style="background: rgba(30, 41, 59, 0.6); border-radius: 6px; padding: 6px 2px; border: 1px solid rgba(234, 179, 8, 0.35);">
+                    <div style="font-size: 0.68rem; color: #facc15; font-weight: 700; letter-spacing: 0.05em;">GP</div>
+                    <div style="font-size: 1.1rem; font-weight: 700; color: #fef08a; line-height: 1.2;">{curr['gp']}</div>
+                </div>
+                <div style="background: rgba(30, 41, 59, 0.6); border-radius: 6px; padding: 6px 2px; border: 1px solid rgba(203, 213, 225, 0.35);">
+                    <div style="font-size: 0.68rem; color: #cbd5e1; font-weight: 700; letter-spacing: 0.05em;">SP</div>
+                    <div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc; line-height: 1.2;">{curr['sp']}</div>
+                </div>
+                <div style="background: rgba(30, 41, 59, 0.6); border-radius: 6px; padding: 6px 2px; border: 1px solid rgba(249, 115, 22, 0.35);">
+                    <div style="font-size: 0.68rem; color: #fb923c; font-weight: 700; letter-spacing: 0.05em;">CP</div>
+                    <div style="font-size: 1.1rem; font-weight: 700; color: #fed7aa; line-height: 1.2;">{curr['cp']}</div>
+                </div>
+            </div>
+        </div>
+        """
+        st.markdown(pouch_html, unsafe_allow_html=True)
 
         if not inventory:
             st.info("Inventory is empty.")
@@ -1665,7 +1681,7 @@ def render_playing_view():
                     if dest_id is not None:
                         dest_room = dungeon_manager._get_room(dest_id, world)
                         dest_name = dest_room.get("name", dest_id) if dest_room else dest_id
-                        btn_label = f"{icon} {dir_key.capitalize()}\n👉 {dest_name}"
+                        btn_label = f"{icon} {dir_key.capitalize()}"
                         if st.button(btn_label, key=f"move_{dir_key}", use_container_width=True, help=f"เดินไปทางทิศ {dir_key.capitalize()}: {dest_name}"):
                             ok_m, msg_m, new_room = dungeon_manager.move_player(dir_key, world, player)
                             if ok_m and new_room:
@@ -1679,26 +1695,57 @@ def render_playing_view():
                                 auto_save()
                                 st.rerun()
                     else:
-                        st.button(f"{icon} {dir_key.capitalize()}\n⛔ ทางตัน", key=f"move_disabled_{dir_key}", disabled=True, use_container_width=True)
+                        st.button(f"⛔ {dir_key.capitalize()}", key=f"move_disabled_{dir_key}", disabled=True, use_container_width=True, help="ทางตัน ไม่มีทางไป")
 
                 # Row 1: North
-                c_n1, c_n2, c_n3 = st.columns([1, 2, 1])
+                c_n1, c_n2, c_n3 = st.columns([1, 1.6, 1])
                 with c_n2:
                     _render_move_btn("north", "⬆️")
 
                 # Row 2: West, Compass Center, East
-                c_w, c_mid, c_e = st.columns([1.5, 0.6, 1.5])
+                c_w, c_mid, c_e = st.columns([1.2, 0.6, 1.2])
                 with c_w:
                     _render_move_btn("west", "⬅️")
                 with c_mid:
-                    st.markdown("<div style='text-align: center; font-size: 1.6rem; padding-top: 10px;'>🧭</div>", unsafe_allow_html=True)
+                    st.markdown("<div style='text-align: center; font-size: 1.4rem; padding-top: 6px;'>🧭</div>", unsafe_allow_html=True)
                 with c_e:
                     _render_move_btn("east", "➡️")
 
                 # Row 3: South
-                c_s1, c_s2, c_s3 = st.columns([1, 2, 1])
+                c_s1, c_s2, c_s3 = st.columns([1, 1.6, 1])
                 with c_s2:
                     _render_move_btn("south", "⬇️")
+
+                # Connected paths info card below compass
+                avail_routes = []
+                for d_k, d_icon in [("north", "⬆️"), ("east", "➡️"), ("south", "⬇️"), ("west", "⬅️")]:
+                    if exits.get(d_k) is not None:
+                        d_room = dungeon_manager._get_room(exits[d_k], world)
+                        d_name = d_room.get("name", exits[d_k]) if d_room else exits[d_k]
+                        d_type = d_room.get("type", "").capitalize() if d_room else ""
+                        avail_routes.append((d_k, d_icon, d_name, d_type))
+
+                if avail_routes:
+                    r_items = ""
+                    for r_dir, r_icon, r_name, r_type in avail_routes:
+                        type_str = f" <span style='font-size: 0.72rem; color: #64748b;'>({r_type})</span>" if r_type else ""
+                        r_items += f"""
+                        <div style="font-size: 0.82rem; padding: 4px 0; border-top: 1px solid rgba(148, 163, 184, 0.1); display: flex; align-items: baseline;">
+                            <span style="color: #38bdf8; font-weight: 700; min-width: 65px;">{r_icon} {r_dir.capitalize()}:</span>
+                            <span style="color: #f1f5f9; font-weight: 500; margin-left: 4px;">{r_name}{type_str}</span>
+                        </div>
+                        """
+                    r_html = f"""
+                    <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; padding: 8px 12px; margin-top: 10px;">
+                        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; font-weight: 700; margin-bottom: 6px;">
+                            🧭 ทางที่เปิดออก (Exits)
+                        </div>
+                        {r_items}
+                    </div>
+                    """
+                    st.markdown(r_html, unsafe_allow_html=True)
+                else:
+                    st.caption("⛔ บริเวณนี้ไม่มีทางออกที่ชัดเจน (Dead End)")
 
         with col_act:
             st.markdown("##### 🎭 Actions & Interaction")
@@ -2127,16 +2174,16 @@ def render_playing_view():
                                 for s_item_id in sell_items:
                                     i_info = item_cat.get(s_item_id, {})
                                     i_name = i_info.get("name", s_item_id)
-                                    i_val = i_info.get("value_gold", 0)
-                                    cost = math.ceil(i_val * s_data.get("sell_multiplier", 1.0))
+                                    cost_info = state_manager.get_item_price_breakdown(i_info, s_data.get("sell_multiplier", 1.0))
+                                    cost_text = cost_info["text"]
                                     col_b1, col_b2 = st.columns([3, 1])
                                     with col_b1:
-                                        st.markdown(f"**{i_name}** — {cost} GP")
+                                        st.markdown(f"**{i_name}** — {cost_text}")
                                         if i_info.get("description"):
                                             st.caption(i_info["description"])
                                     with col_b2:
-                                        can_afford = state_manager.can_afford(player, gp=cost)
-                                        if st.button(f"Buy ({cost} GP)", key=f"buy_{active_shop}_{s_item_id}", disabled=not can_afford, use_container_width=True):
+                                        can_afford = state_manager.can_afford(player, gp=cost_info["gp"], sp=cost_info["sp"], cp=cost_info["cp"])
+                                        if st.button(f"Buy ({cost_text})", key=f"buy_{active_shop}_{s_item_id}", disabled=not can_afford, use_container_width=True):
                                             ok_b, msg_b = state_manager.buy_item(s_item_id, active_shop, player, world)
                                             if ok_b:
                                                 st.toast(msg_b)
@@ -2157,13 +2204,13 @@ def render_playing_view():
                                         s_qty = s_item.get("quantity", 1)
                                         i_info = item_cat.get(s_iid, {})
                                         i_name = i_info.get("name", s_iid)
-                                        i_val = i_info.get("value_gold", 0)
-                                        gain = math.floor(i_val * s_data.get("buy_multiplier", 0.5))
+                                        gain_info = state_manager.get_item_sell_breakdown(i_info, s_data.get("buy_multiplier", 0.5))
+                                        gain_text = gain_info["text"]
                                         col_s1, col_s2 = st.columns([3, 1])
                                         with col_s1:
-                                            st.markdown(f"**{i_name}** (x{s_qty}) — Sells for {gain} GP")
+                                            st.markdown(f"**{i_name}** (x{s_qty}) — Sells for {gain_text}")
                                         with col_s2:
-                                            if st.button(f"Sell (+{gain} GP)", key=f"sell_{active_shop}_{s_iid}", use_container_width=True):
+                                            if st.button(f"Sell (+{gain_text})", key=f"sell_{active_shop}_{s_iid}", use_container_width=True):
                                                 ok_s, msg_s = state_manager.sell_item(s_iid, active_shop, player, world)
                                                 if ok_s:
                                                     st.toast(msg_s)

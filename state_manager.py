@@ -160,8 +160,9 @@ def add_currency(state: Dict[str, Any], *, gp: int = 0, sp: int = 0, cp: int = 0
 
 def subtract_currency(state: Dict[str, Any], *, gp: int = 0, sp: int = 0, cp: int = 0) -> bool:
     """
-    Subtract a cost from the player's purse using auto-change.
-    Converts all wealth to copper, subtracts, then re-distributes.
+    Subtract a cost from the player's purse using smart auto-change.
+    Directly deducts matching denominations when sufficient.
+    Otherwise converts from total copper and redistributes.
     Returns True if successful, False if insufficient funds.
     """
     _ensure_currency(state)
@@ -171,9 +172,11 @@ def subtract_currency(state: Dict[str, Any], *, gp: int = 0, sp: int = 0, cp: in
     if total < cost_cp:
         return False
 
-    # If paying purely in GP and player has enough GP, deduct directly to preserve smaller coins
-    if sp == 0 and cp == 0 and cur["gp"] >= gp:
+    # Exact direct deduction if player has sufficient coins of each requested denomination
+    if cur["gp"] >= gp and cur["sp"] >= sp and cur["cp"] >= cp:
         cur["gp"] -= gp
+        cur["sp"] -= sp
+        cur["cp"] -= cp
     else:
         new_cur = _from_copper(total - cost_cp)
         state["currency"] = new_cur
@@ -1499,6 +1502,39 @@ def perform_short_rest(
     }
 
 
+def get_item_price_breakdown(item_info: Dict[str, Any], multiplier: float = 1.0) -> Dict[str, Any]:
+    """
+    Calculate buy cost breakdown based on currency denomination.
+    Priority: price_cp -> price_sp -> value_gold (GP).
+    Returns dict: {'gp': int, 'sp': int, 'cp': int, 'text': str, 'total_cp': int}
+    """
+    if "price_cp" in item_info:
+        cp = math.ceil(item_info["price_cp"] * multiplier)
+        return {"gp": 0, "sp": 0, "cp": cp, "text": f"{cp} CP", "total_cp": cp}
+    elif "price_sp" in item_info:
+        sp = math.ceil(item_info["price_sp"] * multiplier)
+        return {"gp": 0, "sp": sp, "cp": 0, "text": f"{sp} SP", "total_cp": sp * CP_PER_SP}
+    else:
+        gp = math.ceil(item_info.get("value_gold", 0) * multiplier)
+        return {"gp": gp, "sp": 0, "cp": 0, "text": f"{gp} GP", "total_cp": gp * CP_PER_GP}
+
+
+def get_item_sell_breakdown(item_info: Dict[str, Any], multiplier: float = 0.5) -> Dict[str, Any]:
+    """
+    Calculate sell gain breakdown based on currency denomination.
+    Returns dict: {'gp': int, 'sp': int, 'cp': int, 'text': str}
+    """
+    if "price_cp" in item_info:
+        cp = math.floor(item_info["price_cp"] * multiplier)
+        return {"gp": 0, "sp": 0, "cp": cp, "text": f"{cp} CP"}
+    elif "price_sp" in item_info:
+        sp = math.floor(item_info["price_sp"] * multiplier)
+        return {"gp": 0, "sp": sp, "cp": 0, "text": f"{sp} SP"}
+    else:
+        gp = math.floor(item_info.get("value_gold", 0) * multiplier)
+        return {"gp": gp, "sp": 0, "cp": 0, "text": f"{gp} GP"}
+
+
 def buy_item(
     item_id: str,
     shop_id: str,
@@ -1508,7 +1544,7 @@ def buy_item(
     """
     Buy an item from a shop (spec Section 19b & Section 22f).
     Checks shop hours (open_periods against world_state["game_time"]["period"]).
-    Deducts gold (value_gold * sell_multiplier) and adds item to inventory.
+    Deducts currency and adds item to inventory.
     """
     shops = _get_shop_catalog()
     shop = shops.get(shop_id)
@@ -1532,12 +1568,12 @@ def buy_item(
         return False, f"Item '{item_id}' not found in catalog."
 
     sell_mult = shop.get("sell_multiplier", 1.0)
-    cost = math.ceil(item_info.get("value_gold", 0) * sell_mult)
+    cost_info = get_item_price_breakdown(item_info, sell_mult)
 
     _ensure_currency(character_state)
-    if not can_afford(character_state, gp=cost):
-        return False, f"Not enough gold. Costs {cost} GP, you have {format_currency(character_state)}."
-    subtract_currency(character_state, gp=cost)
+    if not can_afford(character_state, gp=cost_info["gp"], sp=cost_info["sp"], cp=cost_info["cp"]):
+        return False, f"Not enough funds. Costs {cost_info['text']}, you have {format_currency(character_state)}."
+    subtract_currency(character_state, gp=cost_info["gp"], sp=cost_info["sp"], cp=cost_info["cp"])
 
     # Add item to inventory
     inventory = character_state.setdefault("inventory", [])
@@ -1547,8 +1583,8 @@ def buy_item(
     elif not existing:
         inventory.append({"item_id": item_id, "equipped": False, "quantity": 1})
 
-    logger.debug(f"buy_item: bought '{item_id}' from '{shop_id}' for {cost} GP. Remaining: {format_currency(character_state)}.")
-    return True, f"Bought {item_info.get('name', item_id)} for {cost} GP."
+    logger.debug(f"buy_item: bought '{item_id}' from '{shop_id}' for {cost_info['text']}. Remaining: {format_currency(character_state)}.")
+    return True, f"Bought {item_info.get('name', item_id)} for {cost_info['text']}."
 
 
 def sell_item(
@@ -1559,7 +1595,7 @@ def sell_item(
 ) -> Tuple[bool, str]:
     """
     Sell an item to a shop (spec Section 19b & Section 22f).
-    Checks shop hours. Adds gold (value_gold * buy_multiplier) and removes item from inventory.
+    Checks shop hours. Adds currency and removes item from inventory.
     """
     shops = _get_shop_catalog()
     shop = shops.get(shop_id)
@@ -1586,7 +1622,7 @@ def sell_item(
     catalog = _get_item_catalog()
     item_info = catalog.get(item_id, {})
     buy_mult = shop.get("buy_multiplier", 0.5)
-    gain = math.floor(item_info.get("value_gold", 0) * buy_mult)
+    gain_info = get_item_sell_breakdown(item_info, buy_mult)
 
     # Decrement/remove item
     qty = target_item.get("quantity", 1)
@@ -1595,11 +1631,11 @@ def sell_item(
     else:
         inventory.remove(target_item)
 
-    add_currency(character_state, gp=gain)
+    add_currency(character_state, gp=gain_info["gp"], sp=gain_info["sp"], cp=gain_info["cp"])
     character_state["ac"] = _compute_ac(character_state)
 
-    logger.debug(f"sell_item: sold '{item_id}' to '{shop_id}' for {gain} GP. Funds now: {format_currency(character_state)}.")
-    return True, f"Sold {item_info.get('name', item_id)} for {gain} GP."
+    logger.debug(f"sell_item: sold '{item_id}' to '{shop_id}' for {gain_info['text']}. Funds now: {format_currency(character_state)}.")
+    return True, f"Sold {item_info.get('name', item_id)} for {gain_info['text']}."
 
 _spell_catalog: Optional[Dict[str, Any]] = None
 

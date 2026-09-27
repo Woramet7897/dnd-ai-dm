@@ -2,8 +2,9 @@
   "trail_rations": {
     "name": "Trail Rations",
     "type": "ration",
-    "value_gold": 2,
-    "description": "Dried meat, hardtack, and a waterskin — enough to keep you going for a day."
+    "price_sp": 5,
+    "value_gold": 0,
+    "description": "Dried meat, hardtack, and a waterskin — enough to keep you going for a day. (5 SP)"
   },
   "healing_potion": {
     "name": "Healing Potion",
@@ -56,8 +57,20 @@
     "finesse": true,
     "effects": {"attack_bonus": 0, "damage": "1d4", "damage_type": "piercing"},
     "rarity": "common",
-    "value_gold": 5,
-    "description": "A short blade, useful for close work."
+    "price_sp": 20,
+    "value_gold": 2,
+    "description": "A short blade, useful for close work. (20 SP)"
+  },
+  "dart": {
+    "name": "Dart",
+    "type": "weapon",
+    "slot": "main_hand",
+    "finesse": true,
+    "effects": {"attack_bonus": 0, "damage": "1d4", "damage_type": "piercing", "ranged": true},
+    "rarity": "common",
+    "price_cp": 5,
+    "value_gold": 0,
+    "description": "A light throwing dart with an iron needle tip. (5 CP)"
   },
   "leather_armor": {
     "name": "Leather Armor",
@@ -65,6 +78,7 @@
     "slot": "chest",
     "effects": {"ac_base": 11, "stat_mod": "DEX"},
     "rarity": "common",
+    "price_sp": 100,
     "value_gold": 10,
     "description": "Supple, lightweight armor made from tanned hide."
   },
@@ -82,16 +96,18 @@
     "type": "consumable",
     "effects": {"light_radius": 20},
     "rarity": "common",
-    "value_gold": 1,
-    "description": "Burns for 1 hour, casting bright light in a 20-foot radius."
+    "price_cp": 1,
+    "value_gold": 0,
+    "description": "Burns for 1 hour, casting bright light in a 20-foot radius. (1 CP)"
   },
   "rope": {
     "name": "Rope (50 ft)",
     "type": "tool",
     "effects": {},
     "rarity": "common",
+    "price_sp": 10,
     "value_gold": 1,
-    "description": "Fifty feet of hempen rope."
+    "description": "Fifty feet of hempen rope. (10 SP)"
   },
   "thieves_tools": {
     "name": "Thieves' Tools",
@@ -234,24 +250,27 @@
     "type": "raw_food",
     "raw_food": true,
     "freshness_days": 5,
-    "value_gold": 1,
-    "description": "Fresh uncooked food provisions. Spoils in 5 days if not cooked or eaten."
+    "price_sp": 1,
+    "value_gold": 0,
+    "description": "Fresh uncooked food provisions. Spoils in 5 days if not cooked or eaten. (1 SP)"
   },
   "raw_meat": {
     "name": "Raw Meat",
     "type": "raw_food",
     "raw_food": true,
     "freshness_days": 5,
-    "value_gold": 2,
-    "description": "Freshly butchered game meat. Lasts 5 days before spoiling."
+    "price_sp": 2,
+    "value_gold": 0,
+    "description": "Freshly butchered game meat. Lasts 5 days before spoiling. (2 SP)"
   },
   "wild_vegetables": {
     "name": "Wild Vegetables",
     "type": "raw_food",
     "raw_food": true,
     "freshness_days": 5,
-    "value_gold": 1,
-    "description": "Foraged roots, greens, and mushrooms. Lasts 5 days before spoiling."
+    "price_sp": 1,
+    "value_gold": 0,
+    "description": "Foraged roots, greens, and mushrooms. Lasts 5 days before spoiling. (1 SP)"
   },
   "rotten_food": {
     "name": "Rotten Food",
@@ -264,20 +283,23 @@
     "name": "Hearty Stew",
     "type": "food",
     "effects": {"temp_hp": 5, "clear_exhaustion": 1},
-    "value_gold": 5,
-    "description": "A thick, steaming bowl of savory camp stew. Provides +5 temporary HP and relieves exhaustion."
+    "price_sp": 5,
+    "value_gold": 0,
+    "description": "A thick, steaming bowl of savory camp stew. Provides +5 temporary HP and relieves exhaustion. (5 SP)"
   },
   "herbs": {
     "name": "Medicinal Herbs",
     "type": "consumable",
-    "value_gold": 10,
-    "description": "Fragrant dried herbs used for brewing tonics and treating ailments."
+    "price_sp": 10,
+    "value_gold": 1,
+    "description": "Fragrant dried herbs used for brewing tonics and treating ailments. (10 SP)"
   },
   "rations": {
     "name": "Rations",
     "type": "ration",
-    "value_gold": 4,
-    "description": "Preserved food rations suitable for a journey."
+    "price_sp": 4,
+    "value_gold": 0,
+    "description": "Preserved food rations suitable for a journey. (4 SP)"
   }
 }
 
