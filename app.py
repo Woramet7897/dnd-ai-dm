@@ -54,6 +54,8 @@ def init_session_state():
         st.session_state["last_action_msg"] = None
     if "action_suggestions" not in st.session_state:
         st.session_state["action_suggestions"] = list(llm_handler.DEFAULT_ACTION_SUGGESTIONS)
+    if "active_camp_dialogue" not in st.session_state:
+        st.session_state["active_camp_dialogue"] = None
 
 
 def auto_save():
@@ -326,9 +328,11 @@ def render_sidebar():
         for comp in companions:
             c_name = comp.get("name", comp.get("id", "Companion"))
             c_id = comp.get("id", c_name)
+            c_app = state_manager.get_companion_approval(world, c_id)
+            c_approval = c_app.get("approval", 50)
             col_c_info, col_c_btn = st.sidebar.columns([2, 1])
             with col_c_info:
-                st.markdown(f"• **{c_name}**")
+                st.markdown(f"• **{c_name}** ({c_approval}/100)")
             with col_c_btn:
                 with st.popover("Dismiss"):
                     st.write(f"Dismiss {c_name}?")
@@ -570,6 +574,67 @@ def render_sidebar():
                         st.error(res_c.get("message", "Cooking failed."))
                     auto_save()
                     st.rerun()
+
+        # Phase 14.2: Camp Companion Dialogue
+        if companions and dungeon_manager.is_camp_context(world):
+            with st.sidebar.expander("🏕️ Camp Companion Dialogue", expanded=bool(st.session_state.get("active_camp_dialogue"))):
+                active_dlg = st.session_state.get("active_camp_dialogue")
+                if active_dlg:
+                    c_name = active_dlg.get("companion_name", "Companion")
+                    st.markdown(f"**{c_name}:** *\"{active_dlg.get('statement', '')}\"*")
+                    opts = active_dlg.get("options", {})
+                    col_ag, col_dis, col_neu = st.columns(3)
+                    with col_ag:
+                        if st.button("Agree (+5)", key="camp_resp_agree", use_container_width=True):
+                            res = state_manager.respond_to_camp_dialogue(
+                                active_dlg["companion_id"], "agree", world, active_dlg
+                            )
+                            st.session_state["narrative_log"].append({
+                                "role": "assistant",
+                                "content": f"🏕️ **Camp Conversation:** You agreed with {c_name}. ({c_name}'s approval increased to {res['new_approval']}/100)"
+                            })
+                            st.session_state["active_camp_dialogue"] = None
+                            auto_save()
+                            st.rerun()
+                    with col_dis:
+                        if st.button("Disagree (-5)", key="camp_resp_disagree", use_container_width=True):
+                            res = state_manager.respond_to_camp_dialogue(
+                                active_dlg["companion_id"], "disagree", world, active_dlg
+                            )
+                            st.session_state["narrative_log"].append({
+                                "role": "assistant",
+                                "content": f"🏕️ **Camp Conversation:** You disagreed with {c_name}. ({c_name}'s approval decreased to {res['new_approval']}/100)"
+                            })
+                            st.session_state["active_camp_dialogue"] = None
+                            auto_save()
+                            st.rerun()
+                    with col_neu:
+                        if st.button("Neutral (0)", key="camp_resp_neutral", use_container_width=True):
+                            res = state_manager.respond_to_camp_dialogue(
+                                active_dlg["companion_id"], "neutral", world, active_dlg
+                            )
+                            st.session_state["narrative_log"].append({
+                                "role": "assistant",
+                                "content": f"🏕️ **Camp Conversation:** You had a calm, neutral exchange with {c_name}. (Approval: {res['new_approval']}/100)"
+                            })
+                            st.session_state["active_camp_dialogue"] = None
+                            auto_save()
+                            st.rerun()
+                else:
+                    mm = memory_manager.MemoryManager(player.get("name", "Adventurer"))
+                    for comp in companions:
+                        cid = comp.get("id") or comp.get("name")
+                        c_name = comp.get("name", cid)
+                        c_app = state_manager.get_companion_approval(world, cid)
+                        is_pending = c_app.get("camp_dialogue_pending", True)
+                        if is_pending:
+                            if st.button(f"💬 Talk with {c_name}", key=f"btn_camp_dlg_{cid}", use_container_width=True):
+                                dlg = state_manager.generate_camp_dialogue(cid, mm, player, world)
+                                if dlg:
+                                    st.session_state["active_camp_dialogue"] = dlg
+                                    st.rerun()
+                        else:
+                            st.caption(f"✓ Spoke with {c_name} this rest.")
 
     # Town Actions
     if current_room and current_room.get("type") == "town":

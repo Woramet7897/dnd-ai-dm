@@ -604,3 +604,165 @@ def extract_state_updates(
     # Validate raw output through validation.py's validate_extraction_output()
     cleaned = validation.validate_extraction_output(raw_dict, world_state=world_state)
     return cleaned
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# CAMP COMPANION DIALOGUE (Sub-phase 14.2 / Module D §2)
+# ════════════════════════════════════════════════════════════════════════════════
+
+def generate_camp_dialogue(
+    companion_id: str,
+    memory_manager: Any,
+    player_state: Dict[str, Any],
+    world_state: Optional[Dict[str, Any]] = None,
+    client: Optional[Any] = None,
+    model: str = DEFAULT_MODEL,
+    num_ctx: int = DEFAULT_NUM_CTX,
+) -> Optional[Dict[str, Any]]:
+    """
+    Spec Module D §2 / Phase 14.2:
+    Generate camp companion dialogue reacting to recent notable events.
+    - Context Gating: ONLY triggers in camp/rest context. Returns None if mid-combat
+      or mid-dungeon-crawl.
+    - Retrieval: Pulls recent get_relevant_lore() results from memory_manager.
+    - Prompting: Mock/real LLM prompt built from real get_relevant_lore() output.
+    - Returns companion reaction with 3 options: agree (+5), disagree (-5), neutral (0).
+    """
+    # 1. Context Gating: mid-combat or mid-dungeon-crawl must NEVER trigger camp dialogue
+    if world_state is not None:
+        import dungeon_manager
+        if not dungeon_manager.is_camp_context(world_state):
+            logger.debug(
+                f"generate_camp_dialogue: not in camp/rest context "
+                f"(combat={bool(world_state.get('combat_state'))}, loc={world_state.get('current_location')}). Returning None."
+            )
+            return None
+
+    # 2. Pull recent get_relevant_lore() results (existing Phase 5 function)
+    lore_entries = []
+    if memory_manager is not None:
+        try:
+            if hasattr(memory_manager, "get_relevant_lore"):
+                lore_entries = memory_manager.get_relevant_lore(
+                    f"notable events encounters adventure {companion_id}",
+                    n_results=3,
+                )
+            elif callable(memory_manager):
+                lore_entries = memory_manager(
+                    f"notable events encounters adventure {companion_id}",
+                    n_results=3,
+                )
+        except Exception as ex:
+            logger.warning(f"generate_camp_dialogue: get_relevant_lore call failed: {ex}")
+            lore_entries = []
+
+    extracted_lore: List[str] = []
+    if isinstance(lore_entries, list):
+        for entry in lore_entries:
+            if isinstance(entry, dict) and "text" in entry:
+                extracted_lore.append(str(entry["text"]).strip())
+            elif isinstance(entry, str):
+                extracted_lore.append(entry.strip())
+
+    if extracted_lore:
+        lore_text = " ".join(extracted_lore).strip()
+    else:
+        lore_text = "We have survived perilous battles and traveled through dangerous lands together."
+
+    # Determine companion display name
+    companion_name = companion_id.replace("_", " ").title()
+    if world_state and isinstance(world_state, dict):
+        party_comps = world_state.get("party", {}).get("companions", [])
+        for c in party_comps:
+            if isinstance(c, dict) and (c.get("id") == companion_id or c.get("name") == companion_id):
+                companion_name = c.get("name", companion_name)
+                break
+
+    # 3. Build prompt with real lore text
+    camp_prompt = (
+        f"You are the companion {companion_name} resting at camp with the party.\n"
+        f"Reflect on these recent events:\n"
+        f"{lore_text}\n\n"
+        f"Generate a brief campfire reaction or thought from {companion_name}, along with 3 player response options:\n"
+        f"- agree: Player agrees with or supports {companion_name}\n"
+        f"- disagree: Player challenges or disagrees with {companion_name}\n"
+        f"- neutral: Player gives a calm or practical non-committal response\n\n"
+        f"Respond strictly in JSON format with schema:\n"
+        f"{{\n"
+        f'  "statement": "<companion speech at camp reflecting on the events>",\n'
+        f'  "topic": "<short summary of discussion topic>",\n'
+        f'  "options": {{\n'
+        f'    "agree": "<player agreement response>",\n'
+        f'    "disagree": "<player disagreement response>",\n'
+        f'    "neutral": "<player neutral response>"\n'
+        f"  }}\n"
+        f"}}"
+    )
+
+    messages = [{"role": "user", "content": camp_prompt}]
+    options = {"temperature": 0.7, "num_ctx": num_ctx}
+
+    parsed_json = None
+    if client is not None:
+        try:
+            resp = client.chat(model=model, messages=messages, format="json", options=options)
+            content = resp.get("message", {}).get("content", "")
+            parsed_json = json.loads(content)
+        except Exception as ex:
+            logger.warning(f"generate_camp_dialogue: client chat failed: {ex}")
+            try:
+                m = re.search(r"\{[\s\S]*\}", content)
+                if m:
+                    parsed_json = json.loads(m.group(0))
+            except Exception:
+                parsed_json = None
+
+    if parsed_json is None and client is None and os.environ.get("OLLAMA_HOST"):
+        try:
+            import ollama
+            resp = ollama.chat(model=model, messages=messages, format="json", options=options)
+            content = resp.get("message", {}).get("content", "")
+            parsed_json = json.loads(content)
+        except Exception as ex:
+            logger.debug(f"generate_camp_dialogue: ollama call failed: {ex}")
+            parsed_json = None
+
+    # 4. Parse response or apply lore-grounded fallback
+    if isinstance(parsed_json, dict) and "statement" in parsed_json:
+        statement = parsed_json.get("statement", f"Resting by the fire brings to mind: {lore_text}")
+        topic = parsed_json.get("topic") or (lore_text[:50] + "..." if len(lore_text) > 50 else lore_text)
+        opts = parsed_json.get("options", {})
+        agree_opt = opts.get("agree", "I agree with you. We made the right call.")
+        disagree_opt = opts.get("disagree", "I disagree. We should have approached that differently.")
+        neutral_opt = opts.get("neutral", "What's done is done. We must look forward.")
+
+        return {
+            "companion_id": companion_id,
+            "companion_name": companion_name,
+            "statement": statement,
+            "topic": topic,
+            "options": {
+                "agree": agree_opt,
+                "disagree": disagree_opt,
+                "neutral": neutral_opt,
+            },
+        }
+
+    # Robust lore-grounded fallback
+    statement = (
+        f"Sitting by the fire, I keep thinking about what happened: {lore_text}. "
+        f"Do you think we handled that the right way?"
+    )
+    topic = lore_text[:60] + "..." if len(lore_text) > 60 else lore_text
+    return {
+        "companion_id": companion_id,
+        "companion_name": companion_name,
+        "statement": statement,
+        "topic": topic,
+        "options": {
+            "agree": "You're right to think on it. I believe we did what was necessary.",
+            "disagree": "I think we made a mistake there, and we should be honest about it.",
+            "neutral": "We survived it, and that's what counts. We need our rest for tomorrow.",
+        },
+    }
+

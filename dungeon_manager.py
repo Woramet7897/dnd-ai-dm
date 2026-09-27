@@ -857,3 +857,63 @@ def complete_notice_board_quest(
     }
 
 
+def is_camp_context(world_state: Optional[Dict[str, Any]] = None) -> bool:
+    """
+    Check if the current game state qualifies as a camp / rest context (Spec Module D §2).
+    Must return False if:
+      - Mid-combat (world_state['combat_state']['status'] == 'active')
+      - Mid-dungeon-crawl (in an uncleared or unsafe dungeon room)
+      - World state is missing or empty
+      - Player is imprisoned or captive
+    Returns True if:
+      - In a town, safe campsite, or resting at camp / short / long rest.
+    """
+    if not world_state or not isinstance(world_state, dict):
+        return False
+
+    # 1. Combat gating: mid-combat is NEVER a camp context
+    combat_state = world_state.get("combat_state")
+    if isinstance(combat_state, dict) and combat_state.get("status") == "active":
+        return False
+
+    # 2. Captivity gating
+    if world_state.get("is_imprisoned") or world_state.get("status") == "captive":
+        return False
+
+    # 3. Explicit camp/resting flags
+    if world_state.get("at_camp") is True or world_state.get("is_resting") is True:
+        loc = world_state.get("current_location")
+        if loc:
+            room = _get_room(loc, world_state)
+            if room and room.get("type") == "dungeon" and not is_room_safe(loc, world_state):
+                return False
+        return True
+
+    # 4. Location-based check
+    loc = world_state.get("current_location")
+    if not loc:
+        return False
+
+    room = _get_room(loc, world_state)
+    if room:
+        rtype = room.get("type", "")
+        # Dungeon room: uncleared/unsafe is definitely mid-dungeon crawl
+        if rtype == "dungeon":
+            return False
+        # Town rooms are safe resting/camp areas
+        if rtype == "town":
+            return True
+        # Wilderness: safe room or campfire
+        if room.get("is_safe", False) or loc in world_state.get("cleared_rooms", []):
+            if "camp" in loc.lower() or "safe" in loc.lower() or room.get("is_safe"):
+                return True
+    else:
+        # Fallback for dynamic / test locations
+        if "town" in loc.lower() or "camp" in loc.lower():
+            return True
+        if loc in world_state.get("cleared_rooms", []):
+            return True
+
+    return False
+
+

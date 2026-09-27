@@ -1331,6 +1331,14 @@ def long_rest(
     tick_food_spoilage(character_state, days=1)
 
     character_state["weapon_actions_available"] = True
+
+    # Phase 14.2: Reset camp_dialogue_pending for active party companions
+    for comp in world_state.get("party", {}).get("companions", []):
+        cid = comp.get("id") or comp.get("name")
+        if cid:
+            c_app = get_companion_approval(world_state, cid)
+            c_app["camp_dialogue_pending"] = True
+
     logger.debug("Long rest completed. HP restored, time advanced to next morning, weapon actions recharged.")
 
 
@@ -1348,6 +1356,12 @@ def perform_short_rest(
     if world_state:
         import dungeon_manager
         dungeon_manager.advance_time(world_state, steps=1, character_state=character_state)
+        # Phase 14.2: Reset camp_dialogue_pending for active party companions
+        for comp in world_state.get("party", {}).get("companions", []):
+            cid = comp.get("id") or comp.get("name")
+            if cid:
+                c_app = get_companion_approval(world_state, cid)
+                c_app["camp_dialogue_pending"] = True
     logger.debug("perform_short_rest: weapon_actions_available reset to True.")
     return {
         "success": True,
@@ -2732,6 +2746,97 @@ def complete_notice_board_quest(*args, **kwargs):
     """Forwarder to dungeon_manager.complete_notice_board_quest."""
     import dungeon_manager
     return dungeon_manager.complete_notice_board_quest(*args, **kwargs)
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# PHASE 14.2 — CAMP COMPANION DIALOGUE & APPROVAL SYSTEM
+# ────────────────────────────────────────────────────────────────────────────────
+
+def get_companion_approval(world_state: Dict[str, Any], companion_id: str) -> Dict[str, Any]:
+    """
+    Spec Module D §2 / Phase 14.2:
+    Get or initialize approval state for companion_id in world_state['companions_approval'].
+    Baseline approval is 50 (range 0 to 100).
+    Schema: {
+        "approval": int (0-100, default 50),
+        "camp_dialogue_pending": bool (default True),
+        "last_discussion_topic": Optional[str] (default None),
+    }
+    """
+    comp_approval_map = world_state.setdefault("companions_approval", {})
+    if companion_id not in comp_approval_map:
+        comp_approval_map[companion_id] = {
+            "approval": 50,
+            "camp_dialogue_pending": True,
+            "last_discussion_topic": None,
+        }
+    return comp_approval_map[companion_id]
+
+
+def respond_to_camp_dialogue(
+    companion_id: str,
+    response_type: str,
+    world_state: Dict[str, Any],
+    dialogue_data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Spec Module D §2 / Phase 14.2:
+    Process player response (agree, disagree, neutral) to camp companion dialogue.
+    - 'agree': +5 approval
+    - 'disagree': -5 approval
+    - 'neutral': 0 approval
+    Approval is clamped between 0 and 100.
+    Sets camp_dialogue_pending = False, updates last_discussion_topic.
+    """
+    comp_state = get_companion_approval(world_state, companion_id)
+    old_approval = comp_state.get("approval", 50)
+
+    resp_lower = (response_type or "").strip().lower()
+    if resp_lower == "agree":
+        delta = 5
+    elif resp_lower == "disagree":
+        delta = -5
+    elif resp_lower == "neutral":
+        delta = 0
+    else:
+        logger.warning(f"Unknown camp response_type '{response_type}', defaulting to 0 delta.")
+        delta = 0
+
+    new_approval = max(0, min(100, old_approval + delta))
+    comp_state["approval"] = new_approval
+    comp_state["camp_dialogue_pending"] = False
+
+    topic = None
+    if dialogue_data and isinstance(dialogue_data, dict):
+        topic = dialogue_data.get("topic") or dialogue_data.get("statement")
+    if topic:
+        comp_state["last_discussion_topic"] = topic
+
+    logger.info(
+        f"respond_to_camp_dialogue: companion '{companion_id}' {resp_lower} -> "
+        f"approval {old_approval} -> {new_approval} (delta={delta:+d})."
+    )
+    return {
+        "companion_id": companion_id,
+        "response_type": resp_lower,
+        "approval_change": delta,
+        "old_approval": old_approval,
+        "new_approval": new_approval,
+        "camp_dialogue_pending": False,
+        "last_discussion_topic": comp_state.get("last_discussion_topic"),
+    }
+
+
+def is_camp_context(world_state: Optional[Dict[str, Any]] = None) -> bool:
+    """Forwarder to dungeon_manager.is_camp_context."""
+    import dungeon_manager
+    return dungeon_manager.is_camp_context(world_state)
+
+
+def generate_camp_dialogue(*args, **kwargs):
+    """Forwarder to llm_handler.generate_camp_dialogue."""
+    import llm_handler
+    return llm_handler.generate_camp_dialogue(*args, **kwargs)
 
 
 

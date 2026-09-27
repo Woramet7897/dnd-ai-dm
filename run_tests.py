@@ -36,6 +36,7 @@ ORDERED_TEST_FILES = [
     "phase13_tests.py",
     "phase13_5_tests.py",
     "phase14_1_tests.py",
+    "phase14_2_tests.py",
     "phase_equipment_tests.py",
     "test_app_integrations.py",
 ]
