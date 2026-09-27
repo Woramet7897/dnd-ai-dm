@@ -144,7 +144,7 @@ class TestPhase7TimeAndSupply(unittest.TestCase):
         }
 
         # Resolve single round
-        res_round = combat_manager.resolve_round(cs, self.world_state)
+        res_round = combat_manager.resolve_round(cs, world_state=self.world_state)
         narration_block = res_round["narration_block"]
         outcome = res_round["combat_outcome"]
 

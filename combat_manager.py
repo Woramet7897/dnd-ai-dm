@@ -1137,6 +1137,12 @@ def resolve_round(
     Orchestrate a full combat round in initiative order and return a complete
     round summary dict for the narrative LLM.
     """
+    # Defensive guard for positional argument mismatch: if caller passed world_state as 2nd arg
+    if player_attack_result is not None and world_state is None:
+        if isinstance(player_attack_result, dict) and ("schema_version" in player_attack_result or "current_location" in player_attack_result):
+            world_state = player_attack_result
+            player_attack_result = None
+
     round_num      = combat_state["round"]
     turn_order     = combat_state["turn_order"]
     player_c       = combat_state["player_combatant"]

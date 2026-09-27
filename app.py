@@ -409,11 +409,32 @@ def render_playing_view():
         cs = world["combat_state"]
         round_num = cs.get("round", 1)
         enemies = cs.get("enemies", [])
+        companions = cs.get("companions", [])
+        player_c = cs.get("player_combatant", {})
+
+        # Display active surface & smoke status (Phase 11.1)
+        room_surface = cs.get("room_surface", {})
+        surf_type = room_surface.get("type")
+        surf_dur = room_surface.get("duration", 0)
+        if surf_type:
+            st.info(f"🌊 **Active Surface: {surf_type.upper()}** ({surf_dur} round{'s' if surf_dur != 1 else ''} remaining)")
+        if cs.get("smoke_active"):
+            smoke_dur = cs.get("smoke_duration", 0)
+            st.warning(f"💨 **Smoke Active**: Ranged attacks suffer disadvantage ({smoke_dur} round{'s' if smoke_dur != 1 else ''} remaining)")
 
         col_c1, col_c2 = st.columns([2, 1])
 
         with col_c1:
             st.markdown(f"##### Round {round_num} — Active Combatants")
+            p_cur_hp = player_c.get("hp", {}).get("current", 0)
+            p_max_hp = player_c.get("hp", {}).get("max", 10)
+            st.markdown(f"🧑 **{player_c.get('name', 'Adventurer')}** (You) | HP: {p_cur_hp}/{p_max_hp} | AC: {player_c.get('ac', 10)}")
+
+            for comp in companions:
+                c_hp = comp.get("hp", {})
+                st.markdown(f"🤝 **{comp.get('name', 'Companion')}** | HP: {c_hp.get('current', 0)}/{c_hp.get('max', 10)} | AC: {comp.get('ac', 10)}")
+
+            st.markdown("---")
             for enemy in enemies:
                 e_id = enemy.get("id", "enemy")
                 e_name = enemy.get("name", e_id)
@@ -422,16 +443,67 @@ def render_playing_view():
                 max_e_hp = e_hp.get("max", 1)
                 st.markdown(f"👹 **{e_name}** | HP: {cur_e_hp}/{max_e_hp} | AC: {enemy.get('ac', 10)}")
 
+        living_enemies = [e for e in enemies if e.get("hp", {}).get("current", 0) > 0]
+        player_alive = player_c.get("hp", {}).get("current", 0) > 0
+
         with col_c2:
             st.markdown("##### Combat Actions")
             btn_disabled = (cs.get("status") == "ended") or (cs.get("downed_outcome") is not None)
-            if st.button("⚔️ Resolve Combat Round", disabled=btn_disabled, use_container_width=True, type="primary"):
-                # 1. Resolve full combat round (Python math)
-                res_round = combat_manager.resolve_round(cs, world)
+
+            selected_target = None
+            selected_attack = None
+
+            if player_alive and living_enemies:
+                target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
+                chosen_target_label = st.selectbox("🎯 Target Enemy", list(target_map.keys()), key=f"target_sel_{round_num}")
+                selected_target = target_map[chosen_target_label]
+
+                attacks = player_c.get("attacks", [])
+                if not attacks:
+                    attacks = [{"name": "Unarmed Strike", "attack_bonus": 2, "damage": "1+0", "damage_type": "bludgeoning", "ranged": False}]
+
+                def _fmt_atk(a):
+                    ranged_tag = " [Ranged]" if a.get("ranged") else ""
+                    return f"{a.get('name', 'Attack')} (+{a.get('attack_bonus', 0)}, {a.get('damage', '1d4')} {a.get('damage_type', '')}){ranged_tag}"
+
+                atk_map = {_fmt_atk(a): a for a in attacks}
+                chosen_atk_label = st.selectbox("⚔️ Weapon / Attack", list(atk_map.keys()), key=f"atk_sel_{round_num}")
+                selected_attack = atk_map[chosen_atk_label]
+            elif not player_alive:
+                st.warning("⚠️ You are down! Rolling death saves...")
+
+            button_label = "⚔️ Attack & End Round" if player_alive else "⏳ Endure Round"
+            if st.button(button_label, disabled=btn_disabled, use_container_width=True, type="primary"):
+                # 1. Resolve player's attack if conscious
+                player_attack_result = None
+                if player_alive and selected_target and selected_attack:
+                    p_conds = combat_manager._get_condition_set(player_c)
+                    if "stunned" in p_conds:
+                        player_attack_result = {
+                            "attacker_id": player_c.get("id", "player"),
+                            "attacker_name": player_c.get("name", "Player"),
+                            "skipped": True,
+                            "reason": "stunned",
+                        }
+                    else:
+                        player_attack_result = combat_manager.resolve_attack(
+                            player_c,
+                            selected_target,
+                            selected_attack,
+                            combat_state=cs,
+                        )
+
+                # 2. Resolve full combat round (Python math)
+                res_round = combat_manager.resolve_round(
+                    combat_state=cs,
+                    player_attack_result=player_attack_result,
+                    world_state=world,
+                )
+                combat_manager.sync_player_state(player_c)
                 narration_block = res_round["narration_block"]
                 outcome = res_round["combat_outcome"]
 
-                # 2. EXACTLY ONE narrative LLM call for the entire round
+                # 3. EXACTLY ONE narrative LLM call for the entire round
                 hist = st.session_state.get("history_buffer", [])
                 narrative_res = llm_handler.generate_narrative_response(
                     user_input="",
@@ -446,11 +518,11 @@ def render_playing_view():
                     st.session_state["action_suggestions"] = narrative_res["suggestions"]
                 full_combat_msg = f"{narration_block}\n\n*{narration_text}*"
 
-                # 3. Append turn to narrative log & history buffer
+                # 4. Append turn to narrative log & history buffer
                 st.session_state["narrative_log"].append({"role": "assistant", "content": full_combat_msg})
                 st.session_state["history_buffer"].append({"role": "assistant", "content": narration_text})
 
-                # 4. Check combat end
+                # 5. Check combat end
                 if outcome == "player_victory":
                     combat_manager.end_combat(world)
                     st.success("🎉 Combat Victory! All enemies have been defeated.")

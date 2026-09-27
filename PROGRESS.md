@@ -28,9 +28,16 @@ Last updated: 2026-09-26 (Phase 9 complete — All 7 Phase 9 systems verified, 1
 Status values to use: NOT_STARTED / IN_PROGRESS / DONE
 
 ## Phase 11.1 & 14.1 Systems Verification:
-- **Phase 11.1 DoD**: 16/16 `phase11_1_tests.py` tests passed.
+- **Phase 11.1 DoD**: 18/18 `phase11_1_tests.py` tests passed (includes player attack integration and resolve_round defensive guard).
 - **Phase 14.1 DoD**: 9/9 `phase14_1_tests.py` tests passed.
-- **Full Regression**: 264/264 tests passing clean across all test suites (`phase11_1_tests.py`: 16/16, `phase14_1_tests.py`: 9/9, `phase10_tests.py`: 3/3, `phase9_tests.py`: 20/20, `phase8_tests.py`: 9/9, `phase7_tests.py`: 6/6, `phase6_tests.py`: 32/32, `phase_equipment_tests.py`: 34/34, `phase4_tests.py`: 135/135, `phase3_tests.py`: 45/45).
+- **Full Regression**: 266/266 tests passing clean across all test suites (`phase11_1_tests.py`: 18/18, `phase14_1_tests.py`: 9/9, `phase10_tests.py`: 3/3, `phase9_tests.py`: 20/20, `phase8_tests.py`: 9/9, `phase7_tests.py`: 6/6, `phase6_tests.py`: 32/32, `phase_equipment_tests.py`: 34/34, `phase4_tests.py`: 135/135, `phase3_tests.py`: 45/45).
+
+## Critical Bugfix (Phase 7 Integration Disconnect):
+- **Player Combat Action Integration**: Resolved legacy issue where `app.py` called `resolve_round(cs, world)` passing `world` as 2nd positional argument instead of `world_state=world`.
+  1. Added UI in `app.py` for target enemy selection (from living enemies) and weapon/attack selection (from equipped weapons or unarmed strike).
+  2. Wired `combat_manager.resolve_attack(player_c, selected_target, selected_attack, combat_state=cs)` when player is conscious (with stunned skip guard).
+  3. Added defensive guard in `combat_manager.resolve_round()` to detect and recover `world_state` if passed positionally as 2nd argument, preventing `round_results` contamination and ensuring proper wilderness/town downed outcome weighting.
+  4. Updated `phase7_tests.py` line 147 to use `world_state=self.world_state`.
 
 ## If IN_PROGRESS when a session ends, note exactly what's left here:
 Sub-phases 11.1 and 14.1 are 100% DONE and fully verified. Sub-phases 11.2–13.5 and 14.2 remain on the roadmap.
