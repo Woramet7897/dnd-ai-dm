@@ -34,6 +34,87 @@ st.set_page_config(
 )
 
 
+def apply_custom_css():
+    """Inject modern Dark Fantasy RPG custom CSS styling."""
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    h1, h2, h3 {
+        font-family: 'Cinzel', serif !important;
+        letter-spacing: 0.02em;
+    }
+
+    /* Tabs Styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: rgba(19, 27, 46, 0.7);
+        padding: 6px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px;
+        padding: 8px 18px;
+        color: #94a3b8;
+        font-weight: 500;
+        transition: all 0.2s ease;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        color: #f1f5f9;
+        background-color: rgba(255, 255, 255, 0.04);
+    }
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, rgba(225, 29, 72, 0.25) 0%, rgba(225, 29, 72, 0.1) 100%) !important;
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        border-bottom: 2px solid #e11d48 !important;
+    }
+
+    /* Metric Cards */
+    div[data-testid="stMetric"] {
+        background: rgba(19, 27, 46, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.07);
+        border-radius: 10px;
+        padding: 10px 14px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    }
+
+    /* Primary buttons */
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #b91c1c 0%, #e11d48 100%);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        color: #ffffff;
+        font-weight: 600;
+        border-radius: 8px;
+        box-shadow: 0 4px 14px rgba(225, 29, 72, 0.35);
+        transition: all 0.2s ease;
+    }
+    .stButton > button[kind="primary"]:hover {
+        box-shadow: 0 6px 20px rgba(225, 29, 72, 0.55);
+        transform: translateY(-1px);
+    }
+
+    /* Chat message container */
+    div[data-testid="stChatMessage"] {
+        background: rgba(19, 27, 46, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 12px;
+        margin-bottom: 8px;
+    }
+
+    /* Sliders track */
+    div[data-baseweb="slider"] {
+        margin-top: 6px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
 # ────────────────────────────────────────────────────────────────────────────────
 # Session State Helpers
 # ────────────────────────────────────────────────────────────────────────────────
@@ -169,158 +250,203 @@ def get_recommended_stats(cls_name: str, race_name: str) -> Dict[str, int]:
 
 
 def render_landing_view():
-    st.title("🎲 D&D 5e AI DM Engine (MVP Milestone)")
-    st.markdown("Welcome, adventurer. Select an existing save or create a new character to begin.")
+    apply_custom_css()
+
+    st.markdown("""
+    <div style="text-align: center; padding: 18px 0 12px 0;">
+        <h1 style="font-size: 2.3rem; margin-bottom: 6px; background: linear-gradient(90deg, #f8fafc, #fda4af); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+            ⚔️ D&D 5e AI DM Engine
+        </h1>
+        <p style="color: #94a3b8; font-size: 1.05rem; margin: 0;">
+            A Tactical Single-Player D&D 5th Edition Adventure powered by AI
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
     saved_chars = list_saved_characters()
 
-    col1, col2 = st.columns(2)
+    # Center-aligned main card container
+    col_pad_l, col_main, col_pad_r = st.columns([1, 10, 1])
 
-    with col1:
-        st.subheader("📂 Load Existing Character")
-        if saved_chars:
-            selected_char = st.selectbox("Select Character Save:", saved_chars)
-            if st.button("▶️ Load Character", use_container_width=True):
-                if load_game(selected_char):
-                    st.rerun()
-        else:
-            st.info("No existing character saves found.")
+    with col_main:
+        tab_create, tab_load = st.tabs([
+            "✨ สร้างตัวละครใหม่ (Create Character)",
+            "📂 โหลดตัวละครเดิม (Load Save)",
+        ])
 
-    with col2:
-        st.subheader("✨ Create New Character")
-        char_name = st.text_input("Character Name:", value="Valeros", key="input_char_name")
+        with tab_load:
+            st.markdown("##### 📂 บันทึกตัวละครเดิมที่มีอยู่ในระบบ")
+            if saved_chars:
+                col_sel, col_btn = st.columns([3, 1])
+                with col_sel:
+                    selected_char = st.selectbox("เลือกตัวละคร:", saved_chars, label_visibility="collapsed")
+                with col_btn:
+                    if st.button("▶️ เข้าสู่เกม", use_container_width=True, type="primary"):
+                        if load_game(selected_char):
+                            st.rerun()
+            else:
+                st.info("ยังไม่มีข้อมูลตัวละครที่บันทึกไว้ — สลับไปที่แท็บ 'สร้างตัวละครใหม่' เพื่อเริ่มการผจญภัยได้เลย!")
 
-        col_r, col_c = st.columns(2)
-        with col_r:
-            race = st.selectbox(
-                "Race:",
-                ["Human", "Elf", "Dwarf", "Halfling", "Tiefling", "Half-Orc", "Dragonborn"],
-                key="select_race",
-            )
-        with col_c:
-            cls_name = st.selectbox(
-                "Class:",
-                ["Fighter", "Wizard", "Rogue", "Cleric", "Bard"],
-                key="select_class",
-            )
-        bg = st.selectbox(
-            "Background:",
-            ["Folk Hero", "Acolyte", "Criminal", "Noble", "Sage", "Soldier"],
-            key="select_bg",
-        )
-
-        st.markdown("##### Ability Scores (Point-Buy: 27 Points Total)")
-
-        rec_stats = get_recommended_stats(cls_name, race)
-        races_cat = character_creator._load_catalog("races_catalog.json")
-        race_key = race.lower().replace("-", "_").replace(" ", "_")
-        r_bonuses = races_cat.get(race_key, {}).get("stat_bonuses", {})
-
-        stats_alloc = {}
-        for s in character_creator.STAT_NAMES:
-            bonus = r_bonuses.get(s, 0)
-            bonus_lbl = f" (+{bonus} {race})" if bonus > 0 else ""
-            default_val = rec_stats.get(s, 10)
-            val = st.slider(
-                f"{s}{bonus_lbl}",
-                min_value=8,
-                max_value=15,
-                value=default_val,
-                key=f"pb_{cls_name}_{race}_{s}",
-            )
-            stats_alloc[s] = val
-
-        # Live Point-Buy status calculation
-        total_spent = sum(character_creator.POINT_BUY_COST.get(v, 0) for v in stats_alloc.values())
-        remaining = character_creator.POINT_BUY_BUDGET - total_spent
-
-        col_pb1, col_pb2 = st.columns(2)
-        with col_pb1:
-            st.metric("Point-Buy Used", f"{total_spent} / 27")
-        with col_pb2:
-            st.metric("Points Remaining", f"{remaining} แต้ม")
-
-        ok_pts, pts_msg = character_creator.validate_point_buy(stats_alloc)
-        if not ok_pts:
-            st.error(f"⚠️ Point-Buy: {pts_msg}")
-        elif remaining > 0:
-            st.info(f"💡 ใช้แต้มไป {total_spent} / 27 แต้ม (คงเหลือ {remaining} แต้ม — สามารถเพิ่มคะแนนได้)")
-        else:
-            st.success("✅ Point-Buy Valid: ใช้ครบ 27 / 27 แต้มพอดี!")
-
-        # Real-time Final Ability Score summary row
-        st.caption("Final Scores (Base + Racial Bonus):")
-        cols_summary = st.columns(6)
-        for idx, s in enumerate(character_creator.STAT_NAMES):
-            base_v = stats_alloc[s]
-            r_b = r_bonuses.get(s, 0)
-            final_v = base_v + r_b
-            mod = character_creator.get_modifier(final_v)
-            with cols_summary[idx]:
-                st.metric(
-                    label=s,
-                    value=final_v,
-                    delta=f"{mod:+d}",
+        with tab_create:
+            # Identity Section
+            st.markdown("##### 👤 ข้อมูลอัตลักษณ์ตัวละคร (Identity & Vocation)")
+            col_name, col_bg = st.columns(2)
+            with col_name:
+                char_name = st.text_input("ชื่อตัวละคร (Character Name):", value="Valeros", key="input_char_name")
+            with col_bg:
+                bg = st.selectbox(
+                    "ภูมิหลัง (Background):",
+                    ["Folk Hero", "Acolyte", "Criminal", "Noble", "Sage", "Soldier"],
+                    key="select_bg",
                 )
 
-        col_reset, col_submit = st.columns([1, 2])
-        with col_reset:
-            if st.button("🔄 Reset Preset", use_container_width=True):
-                for s in character_creator.STAT_NAMES:
-                    st.session_state[f"pb_{cls_name}_{race}_{s}"] = rec_stats[s]
-                st.rerun()
+            col_r, col_c = st.columns(2)
+            with col_r:
+                race = st.selectbox(
+                    "เผ่าพันธุ์ (Race):",
+                    ["Human", "Elf", "Dwarf", "Halfling", "Tiefling", "Half-Orc", "Dragonborn"],
+                    key="select_race",
+                )
+            with col_c:
+                cls_name = st.selectbox(
+                    "คลาส (Class):",
+                    ["Fighter", "Wizard", "Rogue", "Cleric", "Bard"],
+                    key="select_class",
+                )
 
-        with col_submit:
-            submitted = st.button("⚔️ Create Character", type="primary", use_container_width=True)
+            st.markdown("---")
+            st.markdown("##### ⚔️ จัดสรรค่าพลัง Point-Buy (27 แต้มรวม)")
+            st.caption("สถิติแนะนำจะปรับเปลี่ยนให้เข้ากับคลาสและเผ่าโดยอัตโนมัติ — สามารถปรับเลื่อนสไลเดอร์เพื่อดูการคำนวณแต้มแบบสดๆ ได้")
 
-        if submitted:
-            if not char_name.strip():
-                st.error("Please enter a character name.")
-            elif not ok_pts:
-                st.error("Invalid point-buy stats allocation.")
-            else:
-                try:
-                    # Build character
-                    player = character_creator.create_character(
-                        name=char_name.strip(),
-                        race=race,
-                        class_name=cls_name,
-                        background=bg,
-                        stats=stats_alloc,
+            rec_stats = get_recommended_stats(cls_name, race)
+            races_cat = character_creator._load_catalog("races_catalog.json")
+            race_key = race.lower().replace("-", "_").replace(" ", "_")
+            r_bonuses = races_cat.get(race_key, {}).get("stat_bonuses", {})
+
+            # 2 Columns for Ability Sliders (Physical on Left, Mental on Right)
+            col_stat_l, col_stat_r = st.columns(2)
+            stats_alloc = {}
+
+            with col_stat_l:
+                st.markdown("###### 🗡️ ด้านกายภาพ (Physical Attributes)")
+                for s in ["STR", "DEX", "CON"]:
+                    bonus = r_bonuses.get(s, 0)
+                    bonus_lbl = f" (+{bonus} {race})" if bonus > 0 else ""
+                    default_val = rec_stats.get(s, 10)
+                    val = st.slider(
+                        f"{s}{bonus_lbl}",
+                        min_value=8,
+                        max_value=15,
+                        value=default_val,
+                        key=f"pb_{cls_name}_{race}_{s}",
                     )
-                    # Add starting trail_rations if not present
-                    inv = player.setdefault("inventory", [])
-                    if not any(i.get("item_id") == "trail_rations" for i in inv):
-                        inv.append({"item_id": "trail_rations", "equipped": False, "quantity": 3})
+                    stats_alloc[s] = val
 
-                    world = {
-                        "schema_version": 4,
-                        "character_name": char_name.strip(),
-                        "current_location": "town_riverside",
-                        "visited_rooms": ["town_riverside"],
-                        "cleared_rooms": [],
-                        "collected_loot": [],
-                        "dynamic_rooms": {},
-                        "game_time": {"day": 1, "period": "morning", "steps_since_period_start": 0},
-                        "quest_log": {"main": [], "side": []},
-                        "combat_state": None,
-                    }
+            with col_stat_r:
+                st.markdown("###### 🧠 ด้านสติปัญญาและมนตรา (Mental & Magic)")
+                for s in ["INT", "WIS", "CHA"]:
+                    bonus = r_bonuses.get(s, 0)
+                    bonus_lbl = f" (+{bonus} {race})" if bonus > 0 else ""
+                    default_val = rec_stats.get(s, 10)
+                    val = st.slider(
+                        f"{s}{bonus_lbl}",
+                        min_value=8,
+                        max_value=15,
+                        value=default_val,
+                        key=f"pb_{cls_name}_{race}_{s}",
+                    )
+                    stats_alloc[s] = val
 
-                    state_manager.save_character(char_name.strip(), player)
-                    state_manager.save_world(char_name.strip(), world)
+            # Live Point-Buy Budget Calculation
+            total_spent = sum(character_creator.POINT_BUY_COST.get(v, 0) for v in stats_alloc.values())
+            remaining = character_creator.POINT_BUY_BUDGET - total_spent
 
-                    st.session_state["player_state"] = player
-                    st.session_state["world_state"] = world
-                    st.session_state["current_char_name"] = char_name.strip()
-                    st.session_state["narrative_log"] = [{
-                        "role": "assistant",
-                        "content": f"Welcome to Riverside Village, **{char_name.strip()}**! Your journey begins here.",
-                    }]
+            col_pb1, col_pb2, col_pb_status = st.columns([1, 1, 2])
+            with col_pb1:
+                st.metric("Point-Buy ที่ใช้", f"{total_spent} / 27")
+            with col_pb2:
+                st.metric("แต้มคงเหลือ", f"{remaining} แต้ม")
+            with col_pb_status:
+                ok_pts, pts_msg = character_creator.validate_point_buy(stats_alloc)
+                if not ok_pts:
+                    st.error(f"⚠️ {pts_msg}")
+                elif remaining > 0:
+                    st.info(f"💡 คงเหลืออีก {remaining} แต้ม — สามารถเพิ่มค่าพลังได้")
+                else:
+                    st.success("✅ Point-Buy Valid: ใช้ครบ 27 / 27 แต้มพอดี!")
 
-                    st.success(f"Character '{char_name.strip()}' created successfully!")
+            # Live Final Scores & Modifiers (6 Cards)
+            st.markdown("###### 📊 คะแนนสุทธิพร้อมโบนัสเผ่า (Final Scores & Modifiers)")
+            cols_summary = st.columns(6)
+            for idx, s in enumerate(character_creator.STAT_NAMES):
+                base_v = stats_alloc[s]
+                r_b = r_bonuses.get(s, 0)
+                final_v = base_v + r_b
+                mod = character_creator.get_modifier(final_v)
+                with cols_summary[idx]:
+                    st.metric(
+                        label=s,
+                        value=f"{final_v}",
+                        delta=f"{mod:+d}",
+                    )
+
+            st.markdown("---")
+            col_reset, col_submit = st.columns([1, 2])
+            with col_reset:
+                if st.button("🔄 รีเซ็ตค่าแนะนำ (Reset)", use_container_width=True):
+                    for s in character_creator.STAT_NAMES:
+                        st.session_state[f"pb_{cls_name}_{race}_{s}"] = rec_stats[s]
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Error creating character: {e}")
+
+            with col_submit:
+                submitted = st.button("⚔️ สร้างตัวละครและเริ่มการผจญภัย", type="primary", use_container_width=True)
+
+            if submitted:
+                if not char_name.strip():
+                    st.error("กรุณาระบุชื่อตัวละคร")
+                elif not ok_pts:
+                    st.error(f"การจัดสรรแต้ม Point-Buy ไม่ถูกต้อง: {pts_msg}")
+                else:
+                    try:
+                        player = character_creator.create_character(
+                            name=char_name.strip(),
+                            race=race,
+                            class_name=cls_name,
+                            background=bg,
+                            stats=stats_alloc,
+                        )
+                        inv = player.setdefault("inventory", [])
+                        if not any(i.get("item_id") == "trail_rations" for i in inv):
+                            inv.append({"item_id": "trail_rations", "equipped": False, "quantity": 3})
+
+                        world = {
+                            "schema_version": 4,
+                            "character_name": char_name.strip(),
+                            "current_location": "town_riverside",
+                            "visited_rooms": ["town_riverside"],
+                            "cleared_rooms": [],
+                            "collected_loot": [],
+                            "dynamic_rooms": {},
+                            "game_time": {"day": 1, "period": "morning", "steps_since_period_start": 0},
+                            "quest_log": {"main": [], "side": []},
+                            "combat_state": None,
+                        }
+
+                        state_manager.save_character(char_name.strip(), player)
+                        state_manager.save_world(char_name.strip(), world)
+
+                        st.session_state["player_state"] = player
+                        st.session_state["world_state"] = world
+                        st.session_state["current_char_name"] = char_name.strip()
+                        st.session_state["narrative_log"] = [{
+                            "role": "assistant",
+                            "content": f"Welcome to Riverside Village, **{char_name.strip()}**! Your journey begins here.",
+                        }]
+
+                        st.success(f"สร้างตัวละคร '{char_name.strip()}' สำเร็จ!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"เกิดข้อผิดพลาดในการสร้างตัวละคร: {e}")
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -1670,6 +1796,7 @@ def render_playing_view():
 
 def main():
     init_session_state()
+    apply_custom_css()
 
     player = st.session_state.get("player_state")
     world = st.session_state.get("world_state")
