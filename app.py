@@ -323,6 +323,8 @@ def render_landing_view():
             race_key = race.lower().replace("-", "_").replace(" ", "_")
             r_bonuses = races_cat.get(race_key, {}).get("stat_bonuses", {})
 
+            reset_epoch = st.session_state.get(f"pb_reset_epoch_{cls_name}_{race}", 0)
+
             # 2 Columns for Ability Sliders (Physical on Left, Mental on Right)
             col_stat_l, col_stat_r = st.columns(2)
             stats_alloc = {}
@@ -338,7 +340,7 @@ def render_landing_view():
                         min_value=8,
                         max_value=15,
                         value=default_val,
-                        key=f"pb_{cls_name}_{race}_{s}",
+                        key=f"pb_{cls_name}_{race}_{s}_{reset_epoch}",
                     )
                     stats_alloc[s] = val
 
@@ -353,7 +355,7 @@ def render_landing_view():
                         min_value=8,
                         max_value=15,
                         value=default_val,
-                        key=f"pb_{cls_name}_{race}_{s}",
+                        key=f"pb_{cls_name}_{race}_{s}_{reset_epoch}",
                     )
                     stats_alloc[s] = val
 
@@ -394,8 +396,7 @@ def render_landing_view():
             col_reset, col_submit = st.columns([1, 2])
             with col_reset:
                 if st.button("🔄 รีเซ็ตค่าแนะนำ (Reset)", use_container_width=True):
-                    for s in character_creator.STAT_NAMES:
-                        st.session_state[f"pb_{cls_name}_{race}_{s}"] = rec_stats[s]
+                    st.session_state[f"pb_reset_epoch_{cls_name}_{race}"] = reset_epoch + 1
                     st.rerun()
 
             with col_submit:
