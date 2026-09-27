@@ -43,7 +43,7 @@ sequenced so that:
 
 | # | Item | Files (per spec) | Status |
 |---|---|---|---|
-| 11.1 | Surface system (grease/fire/water/electrified_water combos) | `combat_manager.py`, `dungeon_data.json` | NOT_STARTED |
+| 11.1 | Surface system (grease/fire/water/electrified_water combos) | `combat_manager.py`, `state_manager.py`, `spell_catalog.json` | **DONE** |
 | 11.2 | Shove action + High Ground | `combat_manager.py` | NOT_STARTED |
 | 11.3 | Weapon actions (per-damage-type, short-rest cooldown) | `combat_manager.py` | NOT_STARTED |
 | 12.1 | Inspiration points (award/spend, reroll) | `state_manager.py` | NOT_STARTED |
@@ -51,7 +51,7 @@ sequenced so that:
 | 12.3 | Food spoilage + camp cooking | `state_manager.py` | NOT_STARTED |
 | 13.0 | Crime, pickpocketing, prison/escape loop | `state_manager.py`, `dungeon_manager.py` | NOT_STARTED — **gated, see below** |
 | 13.5 | Notice board generator | `dungeon_manager.py` | NOT_STARTED |
-| 14.1 | Contextual action suggestions (3-button UI) | `llm_handler.py`, `app.py` | **IN_PROGRESS — prompt sent, awaiting result** |
+| 14.1 | Contextual action suggestions (3-button UI) | `llm_handler.py`, `app.py` | **DONE** |
 | 14.2 | Camp companion dialogue (approval system) | `llm_handler.py`, `app.py` | NOT_STARTED |
 
 ---

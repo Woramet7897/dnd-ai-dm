@@ -55,7 +55,7 @@ def _get_monster_catalog() -> Dict:
 # CONDITIONS (spec Section 20)
 # ════════════════════════════════════════════════════════════════════════════════
 
-CONDITIONS = {"prone", "poisoned", "stunned", "restrained", "frightened", "exhausted"}
+CONDITIONS = {"prone", "poisoned", "stunned", "restrained", "frightened", "exhausted", "burning", "dazed"}
 
 # Mechanical effect lookup — used by resolve_attack() before rolling.
 CONDITION_EFFECTS: Dict[str, Dict[str, bool]] = {
@@ -65,6 +65,8 @@ CONDITION_EFFECTS: Dict[str, Dict[str, bool]] = {
     "restrained":  {"attack_rolls_disadvantage": True, "attacks_against_have_advantage": True},
     "frightened":  {"cannot_approach_source": True},
     "exhausted":   {"attack_rolls_disadvantage": True, "ability_checks_disadvantage": True},
+    "burning":     {},
+    "dazed":       {"attack_rolls_disadvantage": True},
 }
 
 
@@ -143,6 +145,212 @@ def tick_conditions(combat_state: Dict[str, Any]) -> None:
 def _get_condition_set(combatant: Dict[str, Any]) -> set:
     """Return the set of currently active condition names for a combatant."""
     return {e["condition"] for e in combatant.get("active_conditions", [])}
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# SURFACE SYSTEM (Phase 11.1 / Module A §1)
+# ════════════════════════════════════════════════════════════════════════════════
+
+VALID_SURFACES = {None, "grease", "water", "fire", "electrified_water", "blood"}
+
+
+def _get_all_combatants(combat_state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return all combatants present in combat_state (player, enemies, companions)."""
+    combatants: List[Dict[str, Any]] = []
+    player_c = combat_state.get("player_combatant")
+    if isinstance(player_c, dict):
+        combatants.append(player_c)
+    combatants.extend(combat_state.get("enemies", []))
+    combatants.extend(combat_state.get("companions", []))
+    return combatants
+
+
+def _get_stat_mod(combatant: Dict[str, Any], stat: str) -> int:
+    """Return the modifier for a named ability stat (floor((val - 10) / 2))."""
+    val = combatant.get("stats", {}).get(stat, 10)
+    return (val - 10) // 2
+
+
+def apply_surface(
+    combat_state: Dict[str, Any],
+    surface_type: Optional[str],
+    duration: int = 3,
+) -> Dict[str, Any]:
+    """
+    Apply a surface to the combat room or resolve a surface combo.
+
+    Valid surfaces: None, 'grease', 'water', 'fire', 'electrified_water', 'blood'.
+    Combos:
+      - grease + fire -> new surface 'fire' (dur 3), living combatants roll DEX save vs DC 12;
+        on fail, take 2d4 fire damage and burning condition (dur 3).
+      - fire + water -> new surface None, clears surface and sets smoke_active = True (dur 3),
+        giving disadvantage to ranged attacks in room.
+    """
+    if surface_type not in VALID_SURFACES:
+        logger.debug(f"apply_surface: '{surface_type}' not in valid surfaces — rejected.")
+        return {
+            "combo_triggered": False,
+            "new_type": combat_state.get("room_surface", {}).get("type"),
+            "effects": [],
+        }
+
+    surface = combat_state.setdefault("room_surface", {"type": None, "duration": 0})
+    current = surface.get("type")
+
+    # Explicit clear call
+    if surface_type is None:
+        surface["type"] = None
+        surface["duration"] = 0
+        return {"combo_triggered": False, "new_type": None, "effects": []}
+
+    # Plain overwrite if empty or same
+    if current is None or current == surface_type:
+        surface["type"] = surface_type
+        surface["duration"] = duration
+        return {"combo_triggered": False, "new_type": surface_type, "effects": []}
+
+    # Check for combos
+    pair = frozenset({current, surface_type})
+
+    # Combo 1: grease + fire
+    if pair == frozenset({"grease", "fire"}):
+        surface["type"] = "fire"
+        surface["duration"] = 3
+        effects: List[Dict[str, Any]] = []
+
+        living = [c for c in _get_all_combatants(combat_state) if c.get("hp", {}).get("current", 0) > 0]
+        for c in living:
+            roll = _roll_d20()
+            mod = _get_stat_mod(c, "DEX")
+            total = roll + mod
+            save_success = (total >= 12)
+
+            if not save_success:
+                dmg = roll_dice("2d4")
+                c_hp = c.setdefault("hp", {"current": 1, "max": 1})
+                c_hp["current"] = max(0, c_hp["current"] - dmg)
+                apply_condition(c, "burning", 3)
+                effects.append({
+                    "combatant_id": c.get("id"),
+                    "save_stat": "DEX",
+                    "save_roll": roll,
+                    "save_total": total,
+                    "save_dc": 12,
+                    "save_success": False,
+                    "damage": dmg,
+                    "damage_type": "fire",
+                    "condition_applied": "burning",
+                })
+            else:
+                effects.append({
+                    "combatant_id": c.get("id"),
+                    "save_stat": "DEX",
+                    "save_roll": roll,
+                    "save_total": total,
+                    "save_dc": 12,
+                    "save_success": True,
+                    "damage": 0,
+                })
+
+        logger.info(f"apply_surface: grease+fire combo triggered! Surface is now 'fire', {len(effects)} saves resolved.")
+        return {"combo_triggered": True, "combo": "grease_fire", "new_type": "fire", "effects": effects}
+
+    # Combo 2: fire + water -> smoke
+    if pair == frozenset({"fire", "water"}):
+        surface["type"] = None
+        surface["duration"] = 0
+        combat_state["smoke_active"] = True
+        combat_state["smoke_duration"] = 3
+        logger.info("apply_surface: fire+water combo triggered! Surface extinguished, smoke active for 3 rounds.")
+        return {
+            "combo_triggered": True,
+            "combo": "fire_water",
+            "new_type": None,
+            "smoke_active": True,
+            "effects": [],
+        }
+
+    # Non-combo pair: overwrite
+    surface["type"] = surface_type
+    surface["duration"] = duration
+    return {"combo_triggered": False, "new_type": surface_type, "effects": []}
+
+
+def trigger_lightning_surface_reaction(combat_state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Trigger water + lightning reaction when lightning damage hits a room with a 'water' surface.
+    Sets room_surface to 'electrified_water' for 3 rounds.
+    All living combatants roll CON save vs DC 13.
+    On fail: take 1d6 lightning damage and become 'dazed' for 1 round.
+    If room_surface is not 'water', this is a safe no-op.
+    """
+    surface = combat_state.setdefault("room_surface", {"type": None, "duration": 0})
+    current = surface.get("type")
+
+    if current != "water":
+        logger.debug(f"trigger_lightning_surface_reaction: current surface is '{current}' (not 'water') — no-op.")
+        return {"combo_triggered": False, "new_type": current, "effects": []}
+
+    surface["type"] = "electrified_water"
+    surface["duration"] = 3
+    effects: List[Dict[str, Any]] = []
+
+    living = [c for c in _get_all_combatants(combat_state) if c.get("hp", {}).get("current", 0) > 0]
+    for c in living:
+        roll = _roll_d20()
+        mod = _get_stat_mod(c, "CON")
+        total = roll + mod
+        save_success = (total >= 13)
+
+        if not save_success:
+            dmg = roll_dice("1d6")
+            c_hp = c.setdefault("hp", {"current": 1, "max": 1})
+            c_hp["current"] = max(0, c_hp["current"] - dmg)
+            apply_condition(c, "dazed", 1)
+            effects.append({
+                "combatant_id": c.get("id"),
+                "save_stat": "CON",
+                "save_roll": roll,
+                "save_total": total,
+                "save_dc": 13,
+                "save_success": False,
+                "damage": dmg,
+                "damage_type": "lightning",
+                "condition_applied": "dazed",
+            })
+        else:
+            effects.append({
+                "combatant_id": c.get("id"),
+                "save_stat": "CON",
+                "save_roll": roll,
+                "save_total": total,
+                "save_dc": 13,
+                "save_success": True,
+                "damage": 0,
+            })
+
+    logger.info(f"trigger_lightning_surface_reaction: electrified_water combo triggered! {len(effects)} saves resolved.")
+    return {"combo_triggered": True, "combo": "water_lightning", "new_type": "electrified_water", "effects": effects}
+
+
+def tick_surface(combat_state: Dict[str, Any]) -> None:
+    """
+    Decrement room_surface duration by 1 at the end of each round.
+    If duration reaches 0, resets to {"type": None, "duration": 0}.
+    Also decrements smoke_duration and resets smoke_active when expired.
+    """
+    surface = combat_state.setdefault("room_surface", {"type": None, "duration": 0})
+    if surface.get("duration", 0) > 0:
+        surface["duration"] -= 1
+        if surface["duration"] <= 0:
+            surface["type"] = None
+            surface["duration"] = 0
+
+    if combat_state.get("smoke_duration", 0) > 0:
+        combat_state["smoke_duration"] -= 1
+        if combat_state["smoke_duration"] <= 0:
+            combat_state["smoke_active"] = False
+            combat_state["smoke_duration"] = 0
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -364,6 +572,9 @@ def start_combat(
         "round_log":        [],         # accumulated results for this round
         "status":           "active",   # 'active' | 'ended'
         "outcome":          None,       # filled by check_combat_end()
+        "room_surface":     {"type": None, "duration": 0},
+        "smoke_active":     False,
+        "smoke_duration":   0,
     }
 
     world_state["combat_state"] = combat_state
@@ -410,6 +621,7 @@ def _player_attacks(player_state: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "damage": effects.get("damage", "1d4"),
                     "damage_type": effects.get("damage_type", "slashing"),
                     "applies_condition": effects.get("applies_condition", None),
+                    "ranged": info.get("ranged", False) or effects.get("ranged", False),
                 }
                 equipped_weapons.append(attack)
 
@@ -419,7 +631,7 @@ def _player_attacks(player_state: Dict[str, Any]) -> List[Dict[str, Any]]:
     unarmed_bonus = prof + str_mod
     return [
         {"name": "Unarmed Strike", "attack_bonus": unarmed_bonus, "damage": "1+0",
-         "damage_type": "bludgeoning", "applies_condition": None}
+         "damage_type": "bludgeoning", "applies_condition": None, "ranged": False}
     ]
 
 
@@ -468,23 +680,25 @@ def resolve_attack(
     attacker: Dict[str, Any],
     target: Dict[str, Any],
     attack: Dict[str, Any],
+    combat_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Resolve a single attack from attacker → target.
     Python decides hit/miss, damage, crits, fumbles, and conditions.
     The LLM only narrates the outcome — never decides it.
 
-    Conditions that affect this roll (spec Section 20):
-    - Attacker has 'poisoned' or 'restrained': attack roll made with disadvantage.
+    Conditions that affect this roll (spec Section 20 & Phase 11.1):
+    - Attacker has 'poisoned', 'restrained', 'exhausted', 'frightened', or 'dazed': attack roll made with disadvantage.
     - Target has 'prone' or 'restrained': attack roll made with advantage.
     - Attacker has 'stunned': turn is skipped (caller should check before calling).
-    - 'frightened': cannot_approach_source — simplified to disadvantage for v1.
+    - Room has 'smoke_active': ranged attacks suffer disadvantage.
 
     Args:
         attacker: combatant dict (has stats, active_conditions, attacks).
         target:   combatant dict (has hp, ac, active_conditions).
         attack:   one entry from attacker["attacks"] (name, attack_bonus, damage,
-                  damage_type, applies_condition).
+                  damage_type, applies_condition, ranged).
+        combat_state: optional live combat_state dict for room-level effects (surfaces, smoke).
 
     Returns:
         result dict with keys:
@@ -505,6 +719,13 @@ def resolve_attack(
     if "poisoned" in attacker_conditions or "restrained" in attacker_conditions or "exhausted" in attacker_conditions:
         has_disadvantage = True
     if "frightened" in attacker_conditions:
+        has_disadvantage = True
+    if "dazed" in attacker_conditions:
+        has_disadvantage = True
+
+    # Smoke: ranged attacks against targets in this room suffer disadvantage
+    is_ranged = attack.get("ranged", False) or any(k in attack.get("name", "").lower() for k in ("bow", "crossbow", "ranged"))
+    if is_ranged and combat_state and combat_state.get("smoke_active"):
         has_disadvantage = True
 
     # Advantage and disadvantage cancel each other out (5e rule)
@@ -555,6 +776,12 @@ def resolve_attack(
             apply_condition(target, cond, duration=2)
             condition_applied = cond
 
+        # ── Trigger lightning surface reaction if lightning damage in water ───
+        if damage > 0 and attack.get("damage_type") == "lightning" and combat_state:
+            surface = combat_state.get("room_surface", {})
+            if surface.get("type") == "water":
+                trigger_lightning_surface_reaction(combat_state)
+
     target_downed = target.get("hp", {}).get("current", 1) <= 0
 
     result = {
@@ -591,6 +818,7 @@ def resolve_attack(
 def resolve_enemy_turn(
     enemy: Dict[str, Any],
     targets: List[Dict[str, Any]],
+    combat_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Resolve an enemy's turn: pick a target and attack with the first non-None attack.
@@ -600,6 +828,7 @@ def resolve_enemy_turn(
     Args:
         enemy:   the enemy combatant dict.
         targets: list of potential targets (player + companions), all alive.
+        combat_state: optional live combat_state dict.
 
     Returns:
         result dict from resolve_attack, or a 'skip' result if stunned or no targets.
@@ -620,12 +849,13 @@ def resolve_enemy_turn(
         return {"attacker_id": enemy["id"], "attacker_name": enemy.get("name", ""),
                 "skipped": True, "reason": "no_attacks"}
 
-    return resolve_attack(enemy, target, attacks[0])
+    return resolve_attack(enemy, target, attacks[0], combat_state=combat_state)
 
 
 def resolve_companion_turn(
     companion: Dict[str, Any],
     enemies: List[Dict[str, Any]],
+    combat_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Resolve a companion's turn: attack the lowest-HP living enemy.
@@ -634,6 +864,7 @@ def resolve_companion_turn(
     Args:
         companion: the companion combatant dict.
         enemies:   list of enemy combatants.
+        combat_state: optional live combat_state dict.
 
     Returns:
         result dict from resolve_attack, or a 'skip' result.
@@ -655,7 +886,7 @@ def resolve_companion_turn(
         return {"attacker_id": companion["id"], "attacker_name": companion.get("name", ""),
                 "skipped": True, "reason": "no_attacks"}
 
-    return resolve_attack(companion, target, attacks[0])
+    return resolve_attack(companion, target, attacks[0], combat_state=combat_state)
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -949,10 +1180,10 @@ def resolve_round(
             living_targets = ([player_c] if player_alive else []) + [
                 comp for comp in companions if comp.get("hp", {}).get("current", 0) > 0
             ]
-            result = resolve_enemy_turn(combatant, living_targets)
+            result = resolve_enemy_turn(combatant, living_targets, combat_state=combat_state)
         else:
             # companion side — targets living enemies
-            result = resolve_companion_turn(combatant, enemies)
+            result = resolve_companion_turn(combatant, enemies, combat_state=combat_state)
 
         round_results.append(result)
 
@@ -978,8 +1209,9 @@ def resolve_round(
     significant  = classified["significant"]
     routine      = classified["routine"]
 
-    # ── Tick conditions (end of round) ────────────────────────────────────────
+    # ── Tick conditions & surfaces (end of round) ────────────────────────────
     tick_conditions(combat_state)
+    tick_surface(combat_state)
 
     # ── Increment round counter ───────────────────────────────────────────────
     combat_state["round"] += 1

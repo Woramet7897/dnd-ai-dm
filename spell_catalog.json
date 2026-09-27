@@ -117,5 +117,14 @@
     "effect": {"damage": "1d10", "damage_type": "fire"},
     "slot_cost": 0,
     "description": "You hurl a mote of fire at a creature. Make a ranged spell attack. On a hit, 1d10 fire damage."
+  },
+  "shocking_grasp": {
+    "name": "Shocking Grasp",
+    "level": 0,
+    "class": ["Wizard"],
+    "type": "attack_roll",
+    "effect": {"damage": "1d8", "damage_type": "lightning"},
+    "slot_cost": 0,
+    "description": "Lightning springs from your hand to deliver a shock to a creature you try to touch. Make a melee spell attack. On a hit, 1d8 lightning damage."
   }
 }

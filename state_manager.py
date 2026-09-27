@@ -1142,6 +1142,12 @@ def resolve_spell_save(
             damage = _roll_dice(eff["damage"])
             target_hp = target.setdefault("hp", {"current": 10, "max": 10})
             target_hp["current"] = max(0, target_hp.get("current", 0) - damage)
+
+            if damage > 0 and eff.get("damage_type") == "lightning" and combat_state:
+                surface = combat_state.get("room_surface", {})
+                if surface.get("type") == "water":
+                    import combat_manager
+                    combat_manager.trigger_lightning_surface_reaction(combat_state)
         if spell.get("on_fail_extra"):
             condition_applied = spell["on_fail_extra"]
 
@@ -1166,6 +1172,7 @@ def resolve_spell_attack(
     caster: Dict[str, Any],
     target: Dict[str, Any],
     spell: Dict[str, Any],
+    combat_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Spec Section 18b / PART 4b:
@@ -1214,6 +1221,12 @@ def resolve_spell_attack(
         target_hp = target.setdefault("hp", {"current": 10, "max": 10})
         target_hp["current"] = max(0, target_hp.get("current", 0) - damage)
 
+        if damage > 0 and eff.get("damage_type") == "lightning" and combat_state:
+            surface = combat_state.get("room_surface", {})
+            if surface.get("type") == "water":
+                import combat_manager
+                combat_manager.trigger_lightning_surface_reaction(combat_state)
+
     return {
         "caster_name": caster.get("name", "Caster"),
         "target_name": target.get("name", "Target"),
@@ -1254,11 +1267,12 @@ def cast_spell(
             return {"success": False, "reason": f"No level {lvl} spell slots remaining."}
         slot_info["current"] -= 1
 
+    combat_state = world_state.get("combat_state") if world_state else None
     s_type = spell.get("type")
     if s_type == "attack_save":
-        res = resolve_spell_save(caster, target, spell, character_state)
+        res = resolve_spell_save(caster, target, spell, character_state, combat_state=combat_state)
     elif s_type == "attack_roll":
-        res = resolve_spell_attack(caster, target, spell)
+        res = resolve_spell_attack(caster, target, spell, combat_state=combat_state)
     elif s_type == "heal":
         eff = spell.get("effect", {})
         heal_val = _roll_dice(eff.get("heal", "1d4+3"))
