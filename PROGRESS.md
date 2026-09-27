@@ -1,6 +1,25 @@
 # PROGRESS.md — do not delete, read this first every session
 
-Last updated: 2026-09-27 (Phase 14.2 & Hotfix complete — 20/20 test suites (475 tests) pass WITH internet access to huggingface.co for the sentence-transformers model download; 18/20 (418 tests) if that model isn't cached/reachable — the 2 failures are phase5_tests.py and one test in phase10_tests.py, both OSError on the HF download, not code bugs.)
+Last updated: 2026-09-28 (Phase 14.2, Hotfix & 5 Architectural Gaps Resolved — 20/20 test suites (477 tests) pass WITH internet access to huggingface.co for the sentence-transformers model download; 18/20 (420 tests) if that model isn't cached/reachable — the 2 failures are phase5_tests.py and one test in phase10_tests.py, both OSError on the HF download, not code bugs.)
+
+## Architectural Gaps & Defects Resolution (app.py & Systems Integration)
+
+1. **Missing `Tuple` & `Union` import in `app.py`**: Added `Tuple, Union` to `from typing import ...` in `app.py`, ensuring full cross-Python version compatibility and eliminating NameError risks on annotation evaluation.
+2. **Interactive Objects in Exploration & Combat**:
+   - Added `interactive_objects` to static catalog `dungeon_data.json` (`ruined_mill`, `goblin_camp`, `old_bridge`).
+   - Implemented `dungeon_manager.interact_with_object()` which copies room state to `world_state["dynamic_rooms"]`, sets `used: true`, applies damage/surfaces (grease/fire) in combat, and persists changes.
+   - Wired interactive object buttons in `app.py` under both Exploration Panel and Combat Tactics.
+3. **Inspiration Reroll on Failed Rolls**:
+   - Implemented BG3/5e-style failure response: when an ability check fails (via manual check or extraction `requires_roll`), records `pending_inspiration_reroll` in session state.
+   - Renders a prominent `[✨ ใช้ 1 Inspiration เพื่อทอยใหม่]` button in the action panel allowing players to spend inspiration to roll a second d20 and take the higher result.
+4. **Short / Long Rest & Ambush Risk Outside Town**:
+   - Added outdoors camp toggle (`🏕️ Set Up Camp` / `🎒 Pack Up Camp`) allowing players to trigger Camp Companion Dialogue and Camp Cooking anywhere outside combat.
+   - Added `Take Long Rest (Camp Outdoors)` with 25% ambush risk in unsafe rooms, triggering combat via `combat_manager.start_combat()`.
+   - Added short rest with 15% ambush risk in unsafe outdoor/dungeon rooms.
+5. **Guard Against Movement While Imprisoned**:
+   - Enforced `is_locked_up = (player.get("status") == "captive" or bool(player.get("crime_state", {}).get("imprisoned")) or bool(world.get("is_imprisoned")))` in `app.py` movement panel.
+   - Added programmatic safeguard in `dungeon_manager.move_player()` to completely reject movement while captive or imprisoned.
+- **Verification**: Added 2 new integration tests to `tests/test_app_integrations.py` (total 14/14 passed); 20/20 test suites, 477 total tests passed with zero regressions.
 
 ## Hotfix — Missing `Union` Import in `dungeon_manager.py` and `state_manager.py` (Root-Cause Analysis)
 

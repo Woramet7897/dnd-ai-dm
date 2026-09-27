@@ -323,6 +323,41 @@ class TestAppIntegrations(unittest.TestCase):
         self.assertFalse(atk_res.get("success"))
         self.assertIn("error", res_round)
 
+    def test_interact_with_object_exploration_and_combat(self):
+        """DoD: interact_with_object marks used=True, triggers surface/damage in combat, and works out of combat."""
+        # Exploration interaction in ruined_mill
+        res_exp = dungeon_manager.interact_with_object(self.world, "ruined_mill", "rotten_support_beam", character_state=self.fighter)
+        self.assertTrue(res_exp["success"])
+        self.assertTrue(res_exp["object"]["used"])
+
+        # Second interaction should fail (already used)
+        res_exp2 = dungeon_manager.interact_with_object(self.world, "ruined_mill", "rotten_support_beam", character_state=self.fighter)
+        self.assertFalse(res_exp2["success"])
+
+        # Combat interaction with chandelier (deals damage + grease surface)
+        cs = combat_manager.start_combat(["goblin_scout"], self.fighter, self.world)
+        res_c = dungeon_manager.interact_with_object(self.world, "ruined_mill", "chandelier", combat_state=cs, character_state=self.fighter)
+        self.assertTrue(res_c["success"])
+        self.assertEqual(cs.get("room_surface", {}).get("type"), "grease")
+        # Check enemy took damage from chandelier (2d6)
+        enemy_hp = cs["enemies"][0]["hp"]["current"]
+        self.assertLess(enemy_hp, 10)
+
+    def test_move_player_blocked_when_imprisoned_or_captive(self):
+        """DoD: move_player returns False when character is captive or has crime_state.imprisoned."""
+        self.fighter["status"] = "captive"
+        ok, msg, _ = dungeon_manager.move_player("north", self.world, self.fighter)
+        self.assertFalse(ok)
+        self.assertIn("imprisoned or held captive", msg)
+
+        # Test crime_state.imprisoned
+        self.fighter["status"] = "normal"
+        self.fighter["crime_state"] = {"imprisoned": True}
+        ok2, msg2, _ = dungeon_manager.move_player("north", self.world, self.fighter)
+        self.assertFalse(ok2)
+        self.assertIn("imprisoned or held captive", msg2)
+
 
 if __name__ == "__main__":
     unittest.main()
+

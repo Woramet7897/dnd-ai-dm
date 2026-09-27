@@ -12,7 +12,7 @@ import logging
 import math
 import os
 import streamlit as st
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import character_creator
 import combat_manager
@@ -868,23 +868,73 @@ def render_sidebar():
     # ── Pinned Bottom Controls (Rest & Save/Exit) ──────────────────────────────
     st.sidebar.markdown("---")
     if not combat_active:
+        # Camp Setup / Packing toggle for outdoors
+        if current_room and current_room.get("type") != "town":
+            is_camp = world.get("at_camp", False)
+            if not is_camp:
+                if st.sidebar.button("🏕️ Set Up Camp (ตั้งแคมป์)", use_container_width=True):
+                    world["at_camp"] = True
+                    auto_save()
+                    st.toast("ตั้งแคมป์เรียบร้อยแล้ว — สามารถพูดคุยกับเพื่อนร่วมทางหรือทำอาหารได้")
+                    st.rerun()
+            else:
+                if st.sidebar.button("🎒 Pack Up Camp (เก็บแคมป์เดินทางต่อ)", use_container_width=True):
+                    world["at_camp"] = False
+                    auto_save()
+                    st.toast("เก็บแคมป์แล้ว พร้อมเดินทางต่อ")
+                    st.rerun()
+
+        # Short Rest
         if st.sidebar.button("☕ Take Short Rest (1 hr)", use_container_width=True):
-            state_manager.perform_short_rest(player, world)
+            is_unsafe = current_room and (not current_room.get("is_safe")) and (current_room.get("type") != "town") and (current_room.get("id") not in world.get("cleared_rooms", []))
+            enc_table = current_room.get("encounter_table", ["wolf"]) if current_room else ["wolf"]
+            import random
+            if is_unsafe and random.random() < 0.15 and enc_table:
+                ambush_enemy = random.choice(enc_table)
+                combat_manager.start_combat([ambush_enemy], player, world)
+                st.session_state["narrative_log"].append({
+                    "role": "assistant",
+                    "content": f"🚨 **Ambush!** ขณะกำลังนั่งพักผ่อนสั้นๆ ศัตรู **{ambush_enemy.replace('_', ' ').title()}** พุ่งเข้าจู่โจมคุณอย่างกะทันหัน!"
+                })
+            else:
+                state_manager.perform_short_rest(player, world)
+                st.session_state["narrative_log"].append({
+                    "role": "assistant",
+                    "content": "You take a short rest, catching your breath and checking your gear. Weapon actions recharged!"
+                })
             auto_save()
-            st.session_state["narrative_log"].append({
-                "role": "assistant",
-                "content": "You take a short rest, catching your breath and checking your gear. Weapon actions recharged!"
-            })
             st.rerun()
 
+        # Long Rest
         if current_room and current_room.get("type") == "town":
-            if st.sidebar.button("⛺ Take Long Rest (Town)", use_container_width=True):
+            if st.sidebar.button("⛺ Take Long Rest (Town Inn)", use_container_width=True):
                 state_manager.long_rest(world, player)
                 auto_save()
                 st.session_state["narrative_log"].append({
                     "role": "assistant",
                     "content": f"You spend the night resting comfortably at Riverside Village. HP fully restored! Time is now **Day {world['game_time']['day']}, Morning**."
                 })
+                st.rerun()
+        else:
+            if st.sidebar.button("⛺ Take Long Rest (Camp Outdoors)", use_container_width=True):
+                is_unsafe = current_room and (not current_room.get("is_safe")) and (current_room.get("id") not in world.get("cleared_rooms", []))
+                enc_table = current_room.get("encounter_table", ["wolf"]) if current_room else ["wolf"]
+                import random
+                if is_unsafe and random.random() < 0.25 and enc_table:
+                    ambush_enemy = random.choice(enc_table)
+                    combat_manager.start_combat([ambush_enemy], player, world)
+                    st.session_state["narrative_log"].append({
+                        "role": "assistant",
+                        "content": f"🚨 **Night Ambush!** กลางดึกขณะกำลังหลับพักแรม กลิ่นคาวดึงดูด **{ambush_enemy.replace('_', ' ').title()}** มาจู่โจมแคมป์ของคุณ!"
+                    })
+                else:
+                    state_manager.long_rest(world, player)
+                    world["at_camp"] = True
+                    st.session_state["narrative_log"].append({
+                        "role": "assistant",
+                        "content": f"⛺ You set up camp and rest safely through the night. HP fully restored! Time is now **Day {world['game_time']['day']}, Morning**."
+                    })
+                auto_save()
                 st.rerun()
 
     col_save, col_exit = st.sidebar.columns(2)
@@ -1034,6 +1084,10 @@ def render_playing_view():
         room_hazards = cs.get("room_hazards", [])
         if room_hazards:
             st.warning(f"⚠️ **Environmental Hazards: {', '.join(h.replace('_', ' ').title() for h in room_hazards)}**")
+        c_objs = current_room.get("interactive_objects", []) if current_room else []
+        unused_c_objs = [o for o in c_objs if not o.get("used")]
+        if unused_c_objs:
+            st.info(f"🎯 **Interactive Objects in Room: {', '.join(o.get('name', o.get('id')) for o in unused_c_objs)}**")
 
         col_c1, col_c2 = st.columns([2, 1])
 
@@ -1218,6 +1272,34 @@ def render_playing_view():
             else:
                 button_label = "⚔️ Attack & End Round"
 
+            if unused_c_objs and player_alive:
+                st.markdown("###### 🎯 Environmental Tactics")
+                for c_obj in unused_c_objs:
+                    c_obj_id = c_obj.get("id")
+                    c_obj_name = c_obj.get("name", c_obj_id)
+                    col_cot, col_cob = st.columns([2, 1])
+                    with col_cot:
+                        st.caption(f"**{c_obj_name}**: {c_obj.get('description', '')}")
+                    with col_cob:
+                        if st.button(f"🎯 ใช้งาน", key=f"c_obj_{c_obj_id}_{round_num}", use_container_width=True, disabled=btn_disabled):
+                            res_io = dungeon_manager.interact_with_object(
+                                world, current_room.get("id"), c_obj_id, combat_state=cs, character_state=player
+                            )
+                            st.session_state["narrative_log"].append({
+                                "role": "assistant",
+                                "content": f"🎯 **Environmental Tactic:** {res_io.get('message')}"
+                            })
+                            c_ended, c_outcome = combat_manager.check_combat_end(cs, player, world)
+                            if not c_ended:
+                                res_rnd = combat_manager.resolve_round(cs, world_state=world)
+                                if res_rnd.get("narration_block"):
+                                    st.session_state["narrative_log"].append({
+                                        "role": "assistant",
+                                        "content": res_rnd["narration_block"]
+                                    })
+                            auto_save()
+                            st.rerun()
+
             if st.button(button_label, disabled=btn_disabled, use_container_width=True, type="primary"):
                 # 1. Resolve player's combat action & round
                 player_attack_result, res_round = resolve_player_combat_action(
@@ -1304,8 +1386,18 @@ def render_playing_view():
         col_nav, col_act = st.columns([1, 2])
 
         with col_nav:
-            if player.get("status") == "captive":
-                cap_reason = player.get("captivity_reason", "combat_defeat")
+            is_locked_up = (
+                player.get("status") == "captive"
+                or bool(player.get("crime_state", {}).get("imprisoned"))
+                or bool(world.get("is_imprisoned"))
+            )
+            if is_locked_up:
+                cap_reason = player.get("captivity_reason")
+                if not cap_reason:
+                    if player.get("crime_state", {}).get("imprisoned") or world.get("is_imprisoned"):
+                        cap_reason = "crime"
+                    else:
+                        cap_reason = "combat_defeat"
                 if cap_reason == "crime":
                     st.markdown("##### ⚖️ Imprisoned in Town Jail")
                     days_left = player.get("prison_days_left", 1)
@@ -1386,6 +1478,7 @@ def render_playing_view():
                             if st.button(label, key=f"move_{dir_key}", use_container_width=True):
                                 ok_m, msg_m, new_room = dungeon_manager.move_player(dir_key, world, player)
                                 if ok_m and new_room:
+                                    st.session_state.pop("pending_inspiration_reroll", None)
                                     st.session_state["last_action_msg"] = msg_m
                                     st.session_state["narrative_log"].append({
                                         "role": "user",
@@ -1398,6 +1491,41 @@ def render_playing_view():
 
         with col_act:
             st.markdown("##### 🎭 Actions & Interaction")
+
+            # Inspiration Reroll Prompt (BG3 style reroll on failed check)
+            pending_reroll = st.session_state.get("pending_inspiration_reroll")
+            if pending_reroll and state_manager.get_inspiration(player) > 0:
+                st.warning(
+                    f"🎲 **ผลการทอยล่าสุดล้มเหลว ({pending_reroll['stat']} DC {pending_reroll['dc']})**: "
+                    f"ทอยได้ {pending_reroll['original_roll']} + mod {pending_reroll['modifier']} = **{pending_reroll['original_total']}** ❌ "
+                    f"(คุณมี **{state_manager.get_inspiration(player)} Inspiration**)"
+                )
+                col_reroll_btn, col_reroll_skip = st.columns([2, 1])
+                with col_reroll_btn:
+                    if st.button("✨ ใช้ 1 Inspiration เพื่อทอยใหม่ (Reroll)", type="primary", use_container_width=True, key="btn_insp_reroll"):
+                        if state_manager.spend_inspiration(player):
+                            reroll_die = state_manager._roll_d20()
+                            final_die = max(pending_reroll["original_roll"], reroll_die)
+                            new_total = final_die + pending_reroll["modifier"] + pending_reroll.get("proficiency", 0) + pending_reroll.get("bonus", 0)
+                            is_crit = (final_die == 20)
+                            is_fumble = (final_die == 1)
+                            new_succ = True if is_crit else (False if is_fumble else (new_total >= pending_reroll["dc"]))
+                            res_str = "SUCCESS ✅" if new_succ else "FAILURE ❌"
+                            st.session_state["narrative_log"].append({
+                                "role": "assistant",
+                                "content": (
+                                    f"✨ **Inspiration Reroll ({pending_reroll['stat']} DC {pending_reroll['dc']})**: "
+                                    f"ทอยใหม่ได้ {reroll_die} (เดิม {pending_reroll['original_roll']} → เลือก {final_die}) "
+                                    f"+ mod {pending_reroll['modifier']} = **{new_total}** → **{res_str}**"
+                                )
+                            })
+                            del st.session_state["pending_inspiration_reroll"]
+                            auto_save()
+                            st.rerun()
+                with col_reroll_skip:
+                    if st.button("ข้ามการทอยใหม่", use_container_width=True, key="btn_skip_reroll"):
+                        del st.session_state["pending_inspiration_reroll"]
+                        st.rerun()
 
             # Contextual Action Suggestions (Sub-phase 14.1 / Module D)
             suggestions = st.session_state.get("action_suggestions") or list(llm_handler.DEFAULT_ACTION_SUGGESTIONS)
@@ -1421,6 +1549,7 @@ def render_playing_view():
                 action_to_process = user_action.strip()
 
             if action_to_process:
+                st.session_state.pop("pending_inspiration_reroll", None)
                 st.session_state["narrative_log"].append({"role": "user", "content": action_to_process})
 
                 # 1. Narrative Call
@@ -1476,6 +1605,20 @@ def render_playing_view():
                             "role": "assistant",
                             "content": f"🎲 **Automatic Check ({diff.capitalize()} {stat} DC {chk_res['dc']})**: Rolled {chk_res['roll']} + {chk_res['modifier']} = **{chk_res['total']}** → **{succ_str}**"
                         })
+                        if not chk_res["success"] and state_manager.get_inspiration(player) > 0:
+                            st.session_state["pending_inspiration_reroll"] = {
+                                "stat": stat,
+                                "difficulty": diff,
+                                "dc": chk_res["dc"],
+                                "modifier": chk_res["modifier"],
+                                "proficiency": chk_res.get("proficiency", 0),
+                                "bonus": chk_res.get("bonus", 0),
+                                "original_roll": chk_res["roll"],
+                                "original_total": chk_res["total"],
+                                "skill": chk_res.get("skill"),
+                            }
+                        else:
+                            st.session_state.pop("pending_inspiration_reroll", None)
 
                 st.session_state["narrative_log"].append({"role": "assistant", "content": narrative_text})
                 st.session_state["history_buffer"].append({"role": "user", "content": action_to_process})
@@ -1533,6 +1676,30 @@ def render_playing_view():
                         auto_save()
                         st.rerun()
 
+            # Interactive Objects in Exploration (Spec Module A §1 & Module C)
+            interactive_objs = current_room.get("interactive_objects", []) if current_room else []
+            unused_objs = [obj for obj in interactive_objs if not obj.get("used")]
+            if unused_objs:
+                st.markdown("##### 🎯 Environmental Objects")
+                for obj in unused_objs:
+                    obj_id = obj.get("id")
+                    obj_name = obj.get("name", obj_id)
+                    obj_desc = obj.get("description", "")
+                    col_obj_txt, col_obj_act = st.columns([3, 1])
+                    with col_obj_txt:
+                        st.caption(f"**{obj_name}**: {obj_desc}")
+                    with col_obj_act:
+                        if st.button(f"🎯 ใช้งาน {obj_name}", key=f"exp_obj_{obj_id}", use_container_width=True):
+                            res_obj = dungeon_manager.interact_with_object(world, room_id, obj_id, character_state=player)
+                            if res_obj.get("success"):
+                                st.toast(f"ใช้งาน {obj_name} สำเร็จ!")
+                                st.session_state["narrative_log"].append({
+                                    "role": "assistant",
+                                    "content": f"🎯 **Interactive Object:** {res_obj['message']}"
+                                })
+                                auto_save()
+                                st.rerun()
+
             # Manual Ability Check, Spells & Combat Launchers
             known_spells = player.get("known_spells", [])
             has_ooc_spells = bool(known_spells)
@@ -1570,6 +1737,20 @@ def render_playing_view():
                             f"Rolled {chk_res['roll']} + mod {chk_res['modifier']} = **{chk_res['total']}** → **{succ_str}**{insp_tag}"
                         )
                         st.session_state["narrative_log"].append({"role": "assistant", "content": roll_msg})
+                        if not chk_res["success"] and state_manager.get_inspiration(player) > 0:
+                            st.session_state["pending_inspiration_reroll"] = {
+                                "stat": chk_stat,
+                                "difficulty": chk_diff,
+                                "dc": chk_res["dc"],
+                                "modifier": chk_res["modifier"],
+                                "proficiency": chk_res.get("proficiency", 0),
+                                "bonus": chk_res.get("bonus", 0),
+                                "original_roll": chk_res["roll"],
+                                "original_total": chk_res["total"],
+                                "skill": chk_skill.strip() if chk_skill else None,
+                            }
+                        else:
+                            st.session_state.pop("pending_inspiration_reroll", None)
                         auto_save()
                         st.rerun()
 

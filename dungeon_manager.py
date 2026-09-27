@@ -215,6 +215,15 @@ def move_player(
     if direction not in _VALID_DIRECTIONS:
         return False, f"'{direction}' is not a valid direction. Use north, south, east, or west.", None
 
+    if character_state:
+        is_locked_up = (
+            character_state.get("status") == "captive"
+            or bool(character_state.get("crime_state", {}).get("imprisoned"))
+            or bool(world_state.get("is_imprisoned"))
+        )
+        if is_locked_up:
+            return False, "Cannot move — you are imprisoned or held captive! You must escape first.", None
+
     current_room = get_current_room(world_state)
     if current_room is None:
         return False, "Cannot move — current location is unknown.", None
@@ -915,5 +924,76 @@ def is_camp_context(world_state: Optional[Dict[str, Any]] = None) -> bool:
             return True
 
     return False
+
+
+def interact_with_object(
+    world_state: Dict[str, Any],
+    room_id: str,
+    object_id: str,
+    combat_state: Optional[Dict[str, Any]] = None,
+    character_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Interact with an environmental object in a room (exploration or combat).
+    Supports triggering damage to enemies, setting surfaces, knocking prone, etc.
+    """
+    room = _get_room(room_id, world_state)
+    if not room:
+        return {"success": False, "message": f"Room '{room_id}' not found."}
+
+    # Ensure dynamic copy of room exists so object state mutation is saved
+    if room_id not in world_state.get("dynamic_rooms", {}):
+        world_state.setdefault("dynamic_rooms", {})[room_id] = copy.deepcopy(room)
+    room = world_state["dynamic_rooms"][room_id]
+
+    objs = room.get("interactive_objects", [])
+    target_obj = next((o for o in objs if o.get("id") == object_id), None)
+    if not target_obj:
+        return {"success": False, "message": f"Object '{object_id}' not found in room."}
+
+    if target_obj.get("used"):
+        return {"success": False, "message": f"'{target_obj.get('name', object_id)}' has already been used."}
+
+    target_obj["used"] = True
+    obj_name = target_obj.get("name", object_id)
+    msg_parts = [f"You interact with {obj_name}!"]
+
+    # In Combat effects
+    if combat_state:
+        import combat_manager
+        surf = target_obj.get("surface")
+        if surf:
+            combat_manager.apply_surface(combat_state, surf)
+            msg_parts.append(f"A surface of {surf.upper()} spreads across the area!")
+
+        dmg_expr = target_obj.get("damage")
+        if dmg_expr and combat_state.get("enemies"):
+            living_enemies = [e for e in combat_state["enemies"] if e.get("hp", {}).get("current", 0) > 0]
+            if living_enemies:
+                from combat_manager import roll_dice
+                dmg_val = roll_dice(dmg_expr)
+                hit_names = []
+                for enemy in living_enemies:
+                    e_hp = enemy.setdefault("hp", {"current": 10, "max": 10})
+                    e_hp["current"] = max(0, e_hp["current"] - dmg_val)
+                    hit_names.append(enemy.get("name", enemy.get("id", "Enemy")))
+                dmg_type_str = f" {target_obj.get('damage_type')}" if target_obj.get('damage_type') else ""
+                msg_parts.append(f"It crashes down, dealing {dmg_val}{dmg_type_str} damage to {', '.join(hit_names)}!")
+    else:
+        # Out of combat
+        surf = target_obj.get("surface")
+        if surf:
+            msg_parts.append(f"It creates a field of {surf} on the ground.")
+        dmg = target_obj.get("damage")
+        if dmg:
+            msg_parts.append(f"It triggers a heavy impact with {dmg} destructive force!")
+
+    full_msg = " ".join(msg_parts)
+    return {
+        "success": True,
+        "object": target_obj,
+        "message": full_msg,
+    }
+
 
 

@@ -64,7 +64,17 @@
     "npcs": [],
     "is_safe": false,
     "loot": [],
-    "encounter_table": ["bandit", "cultist"]
+    "encounter_table": ["bandit", "cultist"],
+    "interactive_objects": [
+      {
+        "id": "loose_boulder",
+        "name": "หินก้อนใหญ่ริมสะพาน (Loose Boulder)",
+        "description": "ก้อนหินขนาดใหญ่หมิ่นเหม่ริมตลิ่ง สามารถผลักให้กลิ้งกระแทกศัตรูได้",
+        "damage": "2d6",
+        "damage_type": "bludgeoning",
+        "used": false
+      }
+    ]
   },
   "crossroads": {
     "id": "crossroads",
@@ -98,7 +108,26 @@
     "npcs": [],
     "is_safe": false,
     "loot": [{"item_id": "healing_potion", "quantity": 1}],
-    "encounter_table": ["giant_spider", "skeleton", "zombie"]
+    "encounter_table": ["giant_spider", "skeleton", "zombie"],
+    "interactive_objects": [
+      {
+        "id": "chandelier",
+        "name": "โคมไฟระย้าสนิมเขรอะ (Rusted Chandelier)",
+        "description": "โคมไฟระย้าโลหะขนาดใหญ่ห้อยด้วยเชือกเก่า สามารถตัดเชือกให้ร่วงลงมาทับพื้นด้านล่างและสาดคราบน้ำมัน",
+        "damage": "2d6",
+        "damage_type": "bludgeoning",
+        "surface": "grease",
+        "used": false
+      },
+      {
+        "id": "rotten_support_beam",
+        "name": "เสาค้ำผุพัง (Rotten Support Beam)",
+        "description": "เสาไม้ที่พยุงโครงสร้างหลังคาโรงสี หากผลักให้พังจะสร้างซากปรักหักพังทับศัตรู",
+        "damage": "1d8",
+        "damage_type": "bludgeoning",
+        "used": false
+      }
+    ]
   },
   "goblin_camp": {
     "id": "goblin_camp",
@@ -115,7 +144,18 @@
     "npcs": [],
     "is_safe": false,
     "loot": [{"item_id": "gold", "amount_min": 10, "amount_max": 30}, {"item_id": "dagger", "quantity": 1}],
-    "encounter_table": ["goblin_scout", "goblin_warrior", "orc"]
+    "encounter_table": ["goblin_scout", "goblin_warrior", "orc"],
+    "interactive_objects": [
+      {
+        "id": "boiling_cauldron",
+        "name": "หม้อต้มเดือดพล่าน (Boiling Cauldron)",
+        "description": "หม้อเหล็กต้มน้ำซุปเดือดเหนือกองไฟ สามารถคว่ำหม้อราดศัตรูหรือจุดไฟเผาพื้นผิว",
+        "damage": "2d4",
+        "damage_type": "fire",
+        "surface": "fire",
+        "used": false
+      }
+    ]
   },
   "town_jail": {
     "id": "town_jail",
