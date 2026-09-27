@@ -16,7 +16,7 @@ Spec coverage:
 Run: python phase4_tests.py
 """
 import sys, os, random, copy
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import combat_manager as cm
 
@@ -902,8 +902,8 @@ finally:
     os.chdir(original_cwd)
     print(f"  Restored cwd to: {os.getcwd()}")
 
-# Confirm _CATALOG_DIR points to the project dir (contains this script)
-project_dir = os.path.dirname(os.path.abspath(__file__))
+# Confirm _CATALOG_DIR points to the project dir (parent of tests directory)
+project_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 check("Bug 2: combat_manager._CATALOG_DIR == project dir",
       _cm_fresh._CATALOG_DIR == project_dir)
 check("Bug 2: validation._CATALOG_DIR == project dir",

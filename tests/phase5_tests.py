@@ -32,6 +32,8 @@ import shutil
 import sys
 import time
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 PASS = 0
 FAIL = 0
 
@@ -83,13 +85,7 @@ def cleanup_all_dbs() -> None:
     time.sleep(0.3)   # let SQLite flush before we delete
     for path in ALL_TEST_DBS:
         if os.path.exists(path):
-            for attempt in range(6):
-                try:
-                    shutil.rmtree(path)
-                    break
-                except PermissionError:
-                    gc.collect()
-                    time.sleep(0.5 * (attempt + 1))
+            shutil.rmtree(path, ignore_errors=True)
 
 
 # ── Import ────────────────────────────────────────────────────────────────────
