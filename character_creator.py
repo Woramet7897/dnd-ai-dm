@@ -274,6 +274,7 @@ def derive_stats(
         "death_saves": {"success": 0, "fail": 0},
         "status": "normal",
         "active_conditions": [],
+        "currency": {"gp": starting_gold, "sp": 5, "cp": 30},
         "gold": starting_gold,
         "inventory": starting_inventory,
         "weapon_actions_available": True,

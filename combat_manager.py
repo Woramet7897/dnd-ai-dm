@@ -518,7 +518,8 @@ def start_combat(
     player_state.setdefault("death_saves", {"success": 0, "fail": 0})
     player_state.setdefault("status", "normal")
     player_state.setdefault("inventory", [])
-    player_state.setdefault("gold", 0)
+    import state_manager
+    state_manager._ensure_currency(player_state)
     player_state.setdefault("xp_current", 0)
     player_state.setdefault("level", 1)
     player_state.setdefault("proficiency_bonus", 2)
@@ -541,6 +542,7 @@ def start_combat(
         "inventory":        player_state["inventory"],          # SHARED BY REFERENCE
         "spell_slots":      player_state["spell_slots"],        # SHARED BY REFERENCE
         "status":           player_state["status"],
+        "currency":         player_state["currency"],
         "gold":             player_state["gold"],
         "xp_current":       player_state["xp_current"],
         "level":            player_state["level"],
@@ -664,7 +666,7 @@ def sync_player_state(player_c: Dict[str, Any]) -> None:
     if real_state is None or not isinstance(real_state, dict):
         return
 
-    for key in ("gold", "status", "xp_current", "level", "proficiency_bonus", "ac", "weapon_actions_available"):
+    for key in ("currency", "gold", "status", "xp_current", "level", "proficiency_bonus", "ac", "weapon_actions_available"):
         if key in player_c:
             real_state[key] = player_c[key]
 
@@ -1565,7 +1567,7 @@ def check_combat_end(combat_state: Dict[str, Any], world_state: Optional[Dict[st
                         import dungeon_manager
                         dungeon_manager.complete_notice_board_quest(world_state, entry["id"], p_state)
 
-        for key in ("gold", "status", "xp_current", "level", "proficiency_bonus", "ac", "inspiration"):
+        for key in ("currency", "gold", "status", "xp_current", "level", "proficiency_bonus", "ac", "inspiration"):
             if key in p_state:
                 player_c[key] = p_state[key]
         sync_player_state(player_c)

@@ -849,7 +849,8 @@ def complete_notice_board_quest(
     target["status"] = "completed"
     reward = target.get("reward_gold", 0)
     if character_state is not None and reward > 0:
-        character_state["gold"] = character_state.get("gold", 0) + reward
+        import state_manager
+        state_manager.add_currency(character_state, gp=reward)
 
     ql = world_state.get("quest_log", {})
     for q in ql.get("side", []):

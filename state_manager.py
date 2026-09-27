@@ -95,6 +95,130 @@ def _get_shop_catalog() -> Dict[str, Any]:
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# CURRENCY SYSTEM — Tri-Denomination (Copper / Silver / Gold)
+# D&D 5e standard: 1 GP = 10 SP = 100 CP
+# ════════════════════════════════════════════════════════════════════════════════
+
+CP_PER_SP = 10
+SP_PER_GP = 10
+CP_PER_GP = CP_PER_SP * SP_PER_GP  # 100
+
+
+def _ensure_currency(state: Dict[str, Any]) -> Dict[str, int]:
+    """
+    Ensure player state has a 'currency' dict {gp, sp, cp}.
+    Default initial purse: {'gp': 10, 'sp': 5, 'cp': 30}.
+    Migrates legacy 'gold' integer if present and keeps 'gold' in sync.
+    """
+    if "currency" not in state or not isinstance(state["currency"], dict):
+        legacy_gold = state.get("gold", 10)
+        state["currency"] = {"gp": int(legacy_gold), "sp": 5, "cp": 30}
+    cur = state["currency"]
+    cur.setdefault("gp", 10)
+    cur.setdefault("sp", 5)
+    cur.setdefault("cp", 30)
+
+    # Sync if 'gold' was updated directly in tests/external assignment
+    if "gold" in state and state["gold"] != cur["gp"]:
+        cur["gp"] = int(state["gold"])
+    else:
+        state["gold"] = cur["gp"]
+    return cur
+
+
+def get_total_copper(state: Dict[str, Any]) -> int:
+    """Return the player's total wealth converted to copper pieces."""
+    cur = _ensure_currency(state)
+    return cur["gp"] * CP_PER_GP + cur["sp"] * CP_PER_SP + cur["cp"]
+
+
+def _from_copper(total_cp: int) -> Dict[str, int]:
+    """Convert a total copper amount into {gp, sp, cp} breakdown."""
+    total_cp = max(0, total_cp)
+    gp = total_cp // CP_PER_GP
+    remainder = total_cp % CP_PER_GP
+    sp = remainder // CP_PER_SP
+    cp = remainder % CP_PER_SP
+    return {"gp": gp, "sp": sp, "cp": cp}
+
+
+def can_afford(state: Dict[str, Any], *, gp: int = 0, sp: int = 0, cp: int = 0) -> bool:
+    """Check if the player can afford a cost specified in mixed denominations."""
+    cost_cp = gp * CP_PER_GP + sp * CP_PER_SP + cp
+    return get_total_copper(state) >= cost_cp
+
+
+def add_currency(state: Dict[str, Any], *, gp: int = 0, sp: int = 0, cp: int = 0) -> Dict[str, int]:
+    """Add coins to the player's purse. Returns the updated currency dict."""
+    cur = _ensure_currency(state)
+    cur["gp"] += gp
+    cur["sp"] += sp
+    cur["cp"] += cp
+    state["gold"] = cur["gp"]  # keep legacy key in sync
+    return cur
+
+
+def subtract_currency(state: Dict[str, Any], *, gp: int = 0, sp: int = 0, cp: int = 0) -> bool:
+    """
+    Subtract a cost from the player's purse using auto-change.
+    Converts all wealth to copper, subtracts, then re-distributes.
+    Returns True if successful, False if insufficient funds.
+    """
+    _ensure_currency(state)
+    cur = state["currency"]
+    cost_cp = gp * CP_PER_GP + sp * CP_PER_SP + cp
+    total = get_total_copper(state)
+    if total < cost_cp:
+        return False
+
+    # If paying purely in GP and player has enough GP, deduct directly to preserve smaller coins
+    if sp == 0 and cp == 0 and cur["gp"] >= gp:
+        cur["gp"] -= gp
+    else:
+        new_cur = _from_copper(total - cost_cp)
+        state["currency"] = new_cur
+    state["gold"] = state["currency"]["gp"]  # keep legacy key in sync
+    return True
+
+
+def format_currency(state_or_dict: Dict[str, Any]) -> str:
+    """
+    Format currency for display. Accepts either a player state or a currency dict.
+    Returns e.g. '10 GP, 5 SP, 30 CP'. NO EMOJI.
+    """
+    if not isinstance(state_or_dict, dict):
+        return "0 CP"
+    if "currency" in state_or_dict and isinstance(state_or_dict["currency"], dict):
+        cur = state_or_dict["currency"]
+    elif "gp" in state_or_dict or "sp" in state_or_dict or "cp" in state_or_dict:
+        cur = state_or_dict
+    else:
+        cur = {"gp": state_or_dict.get("gold", 10), "sp": 5, "cp": 30}
+
+    parts = []
+    gp = cur.get("gp", 0)
+    sp = cur.get("sp", 0)
+    cp = cur.get("cp", 0)
+    if gp > 0 or (sp == 0 and cp == 0):
+        parts.append(f"{gp} GP")
+    if sp > 0:
+        parts.append(f"{sp} SP")
+    if cp > 0:
+        parts.append(f"{cp} CP")
+    return ", ".join(parts) if parts else "0 CP"
+
+
+def gold_to_mixed_currency(gp_amount: int) -> Dict[str, int]:
+    """
+    Convert a legacy GP integer into a mixed denomination dict.
+    Used for monster drops, quest rewards, etc.
+    E.g. 15 GP -> {gp: 15, sp: 0, cp: 0}
+         0 GP with small amounts -> kept as CP/SP
+    """
+    return {"gp": gp_amount, "sp": 0, "cp": 0}
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # EQUIPMENT & CONSUMABLES SYSTEM (spec Section 7b)
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -406,17 +530,17 @@ def pay_cleric_remove_curse(
     """
     Pay 50 gold at a town cleric to remove curse (Module B §2 / Phase 12.2).
     """
-    gold = character_state.get("gold", 0)
-    if gold < 50:
-        return False, f"Insufficient gold. Town cleric requires 50 GP to remove a curse (have {gold} GP)."
+    _ensure_currency(character_state)
+    if not can_afford(character_state, gp=50):
+        return False, f"Insufficient gold. Town cleric requires 50 GP to remove a curse (have {format_currency(character_state)})."
 
-    character_state["gold"] = gold - 50
+    subtract_currency(character_state, gp=50)
     ok, msg = remove_curse(character_state, item_id)
     if ok:
         logger.info(f"pay_cleric_remove_curse: paid 50 GP to cleric. {msg}")
         return True, "Paid 50 GP to the town cleric. Curse has been lifted!"
     # Refund gold on failure
-    character_state["gold"] = gold
+    add_currency(character_state, gp=50)
     return False, msg
 
 
@@ -1061,7 +1185,12 @@ def apply_state_updates(updates: Dict[str, Any], state: Dict[str, Any],
 
     # ── Gold change ───────────────────────────────────────────────────────────
     if "gold_change" in updates:
-        state["gold"] = max(0, state.get("gold", 0) + updates["gold_change"])
+        _ensure_currency(state)
+        change = updates["gold_change"]
+        if change >= 0:
+            add_currency(state, gp=change)
+        else:
+            subtract_currency(state, gp=abs(change))
 
     # ── Add item ──────────────────────────────────────────────────────────────
     if "add_item_id" in updates:
@@ -1405,11 +1534,10 @@ def buy_item(
     sell_mult = shop.get("sell_multiplier", 1.0)
     cost = math.ceil(item_info.get("value_gold", 0) * sell_mult)
 
-    current_gold = character_state.get("gold", 0)
-    if current_gold < cost:
-        return False, f"Not enough gold. Costs {cost} GP, you have {current_gold} GP."
-
-    character_state["gold"] = current_gold - cost
+    _ensure_currency(character_state)
+    if not can_afford(character_state, gp=cost):
+        return False, f"Not enough gold. Costs {cost} GP, you have {format_currency(character_state)}."
+    subtract_currency(character_state, gp=cost)
 
     # Add item to inventory
     inventory = character_state.setdefault("inventory", [])
@@ -1419,7 +1547,7 @@ def buy_item(
     elif not existing:
         inventory.append({"item_id": item_id, "equipped": False, "quantity": 1})
 
-    logger.debug(f"buy_item: bought '{item_id}' from '{shop_id}' for {cost} GP. Gold remaining: {character_state['gold']}.")
+    logger.debug(f"buy_item: bought '{item_id}' from '{shop_id}' for {cost} GP. Remaining: {format_currency(character_state)}.")
     return True, f"Bought {item_info.get('name', item_id)} for {cost} GP."
 
 
@@ -1467,10 +1595,10 @@ def sell_item(
     else:
         inventory.remove(target_item)
 
-    character_state["gold"] = character_state.get("gold", 0) + gain
+    add_currency(character_state, gp=gain)
     character_state["ac"] = _compute_ac(character_state)
 
-    logger.debug(f"sell_item: sold '{item_id}' to '{shop_id}' for {gain} GP. Gold now: {character_state['gold']}.")
+    logger.debug(f"sell_item: sold '{item_id}' to '{shop_id}' for {gain} GP. Funds now: {format_currency(character_state)}.")
     return True, f"Sold {item_info.get('name', item_id)} for {gain} GP."
 
 _spell_catalog: Optional[Dict[str, Any]] = None
@@ -1783,9 +1911,10 @@ def resolve_downed_outcome(
 
     if outcome == "robbed_and_left":
         # Lose portion of gold (50-100%) and all unequipped inventory items
-        cur_gold = combatant.get("gold", 0)
-        gold_lost = random.randint(math.ceil(cur_gold * 0.5), cur_gold) if cur_gold > 0 else 0
-        combatant["gold"] = max(0, cur_gold - gold_lost)
+        _ensure_currency(combatant)
+        cur_total_gp = combatant["currency"]["gp"] + combatant["currency"]["sp"] // SP_PER_GP
+        gold_lost = random.randint(math.ceil(cur_total_gp * 0.5), max(1, cur_total_gp)) if cur_total_gp > 0 else 0
+        subtract_currency(combatant, gp=gold_lost)
 
         inventory = combatant.get("inventory", [])
         items_lost = []
@@ -2394,7 +2523,7 @@ def attempt_pickpocket(
     if success:
         check_inspiration_trigger(player_state, "sleight_of_hand", {"success": True})
         if item_id == "gold":
-            player_state["gold"] = player_state.get("gold", 0) + item_val
+            add_currency(player_state, gp=item_val)
             if isinstance(target_npc, dict) and "gold" in target_npc:
                 target_npc["gold"] = max(0, target_npc["gold"] - item_val)
         else:
@@ -2557,9 +2686,10 @@ def serve_prison_time(
 
     # Pay fine
     fine = player_state.get("bounty", 0)
-    gold = player_state.get("gold", 0)
-    paid = min(gold, fine)
-    player_state["gold"] = max(0, gold - fine)
+    _ensure_currency(player_state)
+    total_gp_equiv = get_total_copper(player_state) // CP_PER_GP
+    paid = min(total_gp_equiv, fine)
+    subtract_currency(player_state, gp=paid)
     player_state["bounty"] = 0
     player_state["is_wanted"] = False
 
@@ -2709,11 +2839,11 @@ def pay_bounty(player_state: Dict[str, Any]) -> Tuple[bool, str]:
     if bounty <= 0:
         return False, "You do not have any active bounty."
 
-    gold = player_state.get("gold", 0)
-    if gold < bounty:
-        return False, f"Insufficient gold. Bounty is {bounty} GP (you have {gold} GP)."
+    _ensure_currency(player_state)
+    if not can_afford(player_state, gp=bounty):
+        return False, f"Insufficient gold. Bounty is {bounty} GP (you have {format_currency(player_state)})."
 
-    player_state["gold"] = gold - bounty
+    subtract_currency(player_state, gp=bounty)
     player_state["bounty"] = 0
     player_state["is_wanted"] = False
     logger.info(f"pay_bounty: paid {bounty} GP. Bounty cleared.")

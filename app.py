@@ -661,9 +661,14 @@ def render_sidebar():
         inventory = player.get("inventory", [])
         ration_qty = sum(i.get("quantity", 1) for i in inventory if isinstance(i, dict) and i.get("item_id") == "trail_rations")
 
-        col_g, col_r = st.columns(2)
-        with col_g:
-            st.metric("Gold", f"{player.get('gold', 0)} GP")
+        curr = state_manager._ensure_currency(player)
+        col_gp, col_sp, col_cp, col_r = st.columns(4)
+        with col_gp:
+            st.metric("Gold", f"{curr['gp']} GP")
+        with col_sp:
+            st.metric("Silver", f"{curr['sp']} SP")
+        with col_cp:
+            st.metric("Copper", f"{curr['cp']} CP")
         with col_r:
             st.metric("Rations", ration_qty)
 
@@ -1601,9 +1606,9 @@ def render_playing_view():
                         st.session_state["action_suggestions"] = res["suggestions"]
 
                     # 2. Extraction Call
-                    ext_res = llm_handler.generate_extraction_response(
+                    ext_res = llm_handler.extract_state_updates(
                         narrative_text=narrative_text,
-                        player_state=player,
+                        user_input=action_to_process,
                         world_state=world,
                     )
 
@@ -1935,7 +1940,7 @@ def render_playing_view():
                                             if i_info.get("description"):
                                                 st.caption(i_info["description"])
                                         with col_b2:
-                                            can_afford = player.get("gold", 0) >= cost
+                                            can_afford = state_manager.can_afford(player, gp=cost)
                                             if st.button(f"Buy ({cost} GP)", key=f"buy_{shop_id}_{s_item_id}", disabled=not can_afford, use_container_width=True):
                                                 ok_b, msg_b = state_manager.buy_item(s_item_id, shop_id, player, world)
                                                 if ok_b:
