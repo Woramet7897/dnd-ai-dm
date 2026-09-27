@@ -100,23 +100,57 @@ def get_available_exits(world_state: Dict[str, Any]) -> Dict[str, Optional[str]]
     return room.get("exits", {})
 
 
-def advance_time(world_state: Dict[str, Any], steps: int = 1) -> Dict[str, Any]:
+def advance_time(
+    world_state: Dict[str, Any],
+    steps: Union[int, Dict[str, Any]] = 1,
+    character_state: Optional[Dict[str, Any]] = None,
+    days: int = 0,
+) -> Dict[str, Any]:
     """
-    Deterministically advance game_time in world_state by steps (spec Section 22b).
+    Deterministically advance game_time in world_state by steps or days (spec Section 22b / Phase 12.3).
     Increments steps_since_period_start; when reaching STEPS_PER_PERIOD, resets to 0
     and advances period to the next in DAY_PERIODS (morning -> afternoon -> evening -> night -> morning).
     Increments day on night -> morning wrap.
+    Ticks freshness_days on raw_food items in character inventory by the number of days passed.
+    When freshness_days hits 0, raw_food flips to rotten_food.
 
-    Returns dict with keys: day, period, steps_since_period_start, period_changed (bool).
+    Returns dict with keys: day, period, steps_since_period_start, period_changed (bool), days_passed (int), spoiled_items (list).
     """
+    # Guard if character_state was passed positionally as steps
+    if isinstance(steps, dict) and character_state is None:
+        character_state = steps
+        steps = 1
+    elif not isinstance(steps, int):
+        steps = 1
+
+    # Extract character_state if not explicitly provided
+    if character_state is None and isinstance(world_state, dict):
+        character_state = world_state.get("player_state") or world_state.get("character_state")
+        if character_state is None and "inventory" in world_state and "game_time" not in world_state:
+            character_state = world_state
+
+    # Guard if world_state is only a character_state dict
+    if isinstance(world_state, dict) and "inventory" in world_state and "game_time" not in world_state:
+        world_state = world_state.setdefault("_world_state", {
+            "game_time": {"day": 1, "period": "morning", "steps_since_period_start": 0}
+        })
+
     gt = world_state.setdefault("game_time", {
         "day": 1,
         "period": "morning",
         "steps_since_period_start": 0
     })
 
+    steps_per_day = STEPS_PER_PERIOD * len(DAY_PERIODS)
+    if days > 0:
+        steps_from_days = days * steps_per_day
+        steps_to_run = steps_from_days if steps == 1 else (steps_from_days + steps)
+    else:
+        steps_to_run = steps
+
     period_changed = False
-    for _ in range(steps):
+    days_passed = 0
+    for _ in range(steps_to_run):
         gt["steps_since_period_start"] += 1
         if gt["steps_since_period_start"] >= STEPS_PER_PERIOD:
             gt["steps_since_period_start"] = 0
@@ -125,10 +159,18 @@ def advance_time(world_state: Dict[str, Any], steps: int = 1) -> Dict[str, Any]:
             next_idx = (current_idx + 1) % len(DAY_PERIODS)
             if next_idx == 0:  # wrapped night -> morning
                 gt["day"] += 1
+                days_passed += 1
             gt["period"] = DAY_PERIODS[next_idx]
+
+    spoiled_items = []
+    if days_passed > 0 and character_state is not None:
+        import state_manager
+        spoiled_items = state_manager.tick_food_spoilage(character_state, days=days_passed)
 
     res = dict(gt)
     res["period_changed"] = period_changed
+    res["days_passed"] = days_passed
+    res["spoiled_items"] = spoiled_items
     return res
 
 
@@ -194,7 +236,7 @@ def move_player(
         visited.append(destination_id)
 
     # Advance game time (1 step per successful move)
-    time_info = advance_time(world_state, steps=1)
+    time_info = advance_time(world_state, steps=1, character_state=character_state)
     if time_info.get("period_changed") and character_state is not None:
         import state_manager
         state_manager.handle_period_change(world_state, character_state)

@@ -380,10 +380,11 @@ def render_sidebar():
                 slot_tag = f" [{islot}]" if islot else ""
                 status_tag = " *(Equipped)*" if is_equipped else ""
                 curse_tag = " 🔒 *(Bound)*" if is_bound else ""
+                fresh_tag = f" ⏳ ({item['freshness_days']}d fresh)" if "freshness_days" in item and not is_bound and is_id else ""
 
                 col_i1, col_i2 = st.columns([3, 2])
                 with col_i1:
-                    st.markdown(f"**{item_name}** x{qty}{slot_tag}{status_tag}{curse_tag}{id_tag}")
+                    st.markdown(f"**{item_name}** x{qty}{slot_tag}{status_tag}{curse_tag}{id_tag}{fresh_tag}")
                 with col_i2:
                     if not is_id:
                         if st.button("Identify", key=f"inv_id_{idx}_{item_id}", use_container_width=True):
@@ -420,15 +421,22 @@ def render_sidebar():
                                     st.toast(msg_eq)
                                 auto_save()
                                 st.rerun()
-                    elif itype == "consumable":
+                    elif itype in ("consumable", "food"):
                         if st.button("Use", key=f"inv_use_{idx}_{item_id}", use_container_width=True):
                             ok_u, msg_u, res_u = state_manager.use_consumable(item_id, player)
                             if ok_u:
                                 healed = res_u.get("healed", 0)
-                                st.toast(f"Used {item_name}! Restored {healed} HP.")
+                                temp_hp = res_u.get("temp_hp", 0)
+                                ex_cleared = res_u.get("exhaustion_cleared", False)
+                                details = []
+                                if healed: details.append(f"Restored {healed} HP")
+                                if temp_hp: details.append(f"+{temp_hp} Temp HP")
+                                if ex_cleared: details.append("Cleared Exhaustion")
+                                summary = ", ".join(details) if details else "Consumed"
+                                st.toast(f"Used {item_name}! {summary}")
                                 st.session_state["narrative_log"].append({
                                     "role": "assistant",
-                                    "content": f"🧪 You drank a **{item_name}** and regained {healed} HP! (HP: {player['hp']['current']}/{player['hp']['max']})"
+                                    "content": f"🍲 You consumed **{item_name}**! {summary}. (HP: {player['hp']['current']}/{player['hp']['max']})"
                                 })
                             else:
                                 st.error(msg_u)
@@ -510,6 +518,40 @@ def render_sidebar():
                 "content": "You take a short rest, catching your breath and checking your gear. Weapon actions recharged!"
             })
             st.rerun()
+
+        # Camp Cooking
+        with st.sidebar.expander("🍳 Camp Cooking", expanded=False):
+            food_candidates = [
+                i for i in inventory
+                if isinstance(i, dict) and (
+                    i.get("raw_food") or i.get("type") in ("raw_food", "food", "rotten_food")
+                    or "freshness_days" in i or i.get("item_id") in ("raw_food", "raw_meat", "wild_vegetables", "rotten_food", "trail_rations")
+                )
+            ]
+            if len(food_candidates) == 0:
+                st.info("No cooking ingredients in inventory. Forage or hunt to find food!")
+            else:
+                f_names = [f"{it.get('name', it.get('item_id'))} (x{it.get('quantity', 1)})" for it in food_candidates]
+                c_idx1 = st.selectbox("Ingredient 1", range(len(food_candidates)), format_func=lambda x: f_names[x], key="camp_cook_ing1")
+                c_idx2 = st.selectbox("Ingredient 2", range(len(food_candidates)), format_func=lambda x: f_names[x], key="camp_cook_ing2")
+                if st.button("🍲 Cook Meal (Survival DC 12)", use_container_width=True, key="btn_camp_cook"):
+                    res_c = state_manager.cook_meal(player, food_candidates[c_idx1], food_candidates[c_idx2])
+                    if res_c.get("success"):
+                        st.toast("Cooked Hearty Stew!")
+                        st.session_state["narrative_log"].append({
+                            "role": "assistant",
+                            "content": f"🍲 **Camp Cooking:** {res_c['message']}"
+                        })
+                    elif res_c.get("burned"):
+                        st.toast("Burned the meal!")
+                        st.session_state["narrative_log"].append({
+                            "role": "assistant",
+                            "content": f"🔥 **Camp Cooking:** {res_c['message']}"
+                        })
+                    else:
+                        st.error(res_c.get("message", "Cooking failed."))
+                    auto_save()
+                    st.rerun()
 
     # Town Actions
     if current_room and current_room.get("type") == "town":

@@ -228,5 +228,44 @@
     "rarity": "rare",
     "value_gold": 100,
     "description": "An axe cursed with blinding fury that refuses to leave its wielder's grip."
+  },
+  "raw_food": {
+    "name": "Raw Food",
+    "type": "raw_food",
+    "raw_food": true,
+    "freshness_days": 5,
+    "value_gold": 1,
+    "description": "Fresh uncooked food provisions. Spoils in 5 days if not cooked or eaten."
+  },
+  "raw_meat": {
+    "name": "Raw Meat",
+    "type": "raw_food",
+    "raw_food": true,
+    "freshness_days": 5,
+    "value_gold": 2,
+    "description": "Freshly butchered game meat. Lasts 5 days before spoiling."
+  },
+  "wild_vegetables": {
+    "name": "Wild Vegetables",
+    "type": "raw_food",
+    "raw_food": true,
+    "freshness_days": 5,
+    "value_gold": 1,
+    "description": "Foraged roots, greens, and mushrooms. Lasts 5 days before spoiling."
+  },
+  "rotten_food": {
+    "name": "Rotten Food",
+    "type": "rotten_food",
+    "rotten": true,
+    "value_gold": 0,
+    "description": "Spoiled, rancid food. Cooking with this causes food poisoning without a DC 13 Constitution save."
+  },
+  "hearty_stew": {
+    "name": "Hearty Stew",
+    "type": "food",
+    "effects": {"temp_hp": 5, "clear_exhaustion": 1},
+    "value_gold": 5,
+    "description": "A thick, steaming bowl of savory camp stew. Provides +5 temporary HP and relieves exhaustion."
   }
 }
+

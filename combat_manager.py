@@ -795,7 +795,20 @@ def resolve_attack(
 
         # ── Apply damage to target ────────────────────────────────────────────
         target_hp = target.setdefault("hp", {"current": 1, "max": 1})
-        target_hp["current"] = max(0, target_hp["current"] - damage)
+        temp_hp = target_hp.get("temp", target.get("temp_hp", 0))
+        damage_to_apply = damage
+        if temp_hp > 0:
+            if damage_to_apply <= temp_hp:
+                target_hp["temp"] = temp_hp - damage_to_apply
+                if "temp_hp" in target:
+                    target["temp_hp"] = target_hp["temp"]
+                damage_to_apply = 0
+            else:
+                damage_to_apply -= temp_hp
+                target_hp["temp"] = 0
+                if "temp_hp" in target:
+                    target["temp_hp"] = 0
+        target_hp["current"] = max(0, target_hp["current"] - damage_to_apply)
 
         # ── Apply condition (from static attack field, not LLM) ───────────────
         cond = attack.get("applies_condition")
