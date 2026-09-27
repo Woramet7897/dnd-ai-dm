@@ -266,6 +266,11 @@ def render_sidebar():
     with col_gold:
         st.markdown(f"**Gold:** {player.get('gold', 0)} GP")
 
+    insp = state_manager.get_inspiration(player)
+    max_insp = player.get("max_inspiration", state_manager.MAX_INSPIRATION)
+    pips = "🟡 " * insp + "⚪ " * max(0, max_insp - insp)
+    st.sidebar.markdown(f"✨ **Inspiration:** {pips.strip()} ({insp}/{max_insp})")
+
     # Ability Stats & Mods
     st.sidebar.markdown("---")
     st.sidebar.markdown("##### Ability Stats")
@@ -980,12 +985,23 @@ def render_playing_view():
                 with st.popover("🎲 Make Ability Check"):
                     chk_stat = st.selectbox("Stat:", ["STR", "DEX", "CON", "INT", "WIS", "CHA"])
                     chk_diff = st.selectbox("Difficulty:", ["easy", "medium", "hard", "very_hard"])
+                    chk_skill = st.text_input("Skill (optional, e.g. Arcana, Stealth, Athletics):", "")
+                    insp_count = state_manager.get_inspiration(player)
+                    use_insp = st.checkbox(f"Use Inspiration (Reroll, have {insp_count})", disabled=(insp_count <= 0))
                     if st.button("Roll d20", use_container_width=True):
-                        chk_res = state_manager.resolve_check(chk_stat, chk_diff, player)
+                        chk_res = state_manager.resolve_check(
+                            chk_stat,
+                            chk_diff,
+                            player,
+                            skill=chk_skill.strip() if chk_skill else None,
+                            use_inspiration=use_insp,
+                        )
                         succ_str = "SUCCESS ✅" if chk_res["success"] else "FAILURE ❌"
+                        insp_tag = " (Inspiration Used ✨)" if chk_res.get("inspiration_spent") else ""
+                        skill_tag = f" [{chk_res['skill']}]" if chk_res.get("skill") else ""
                         roll_msg = (
-                            f"🎲 **{chk_stat} Check ({chk_diff.capitalize()} DC {chk_res['dc']})**: "
-                            f"Rolled {chk_res['roll']} + mod {chk_res['modifier']} = **{chk_res['total']}** → **{succ_str}**"
+                            f"🎲 **{chk_stat}{skill_tag} Check ({chk_diff.capitalize()} DC {chk_res['dc']})**: "
+                            f"Rolled {chk_res['roll']} + mod {chk_res['modifier']} = **{chk_res['total']}** → **{succ_str}**{insp_tag}"
                         )
                         st.session_state["narrative_log"].append({"role": "assistant", "content": roll_msg})
                         auto_save()

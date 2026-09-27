@@ -277,6 +277,8 @@ def derive_stats(
         "gold": starting_gold,
         "inventory": starting_inventory,
         "weapon_actions_available": True,
+        "inspiration": 0,
+        "max_inspiration": 4,
         "roll_log": [],
     }
 

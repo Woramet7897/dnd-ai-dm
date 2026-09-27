@@ -1042,6 +1042,13 @@ def resolve_shove(
 
     target_downed = target.get("hp", {}).get("current", 0) <= 0
 
+    try:
+        import state_manager
+        real_attacker = attacker.get("_player_state", attacker)
+        state_manager.check_inspiration_trigger(real_attacker, "shove_assist", {"success": True})
+    except Exception as e:
+        logger.debug(f"resolve_shove: inspiration trigger check failed: {e}")
+
     return {
         "success":           True,
         "action_type":       "shove",
@@ -1525,7 +1532,14 @@ def check_combat_end(combat_state: Dict[str, Any], world_state: Optional[Dict[st
             state_manager.apply_level_up(p_state)
             leveled_up = True
         combat_state["leveled_up"] = leveled_up
-        for key in ("gold", "status", "xp_current", "level", "proficiency_bonus", "ac"):
+
+        # Soldier background inspiration trigger: won combat without losing a teammate
+        companions = combat_state.get("companions", [])
+        teammate_lost = any(comp.get("hp", {}).get("current", 0) <= 0 for comp in companions)
+        if not teammate_lost and p_state.get("hp", {}).get("current", 0) > 0:
+            state_manager.check_inspiration_trigger(p_state, "combat_victory_no_casualties", {"success": True})
+
+        for key in ("gold", "status", "xp_current", "level", "proficiency_bonus", "ac", "inspiration"):
             if key in p_state:
                 player_c[key] = p_state[key]
         sync_player_state(player_c)

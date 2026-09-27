@@ -467,6 +467,116 @@ def _roll_dice(dice_string: str) -> int:
     return total + bonus
 
 
+# ─── Inspiration Points Constants & System (Module B §1 / Phase 12.1) ─────────
+MAX_INSPIRATION = 4
+
+def award_inspiration(player_state: Dict[str, Any], reason: str = "") -> bool:
+    """
+    Award 1 Inspiration Point to the player (Module B §1 / Phase 12.1).
+    Capped at MAX_INSPIRATION (4). Returns True if awarded, False if already at cap.
+    """
+    if "inspiration" not in player_state:
+        player_state["inspiration"] = 0
+
+    if isinstance(player_state["inspiration"], dict):
+        cur = player_state["inspiration"].get("current", 0)
+        max_cap = player_state["inspiration"].get("max", MAX_INSPIRATION)
+        if cur >= max_cap:
+            logger.debug(f"award_inspiration: at cap ({cur}/{max_cap}) — no-op.")
+            return False
+        player_state["inspiration"]["current"] = cur + 1
+        logger.info(f"award_inspiration: +1 ({cur+1}/{max_cap}). Reason: {reason}")
+        return True
+    else:
+        cur = int(player_state["inspiration"])
+        max_cap = player_state.get("max_inspiration", MAX_INSPIRATION)
+        if cur >= max_cap:
+            logger.debug(f"award_inspiration: at cap ({cur}/{max_cap}) — no-op.")
+            return False
+        player_state["inspiration"] = cur + 1
+        logger.info(f"award_inspiration: +1 ({cur+1}/{max_cap}). Reason: {reason}")
+        return True
+
+
+def spend_inspiration(player_state: Dict[str, Any]) -> bool:
+    """
+    Spend 1 Inspiration Point from player_state (Module B §1 / Phase 12.1).
+    Returns True if successfully consumed, False if 0 points available.
+    """
+    if "inspiration" not in player_state:
+        player_state["inspiration"] = 0
+
+    if isinstance(player_state["inspiration"], dict):
+        cur = player_state["inspiration"].get("current", 0)
+        if cur <= 0:
+            return False
+        player_state["inspiration"]["current"] = cur - 1
+        logger.info(f"spend_inspiration: consumed 1 point ({cur-1} remaining).")
+        return True
+    else:
+        cur = int(player_state["inspiration"])
+        if cur <= 0:
+            return False
+        player_state["inspiration"] = cur - 1
+        logger.info(f"spend_inspiration: consumed 1 point ({cur-1} remaining).")
+        return True
+
+
+def get_inspiration(player_state: Dict[str, Any]) -> int:
+    """Return the current number of inspiration points."""
+    val = player_state.get("inspiration", 0)
+    if isinstance(val, dict):
+        return int(val.get("current", 0))
+    return int(val)
+
+
+def check_inspiration_trigger(
+    character_state: Dict[str, Any],
+    trigger_type: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """
+    Check if a game event satisfies the character's background inspiration trigger (Module B §1 / Phase 12.1).
+    - Criminal: successful theft / lockpick / Sleight of Hand / Stealth
+    - Soldier: won combat without losing a teammate, or successful tactical Shove
+    - Sage: successful Arcana check
+    - Acolyte: Religion / Insight check
+    - Folk Hero: Survival / Animal Handling check
+    - Noble: Persuasion / History check
+    - Entertainer: Performance / Acrobatics check
+    """
+    if details is None:
+        details = {}
+
+    bg = str(character_state.get("background", "")).strip().lower().replace(" ", "_").replace("-", "_")
+
+    if bg == "criminal":
+        if trigger_type in ("theft", "lockpick", "sleight_of_hand", "stealth") and details.get("success", True):
+            return award_inspiration(character_state, "Criminal: successful theft or lockpicking")
+    elif bg == "soldier":
+        if trigger_type == "combat_victory_no_casualties":
+            return award_inspiration(character_state, "Soldier: won battle without losing a teammate")
+        elif trigger_type == "shove_assist" and details.get("success", True):
+            return award_inspiration(character_state, "Soldier: tactical shove assist")
+    elif bg == "sage":
+        if trigger_type == "arcana" and details.get("success", True):
+            return award_inspiration(character_state, "Sage: solved an Arcana check")
+    elif bg == "acolyte":
+        if trigger_type in ("religion", "insight") and details.get("success", True):
+            return award_inspiration(character_state, "Acolyte: upheld religious rites")
+    elif bg == "folk_hero":
+        if trigger_type in ("survival", "animal_handling") and details.get("success", True):
+            return award_inspiration(character_state, "Folk Hero: heroic feat of survival")
+    elif bg == "noble":
+        if trigger_type in ("persuasion", "history") and details.get("success", True):
+            return award_inspiration(character_state, "Noble: diplomatic leadership")
+    elif bg == "entertainer":
+        if trigger_type in ("performance", "acrobatics") and details.get("success", True):
+            return award_inspiration(character_state, "Entertainer: crowd-pleasing performance")
+
+    return False
+
+
 def resolve_check(
     stat: str,
     difficulty: str,
@@ -475,6 +585,8 @@ def resolve_check(
     disadvantage: bool = False,
     proficient: bool = False,
     bonus_dice: Optional[str] = None,
+    skill: Optional[str] = None,
+    use_inspiration: bool = False,
 ) -> Dict[str, Any]:
     """
     Resolve a D&D 5e ability check using the difficulty enum.
@@ -488,6 +600,7 @@ def resolve_check(
       - Advantage: roll twice, take higher.
       - Disadvantage: roll twice, take lower.
       - Advantage and disadvantage cancel out (roll once, no modifier).
+      - use_inspiration: spends 1 point and rerolls, taking the higher roll.
 
     Returns dict with keys: roll, modifier, proficiency, bonus, total, dc, success, critical, fumble.
     """
@@ -501,8 +614,16 @@ def resolve_check(
     stat_value = stats.get(stat, 10)
     modifier = get_modifier(stat_value)
 
+    if skill and not proficient:
+        if skill in state.get("proficient_skills", []):
+            proficient = True
+
     prof_bonus = state.get("proficiency_bonus", 2)
     prof_contribution = prof_bonus if proficient else 0
+
+    inspiration_used = False
+    if use_inspiration and spend_inspiration(state):
+        inspiration_used = True
 
     # Resolve advantage/disadvantage — they cancel if both are true
     if advantage and not disadvantage:
@@ -513,6 +634,10 @@ def resolve_check(
         roll = min(roll1, roll2)
     else:
         roll = _roll_d20()
+
+    if inspiration_used:
+        reroll = _roll_d20()
+        roll = max(roll, reroll)
 
     # Nat 20 / nat 1 are checked on the raw die, before any modifiers
     critical = (roll == 20)
@@ -531,19 +656,69 @@ def resolve_check(
     else:
         success = total >= dc
 
+    if success and skill:
+        trigger = str(skill).strip().lower().replace(" ", "_")
+        check_inspiration_trigger(state, trigger, {"success": True})
+
     return {
-        "roll":        roll,
-        "modifier":    modifier,
-        "proficiency": prof_contribution,
-        "bonus":       bonus,
-        "total":       total,
-        "dc":          dc,
-        "difficulty":  difficulty,
-        "stat":        stat,
-        "success":     success,
-        "critical":    critical,
-        "fumble":      fumble,
+        "roll":              roll,
+        "modifier":          modifier,
+        "proficiency":       prof_contribution,
+        "bonus":             bonus,
+        "total":             total,
+        "dc":                dc,
+        "difficulty":        difficulty,
+        "stat":              stat,
+        "skill":             skill,
+        "success":           success,
+        "critical":          critical,
+        "fumble":            fumble,
+        "inspiration_spent": inspiration_used,
     }
+
+
+def reroll_check(
+    previous_result: Dict[str, Any],
+    state: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Spend 1 inspiration point to reroll an ability check (Module B §1 / Phase 12.1).
+    Takes the higher of the previous roll and the new roll.
+    """
+    if not spend_inspiration(state):
+        res = dict(previous_result)
+        res["rerolled"] = False
+        res["reason"] = "No inspiration points available."
+        return res
+
+    new_roll = _roll_d20()
+    effective_roll = max(previous_result.get("roll", 1), new_roll)
+    total = effective_roll + previous_result.get("modifier", 0) + previous_result.get("proficiency", 0) + previous_result.get("bonus", 0)
+
+    critical = (effective_roll == 20)
+    fumble = (effective_roll == 1)
+    if critical:
+        success = True
+    elif fumble:
+        success = False
+    else:
+        success = total >= previous_result.get("dc", 10)
+
+    res = dict(previous_result)
+    res.update({
+        "roll":              effective_roll,
+        "raw_reroll":        new_roll,
+        "total":             total,
+        "success":           success,
+        "critical":          critical,
+        "fumble":            fumble,
+        "rerolled":          True,
+        "inspiration_spent": True,
+    })
+    if success and res.get("skill"):
+        trigger = str(res["skill"]).strip().lower().replace(" ", "_")
+        check_inspiration_trigger(state, trigger, {"success": True})
+    return res
 
 
 def resolve_death_save(state: Dict[str, Any]) -> Dict[str, Any]:
