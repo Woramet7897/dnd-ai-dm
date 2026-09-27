@@ -128,11 +128,16 @@ def _compute_ac(character_state: Dict[str, Any]) -> int:
             if "ac_penalty" in effects:
                 ac_bonus_total -= effects.get("ac_penalty", 0)
 
-            curse_eff = item.get("curse_effect") or info.get("curse_effect", {})
-            if "ac_bonus" in curse_eff and "ac_bonus" not in effects:
-                ac_bonus_total += curse_eff.get("ac_bonus", 0)
-            if "ac_penalty" in curse_eff and "ac_penalty" not in effects:
-                ac_bonus_total -= curse_eff.get("ac_penalty", 0)
+            is_item_cursed = item.get("cursed")
+            if is_item_cursed is None:
+                is_item_cursed = info.get("cursed", False)
+
+            if is_item_cursed:
+                curse_eff = item.get("curse_effect") or info.get("curse_effect", {})
+                if "ac_bonus" in curse_eff and "ac_bonus" not in effects:
+                    ac_bonus_total += curse_eff.get("ac_bonus", 0)
+                if "ac_penalty" in curse_eff and "ac_penalty" not in effects:
+                    ac_bonus_total -= curse_eff.get("ac_penalty", 0)
 
     if equipped_chest is not None:
         chest_effects = equipped_chest.get("effects", {})
@@ -197,15 +202,20 @@ def get_active_effects(character_state: Dict[str, Any]) -> Dict[str, Any]:
                 for sk, bon in effects["skill_bonus"].items():
                     skill_bonus[sk] = skill_bonus.get(sk, 0) + bon
 
-            curse_eff = item.get("curse_effect") or info.get("curse_effect", {})
-            if "ac_bonus" in curse_eff and "ac_bonus" not in effects:
-                ac_bonus_total += curse_eff["ac_bonus"]
-            if "ac_penalty" in curse_eff and "ac_penalty" not in effects:
-                ac_bonus_total -= curse_eff["ac_penalty"]
-            if "saving_throw_bonus" in curse_eff and "saving_throw_bonus" not in effects:
-                saving_throw_bonus += curse_eff["saving_throw_bonus"]
-            if "saving_throw_penalty" in curse_eff and "saving_throw_penalty" not in effects:
-                saving_throw_bonus -= curse_eff["saving_throw_penalty"]
+            is_item_cursed = item.get("cursed")
+            if is_item_cursed is None:
+                is_item_cursed = info.get("cursed", False)
+
+            if is_item_cursed:
+                curse_eff = item.get("curse_effect") or info.get("curse_effect", {})
+                if "ac_bonus" in curse_eff and "ac_bonus" not in effects:
+                    ac_bonus_total += curse_eff["ac_bonus"]
+                if "ac_penalty" in curse_eff and "ac_penalty" not in effects:
+                    ac_bonus_total -= curse_eff["ac_penalty"]
+                if "saving_throw_bonus" in curse_eff and "saving_throw_bonus" not in effects:
+                    saving_throw_bonus += curse_eff["saving_throw_bonus"]
+                if "saving_throw_penalty" in curse_eff and "saving_throw_penalty" not in effects:
+                    saving_throw_bonus -= curse_eff["saving_throw_penalty"]
 
     return {
         "ac_bonus_total": ac_bonus_total,
@@ -375,13 +385,15 @@ def remove_curse(
     for item in inventory:
         if isinstance(item, dict):
             if item_id is None or item.get("item_id") == item_id:
+                found = True
                 if item.get("cannot_unequip"):
                     item["cannot_unequip"] = False
-                    found = True
                 item["cursed"] = False
 
     if item_id and not found:
-        return False, f"No cursed bound item '{item_id}' found in inventory."
+        return False, f"No item '{item_id}' found in inventory."
+
+    character_state["ac"] = _compute_ac(character_state)
     return True, "Curse removed successfully."
 
 
@@ -402,6 +414,8 @@ def pay_cleric_remove_curse(
     if ok:
         logger.info(f"pay_cleric_remove_curse: paid 50 GP to cleric. {msg}")
         return True, "Paid 50 GP to the town cleric. Curse has been lifted!"
+    # Refund gold on failure
+    character_state["gold"] = gold
     return False, msg
 
 

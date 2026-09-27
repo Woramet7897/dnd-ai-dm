@@ -257,6 +257,49 @@ class TestPhase12_2CursedItems(unittest.TestCase):
         # 12 - 1 = 11
         self.assertEqual(state_manager._compute_ac(p), 11)
 
+    # ── 10. remove_curse on Carried (Unequipped) Item ────────────────────────
+    def test_remove_curse_unequipped_item(self):
+        """remove_curse works on unequipped items in inventory."""
+        p = dict(self.player)
+        p["inventory"] = [
+            {
+                "item_id": "cursed_ring_of_burden",
+                "equipped": False,
+                "cursed": True,
+                "cannot_unequip": False,
+            }
+        ]
+        ok, msg = state_manager.remove_curse(p, "cursed_ring_of_burden")
+        self.assertTrue(ok)
+        self.assertFalse(p["inventory"][0]["cursed"])
+
+    # ── 11. pay_cleric_remove_curse Refunds Gold on Missing Item ─────────────
+    def test_pay_cleric_refunds_on_failure(self):
+        """pay_cleric_remove_curse refunds 50 GP if target item does not exist."""
+        p = dict(self.player)
+        p["gold"] = 100
+        p["inventory"] = []
+        ok, msg = state_manager.pay_cleric_remove_curse(p, "nonexistent_item")
+        self.assertFalse(ok)
+        self.assertEqual(p["gold"], 100)
+
+    # ── 12. remove_curse Restores AC if Cursed Item Had AC Penalty ───────────
+    def test_remove_curse_restores_ac(self):
+        """Lifting a curse with ac_penalty recomputes and restores character AC."""
+        p = dict(self.player)
+        p["inventory"] = [
+            {
+                "item_id": "cursed_ring_of_burden",
+                "equipped": True,
+                "cursed": True,
+                "cannot_unequip": True,
+                "curse_effect": {"ac_penalty": 1},
+            }
+        ]
+        self.assertEqual(state_manager._compute_ac(p), 11)
+        state_manager.remove_curse(p, "cursed_ring_of_burden")
+        self.assertEqual(p["ac"], 12)
+
 
 if __name__ == "__main__":
     unittest.main()
