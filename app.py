@@ -503,10 +503,19 @@ def render_landing_view():
                                 f"**{char_name.strip()}** {race_info} ในมาดของ {cls_name} ผู้มีภูมิหลังเป็น {bg} "
                                 f"ก้าวเท้าข้ามสะพานไม้เก่าเข้าสู่หมู่บ้านริมน้ำริเวอร์ไซด์\n\n"
                                 f"> *\"{intro_quote}\"*\n\n"
-                                f"กลิ่นขนมปังอบใหม่และควันจากโรงตีเหล็กลอยอวลในอากาศ ชาวบ้านเริ่มออกมาทำมาหากิน "
-                                f"เสียงลำน้ำและโอกาสครั้งใหม่รอคอยเจ้าอยู่เบื้องหน้า... การผจญภัยเริ่มต้นขึ้นแล้ว!"
+                                f"กลิ่นขนมปังอบใหม่และควันจากเตาหลอมของโรงตีเหล็กลอยอวลในอากาศ ชาวบ้านเริ่มออกมาเปิดร้านและทำมาหากิน "
+                                f"เมื่อมองไปรอบจัตุรัสกลางหมู่บ้าน เจ้าจะเห็นจุดน่าสนใจหลายแห่งที่รอให้สำรวจ:\n\n"
+                                f"• 🍻 **โรงเตี๊ยมมังกรเมา (The Drunken Dragon Tavern):** แหล่งรวมข่าวลือ ข่าวกรอง และกระดานประกาศภารกิจล่าค่าหัว (Notice Board)\n"
+                                f"• 🏪 **ตลาดและร้านค้า (Town Shops):** ร้านค้าทั่วไป โรงตีเหล็ก และร้านปรุงยา สำหรับเตรียมเสบียงและอาวุธ\n"
+                                f"• 🌲 **เส้นทางออกนอกเมือง:** มุ่งหน้าสู่ป่าธอร์นวูดทางทิศเหนือ ซึ่งมีข่าวลือเรื่องก็อบลินและดันเจียนลึกลับ\n\n"
+                                f"**เจ้าต้องการมุ่งหน้าไปสำรวจที่ไหนก่อนดี?** *(สามารถคลิกปุ่มตัวเลือกแนะนำด้านล่าง หรือพิมพ์คำสั่งสิ่งที่อยากทำได้เลย)*"
                             ),
                         }]
+                        st.session_state["action_suggestions"] = [
+                            "เดินไปที่โรงเตี๊ยมเพื่อดูกระดานประกาศภารกิจ",
+                            "แวะดูสินค้าที่ร้านค้าและโรงตีเหล็ก",
+                            "พูดคุยสอบถามข่าวสารกับชาวบ้านในจัตุรัส",
+                        ]
 
                         st.success(f"สร้างตัวละคร '{char_name.strip()}' สำเร็จ!")
                         st.rerun()
@@ -1119,6 +1128,17 @@ def render_playing_view():
 
     # Story & Narrative Log
     st.markdown("### 📜 Narrative Log")
+
+    # Auto-enhance initial prologue if needed for current session
+    log = st.session_state.get("narrative_log", [])
+    if len(log) == 1 and "บทนำ: ก้าวแรกสู่ริเวอร์ไซด์" in log[0].get("content", "") and "โรงเตี๊ยมมังกรเมา" not in log[0].get("content", ""):
+        log[0]["content"] += (
+            "\n\nเบื้องหน้าของเจ้าคือจัตุรัสกลางหมู่บ้านที่เต็มไปด้วยชีวิตชีวา:\n"
+            "• 🍻 **โรงเตี๊ยมมังกรเมา (The Drunken Dragon Tavern):** แหล่งรวมข่าวลือและ **กระดานประกาศภารกิจ (Notice Board)**\n"
+            "• 🏪 **ตลาดและร้านค้า (Town Shops):** ร้านค้าทั่วไป โรงตีเหล็ก และร้านปรุงยา สำหรับเตรียมเสบียงและอาวุธ\n"
+            "• 🌲 **เส้นทางออกนอกเมือง:** มุ่งหน้าสู่ป่าธอร์นวูดทางทิศเหนือ ซึ่งมีข่าวลือเรื่องก็อบลินและดันเจียนลึกลับ\n\n"
+            "**เจ้าต้องการมุ่งหน้าไปสำรวจที่ไหนก่อนดี?** *(สามารถคลิกปุ่มตัวเลือกแนะนำด้านล่าง หรือพิมพ์คำสั่งสิ่งที่อยากทำได้เลย)*"
+        )
     log_container = st.container(height=520)
     with log_container:
         for entry in st.session_state["narrative_log"]:
@@ -1634,6 +1654,13 @@ def render_playing_view():
             with tab_act:
                 # Contextual Action Suggestions (Sub-phase 14.1 / Module D)
                 suggestions = st.session_state.get("action_suggestions") or list(llm_handler.DEFAULT_ACTION_SUGGESTIONS)
+                if suggestions == llm_handler.DEFAULT_ACTION_SUGGESTIONS:
+                    suggestions = [
+                        "เดินไปที่โรงเตี๊ยมเพื่อดูกระดานประกาศภารกิจ",
+                        "แวะดูสินค้าที่ร้านค้าและโรงตีเหล็ก",
+                        "พูดคุยสอบถามข่าวสารกับชาวบ้านในจัตุรัส",
+                    ]
+                    st.session_state["action_suggestions"] = list(suggestions)
                 st.caption("💡 **Suggested Actions:**")
                 sug_cols = st.columns(3)
                 clicked_suggestion = None

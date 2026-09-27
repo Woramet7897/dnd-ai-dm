@@ -109,7 +109,8 @@ def build_system_prompt_tiers(
         f"Campaign Tone: {tone}\n"
         f"Player Character: {char_name} (Level {char_level} {char_race} {char_class}).\n"
         f"Time: Day {day}, {period}.\n"
-        f"Background / Motivation: {bg_hook}"
+        f"Background / Motivation: {bg_hook}\n"
+        f"DM Guidance: In non-combat exploration scenes, always conclude your narration by presenting clear points of interest, sensory clues, or leading questions to guide the player on where they can go or what they can interact with next. Never leave the player stranded without directions."
     )
 
     # Tier 2: Companion persona seeds (only present companions)
@@ -296,6 +297,7 @@ DEFAULT_ACTION_SUGGESTIONS: List[str] = [
 
 SUGGESTIONS_DIRECTIVE: str = (
     "\n\n[Action Suggestions Directive]\n"
+    "In exploration scenes (out of combat), guide the player by concluding with clear points of interest or questions about their next move.\n"
     "At the very end of your response, provide exactly 3 short suggested actions "
     "(under 8 words each, concrete, context-appropriate to the scene just narrated, in Thai, in first-person or imperative). "
     "Output them strictly as a trailing JSON block:\n"
