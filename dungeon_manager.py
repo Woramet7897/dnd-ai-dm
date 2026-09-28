@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import random
+import uuid
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger("dungeon_manager")
@@ -605,7 +606,9 @@ def get_active_world_events_for_location(
 
     context_lines = []
     for flag in loc_flags:
-        info = WORLD_EVENT_DEFINITIONS.get(flag, {})
+        info = WORLD_EVENT_DEFINITIONS.get(flag)
+        if not info:
+            info = world_state.get("dynamic_world_events", {}).get(flag, {})
         line = info.get("context_line")
         if line:
             context_lines.append(f"[World Event] {line}")
@@ -614,6 +617,54 @@ def get_active_world_events_for_location(
         event_flags.pop(location_id, None)
 
     return context_lines
+
+
+def register_dynamic_event(
+    event_data: Dict[str, Any],
+    world_state: Dict[str, Any],
+) -> str:
+    """
+    Register a dynamically generated world event or rumor into world_state.
+    Stores definition in world_state['dynamic_world_events'],
+    attaches flag to world_state['world_event_flags'][location_id],
+    and optionally adds a notice to world_state['notice_board']['entries'].
+    Returns generated event ID / flag name.
+    """
+    flag = f"dyn_event_{uuid.uuid4().hex[:8]}"
+    dyn_events = world_state.setdefault("dynamic_world_events", {})
+    dyn_events[flag] = dict(event_data)
+
+    target_loc = event_data.get("location_id", world_state.get("current_location", "town_riverside"))
+    event_flags = world_state.setdefault("world_event_flags", {})
+    loc_flags = event_flags.setdefault(target_loc, [])
+    if flag not in loc_flags:
+        loc_flags.append(flag)
+
+    if event_data.get("post_to_notice_board") or event_data.get("rumor_text"):
+        nb = world_state.setdefault("notice_board", {})
+        entries = nb.setdefault("entries", [])
+        room_obj = _get_room(target_loc, world_state) or {}
+        r_name = room_obj.get("name", target_loc.replace("_", " ").title())
+        reward = int(event_data.get("reward_gold", 0))
+
+        nb_entry = {
+            "id": f"notice_{flag}",
+            "type": "rumor" if reward <= 0 else "event_quest",
+            "title": event_data.get("title", "Local Rumor"),
+            "description": event_data.get("rumor_text") or event_data.get("context_line", ""),
+            "target_room_id": target_loc,
+            "target_room_name": r_name,
+            "reward_gold": reward,
+            "status": "available",
+            "is_dynamic": True,
+        }
+        entries.append(nb_entry)
+
+    logger.info(
+        f"register_dynamic_event: registered dynamic event '{event_data.get('title')}' "
+        f"as flag '{flag}' at '{target_loc}'."
+    )
+    return flag
 
 
 # ────────────────────────────────────────────────────────────────────────────────

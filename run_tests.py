@@ -41,6 +41,7 @@ ORDERED_TEST_FILES = [
     "test_app_integrations.py",
     "phase15_gemini_tests.py",
     "test_dynamic_npcs.py",
+    "test_dynamic_events.py",
 ]
 
 

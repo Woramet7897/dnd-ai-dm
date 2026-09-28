@@ -559,6 +559,59 @@ def validate_generated_item(item_data: Any) -> Optional[Dict[str, Any]]:
     return item_dict
 
 
+def validate_generated_event(
+    event_data: Any,
+    world_state: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Validate a dynamic world event or rumor against safety bounds and sanitize text.
+    Returns cleaned event dict or None if invalid.
+    """
+    if not isinstance(event_data, dict):
+        logger.debug(f"validate_generated_event: input is not a dict ({type(event_data).__name__}) — dropped.")
+        return None
+
+    # 1. Title
+    title = sanitize_text(event_data.get("title", "Local Rumor"), max_len=60)
+    if not title:
+        title = "Local Rumor"
+
+    # 2. Location ID
+    loc_id = event_data.get("location_id")
+    dm = _get_dungeon_manager()
+    known_rooms = dm._all_known_room_ids(world_state if world_state else {})
+    if not isinstance(loc_id, str) or loc_id not in known_rooms:
+        loc_id = world_state.get("current_location", "town_riverside") if world_state else "town_riverside"
+
+    # 3. Context Line
+    raw_context = event_data.get("context_line", "")
+    context_line = sanitize_text(raw_context, max_len=200, allow_newlines=False)
+    if not context_line:
+        logger.debug("validate_generated_event: missing or empty context_line — dropped.")
+        return None
+
+    # 4. Rumor text
+    raw_rumor = event_data.get("rumor_text")
+    rumor_text = sanitize_text(raw_rumor, max_len=200, allow_newlines=False) if raw_rumor else None
+
+    # 5. Post to notice board
+    post_nb = bool(event_data.get("post_to_notice_board", False)) or (rumor_text is not None)
+
+    # 6. Reward gold
+    raw_gold = event_data.get("reward_gold", 0)
+    reward_gold = int(raw_gold) if isinstance(raw_gold, (int, float)) else 0
+    reward_gold = max(0, min(100, reward_gold))
+
+    return {
+        "title": title,
+        "location_id": loc_id,
+        "context_line": context_line,
+        "rumor_text": rumor_text,
+        "post_to_notice_board": post_nb,
+        "reward_gold": reward_gold,
+    }
+
+
 # ─── Catalog caches (loaded once, then reused) ───────────────────────────────
 _item_catalog: Optional[Dict] = None
 _monster_catalog: Optional[Dict] = None
@@ -965,6 +1018,24 @@ def validate_extraction_output(
 
             alias_to_real_npc_id[alias] = real_id
             alias_to_real_npc_id[alias_clean] = real_id
+
+    # ── generated_events (Spec: Dynamic World Events & Rumors) ───────────────
+    alias_to_real_event_id: Dict[str, str] = {}
+    if "generated_events" in raw and isinstance(raw["generated_events"], dict):
+        dm = _get_dungeon_manager()
+        for alias, e_data in raw["generated_events"].items():
+            if not isinstance(alias, str) or not alias.strip():
+                continue
+            alias_clean = alias.strip().lower()
+
+            valid_event = validate_generated_event(e_data, world_state=world_state)
+            if valid_event is None:
+                logger.debug(f"generated_event '{alias}' failed validation — dropped.")
+                continue
+
+            real_id = dm.register_dynamic_event(valid_event, world_state if world_state else {})
+            alias_to_real_event_id[alias] = real_id
+            alias_to_real_event_id[alias_clean] = real_id
 
     # ── state_updates ──────────────────────────────────────────────────────────
     if "state_updates" in raw:
