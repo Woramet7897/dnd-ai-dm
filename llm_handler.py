@@ -16,12 +16,14 @@ Features:
 5. Model-Swap Decision: defaults to SAME model (llama3) for narrative and extraction to prevent 4GB VRAM swap overhead.
 """
 
+import datetime
 import json
 import logging
 import os
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
+import zoneinfo
 
 import validation
 
@@ -42,26 +44,159 @@ MAX_PROMPT_RATIO = 0.70  # 70% of num_ctx for system prompt + history budget
 
 # ── Cloud Engine: Google Gemini Flash (Free Tier) ─────────────────────────────
 GEMINI_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "data", "gemini_config.json")
-DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
+KNOWN_SHUTDOWN_MODELS = {
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash-lite-001",
+}
+GEMINI_COOLDOWN_SECONDS = 600  # 10 minutes cooldown on HTTP 429 / RESOURCE_EXHAUSTED
+
+# Module-level state for Gemini quota cooldown and session error tracking
+_gemini_cooldown_until: float = 0.0
+_gemini_session_disabled: bool = False
+_gemini_disabled_reason: Optional[str] = None
+_gemini_last_error_type: Optional[str] = None
+
+
+def reset_gemini_state() -> None:
+    """Reset Gemini runtime cooldown and session disabled state (for testing and UI reset)."""
+    global _gemini_cooldown_until, _gemini_session_disabled, _gemini_disabled_reason, _gemini_last_error_type
+    _gemini_cooldown_until = 0.0
+    _gemini_session_disabled = False
+    _gemini_disabled_reason = None
+    _gemini_last_error_type = None
+
+
+def get_pacific_date_str() -> str:
+    """Return current date in US Pacific time (YYYY-MM-DD) where quota resets at midnight."""
+    try:
+        zi = zoneinfo.ZoneInfo("America/Los_Angeles")
+        return datetime.datetime.now(zi).strftime("%Y-%m-%d")
+    except Exception:
+        tz_pacific = datetime.timezone(datetime.timedelta(hours=-7))
+        return datetime.datetime.now(tz_pacific).strftime("%Y-%m-%d")
+
+
+def get_gemini_daily_calls() -> int:
+    """Retrieve number of successful Gemini calls today (Pacific time)."""
+    cfg = load_gemini_config()
+    daily = cfg.get("daily_calls", {})
+    today_pt = get_pacific_date_str()
+    if daily.get("date") == today_pt:
+        return int(daily.get("count", 0))
+    return 0
+
+
+def increment_gemini_daily_calls() -> int:
+    """Increment successful Gemini call count for current Pacific date and persist."""
+    cfg = load_gemini_config()
+    today_pt = get_pacific_date_str()
+    daily = cfg.get("daily_calls", {})
+    if daily.get("date") == today_pt:
+        count = int(daily.get("count", 0)) + 1
+    else:
+        count = 1
+    daily_data = {"date": today_pt, "count": count}
+    cfg["daily_calls"] = daily_data
+    save_gemini_config(
+        api_key=cfg.get("api_key", ""),
+        model=cfg.get("model", DEFAULT_GEMINI_MODEL),
+        engine=cfg.get("engine", "gemini"),
+        reset_state=False,
+        daily_calls=daily_data,
+        user_daily_limit=cfg.get("user_daily_limit"),
+    )
+    return count
+
+
+def get_gemini_user_daily_limit() -> Optional[int]:
+    """Retrieve user-configured daily Gemini call limit if set."""
+    cfg = load_gemini_config()
+    lim = cfg.get("user_daily_limit")
+    if lim is not None and str(lim).isdigit() and int(lim) > 0:
+        return int(lim)
+    return None
+
+
+def set_gemini_user_daily_limit(limit: Optional[int]) -> None:
+    """Save user-configured daily Gemini call limit."""
+    cfg = load_gemini_config()
+    save_gemini_config(
+        api_key=cfg.get("api_key", ""),
+        model=cfg.get("model", DEFAULT_GEMINI_MODEL),
+        engine=cfg.get("engine", "gemini"),
+        reset_state=False,
+        daily_calls=cfg.get("daily_calls"),
+        user_daily_limit=limit,
+    )
+
+
+def get_gemini_status() -> Dict[str, Any]:
+    """
+    Expose current Gemini status for UI and monitoring.
+    Returns dict with keys: engine, cooldown_until, cooldown_seconds_remaining,
+    session_disabled, disabled_reason, last_error_type, calls_today.
+    """
+    now = time.time()
+    in_cooldown = now < _gemini_cooldown_until
+    return {
+        "engine": get_active_engine(),
+        "cooldown_until": _gemini_cooldown_until if in_cooldown else None,
+        "cooldown_seconds_remaining": int(_gemini_cooldown_until - now) if in_cooldown else 0,
+        "session_disabled": _gemini_session_disabled,
+        "disabled_reason": _gemini_disabled_reason,
+        "last_error_type": _gemini_last_error_type,
+        "calls_today": get_gemini_daily_calls(),
+    }
 
 
 def load_gemini_config() -> Dict[str, Any]:
-    """Load local Gemini API configuration if present."""
+    """Load local Gemini API configuration if present, substituting shutdown models."""
     if os.path.exists(GEMINI_CONFIG_PATH):
         try:
             with open(GEMINI_CONFIG_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
+                cfg = json.load(f)
+            saved_model = cfg.get("model")
+            if saved_model in KNOWN_SHUTDOWN_MODELS:
+                logger.warning(
+                    f"Configured model '{saved_model}' is shut down. "
+                    f"Substituting default '{DEFAULT_GEMINI_MODEL}'."
+                )
+                cfg["model"] = DEFAULT_GEMINI_MODEL
+            return cfg
         except Exception:
             return {}
     return {}
 
 
-def save_gemini_config(api_key: str, model: str = DEFAULT_GEMINI_MODEL, engine: str = "gemini") -> None:
+def save_gemini_config(
+    api_key: str,
+    model: str = DEFAULT_GEMINI_MODEL,
+    engine: str = "gemini",
+    reset_state: bool = True,
+    **kwargs: Any,
+) -> None:
     """Save Gemini API configuration locally in data/gemini_config.json."""
     try:
+        if reset_state:
+            reset_gemini_state()
         os.makedirs(os.path.dirname(GEMINI_CONFIG_PATH), exist_ok=True)
+        existing = {}
+        if os.path.exists(GEMINI_CONFIG_PATH):
+            try:
+                with open(GEMINI_CONFIG_PATH, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+            except Exception:
+                existing = {}
+        existing["api_key"] = api_key.strip()
+        existing["model"] = model.strip()
+        existing["engine"] = engine.strip()
+        for k, v in kwargs.items():
+            existing[k] = v
         with open(GEMINI_CONFIG_PATH, "w", encoding="utf-8") as f:
-            json.dump({"api_key": api_key.strip(), "model": model.strip(), "engine": engine.strip()}, f, indent=2)
+            json.dump(existing, f, indent=2)
     except Exception as ex:
         logger.error(f"Failed to save Gemini config: {ex}")
 
@@ -79,7 +214,15 @@ def get_gemini_api_key() -> Optional[str]:
 
 
 def get_active_engine() -> str:
-    """Return active LLM engine: 'gemini' or 'ollama'."""
+    """
+    Return active LLM engine: 'gemini' or 'ollama'.
+    Falls back to 'ollama' if cooldown is active or Gemini is disabled for the session.
+    """
+    global _gemini_cooldown_until, _gemini_session_disabled
+    now = time.time()
+    if _gemini_session_disabled or now < _gemini_cooldown_until:
+        return "ollama"
+
     env_e = os.environ.get("LLM_ENGINE")
     if env_e:
         return env_e.lower().strip()
@@ -100,15 +243,40 @@ def call_gemini_api(
     """
     Call Google Gemini REST API directly using requests.
     Zero heavy SDK dependencies, works across all Python versions.
+    Classifies error kinds: 'quota', 'auth', 'not_found', 'timeout', 'network', 'other'.
     """
+    global _gemini_cooldown_until, _gemini_session_disabled, _gemini_disabled_reason, _gemini_last_error_type
     import requests
+
+    now = time.time()
+    if _gemini_session_disabled:
+        return None, {
+            "error": f"Gemini is disabled for this session: {_gemini_disabled_reason}",
+            "error_type": _gemini_last_error_type or "other",
+            "elapsed_seconds": 0.0,
+        }
+    if now < _gemini_cooldown_until:
+        rem = int(_gemini_cooldown_until - now)
+        return None, {
+            "error": f"Gemini quota cooldown active ({rem}s remaining)",
+            "error_type": "quota",
+            "elapsed_seconds": 0.0,
+        }
+
     key = api_key or get_gemini_api_key()
     if not key:
-        return None, {"error": "Missing Gemini API Key"}
+        _gemini_last_error_type = "auth"
+        return None, {"error": "Missing Gemini API Key", "error_type": "auth", "elapsed_seconds": 0.0}
 
     cfg = load_gemini_config()
     chosen_model = model or cfg.get("model") or DEFAULT_GEMINI_MODEL
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{chosen_model}:generateContent?key={key}"
+    if chosen_model in KNOWN_SHUTDOWN_MODELS:
+        logger.warning(
+            f"Requested model '{chosen_model}' is shut down. "
+            f"Substituting default '{DEFAULT_GEMINI_MODEL}'."
+        )
+        chosen_model = DEFAULT_GEMINI_MODEL
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{chosen_model}:generateContent"
 
     payload: Dict[str, Any] = {
         "contents": contents,
@@ -124,28 +292,71 @@ def call_gemini_api(
     if response_mime_type:
         payload["generationConfig"]["responseMimeType"] = response_mime_type
 
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": key,
+    }
+
     start_t = time.time()
     try:
         resp = requests.post(
             url,
             json=payload,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             timeout=25
         )
         elapsed = time.time() - start_t
         if resp.status_code != 200:
-            err_msg = f"HTTP {resp.status_code}: {resp.text}"
-            logger.error(f"Gemini API returned error: {err_msg}")
-            return None, {"error": err_msg, "elapsed_seconds": elapsed}
+            resp_text = resp.text or ""
+            if key and key in resp_text:
+                resp_text = resp_text.replace(key, "[REDACTED_API_KEY]")
+            truncated_body = resp_text[:300] + "..." if len(resp_text) > 300 else resp_text
+            err_msg = f"HTTP {resp.status_code}: {truncated_body}"
+
+            if resp.status_code == 429 or "RESOURCE_EXHAUSTED" in resp_text:
+                error_type = "quota"
+                _gemini_cooldown_until = time.time() + GEMINI_COOLDOWN_SECONDS
+                _gemini_last_error_type = "quota"
+                logger.warning(
+                    f"Gemini quota exhausted (HTTP {resp.status_code}). "
+                    f"Cooldown activated for {GEMINI_COOLDOWN_SECONDS}s. Falling back to Ollama."
+                )
+            elif resp.status_code in (401, 403) or "PERMISSION_DENIED" in resp_text or "API_KEY_INVALID" in resp_text:
+                error_type = "auth"
+                _gemini_session_disabled = True
+                _gemini_disabled_reason = "Authentication failed (Invalid API key)"
+                _gemini_last_error_type = "auth"
+                logger.error(
+                    f"Gemini authentication failed (HTTP {resp.status_code}): {truncated_body}. "
+                    "Gemini has been disabled for this session. Please check your API key at https://aistudio.google.com/app/apikey"
+                )
+            elif resp.status_code == 404:
+                error_type = "not_found"
+                _gemini_session_disabled = True
+                _gemini_disabled_reason = f"Model '{chosen_model}' not found (HTTP 404)"
+                _gemini_last_error_type = "not_found"
+                logger.error(
+                    f"Gemini model '{chosen_model}' not found (HTTP 404). "
+                    "Model may be shut down or nonexistent. Gemini has been disabled for this session. "
+                    "Please choose an active model in AI settings."
+                )
+            else:
+                error_type = "other"
+                _gemini_last_error_type = "other"
+                logger.error(f"Gemini API returned error: {err_msg}")
+
+            return None, {"error": err_msg, "error_type": error_type, "elapsed_seconds": elapsed}
 
         data = resp.json()
         candidates = data.get("candidates", [])
         if not candidates:
-            return None, {"error": "No candidates returned by Gemini", "elapsed_seconds": elapsed}
+            _gemini_last_error_type = "other"
+            return None, {"error": "No candidates returned by Gemini", "error_type": "other", "elapsed_seconds": elapsed}
 
         first_cand = candidates[0]
         text = first_cand.get("content", {}).get("parts", [{}])[0].get("text", "")
         usage = data.get("usageMetadata", {})
+        calls_today = increment_gemini_daily_calls()
         metrics = {
             "eval_count": usage.get("candidatesTokenCount", 0),
             "prompt_eval_count": usage.get("promptTokenCount", 0),
@@ -154,12 +365,23 @@ def call_gemini_api(
             "elapsed_seconds": elapsed,
             "engine": "gemini",
             "model": chosen_model,
+            "calls_today": calls_today,
         }
         return text, metrics
     except Exception as ex:
         elapsed = time.time() - start_t
-        logger.error(f"Gemini API call failed after {elapsed:.2f}s: {ex}")
-        return None, {"error": str(ex), "elapsed_seconds": elapsed}
+        if isinstance(ex, requests.Timeout):
+            error_type = "timeout"
+            logger.warning(f"Gemini API call timed out after {elapsed:.2f}s: {ex}. Falling back to Ollama without cooldown.")
+        elif isinstance(ex, (requests.ConnectionError, requests.RequestException)):
+            error_type = "network"
+            logger.error(f"Gemini API network error after {elapsed:.2f}s: {ex}. Falling back to Ollama.")
+        else:
+            error_type = "other"
+            logger.error(f"Gemini API call failed after {elapsed:.2f}s: {ex}")
+
+        _gemini_last_error_type = error_type
+        return None, {"error": str(ex), "error_type": error_type, "elapsed_seconds": elapsed}
 
 
 def test_gemini_connection(api_key: str, model: str = DEFAULT_GEMINI_MODEL) -> Tuple[bool, str]:
@@ -799,7 +1021,8 @@ def extract_state_updates(
     logger.debug(f"Calling Ollama extraction model='{effective_model}', num_ctx={num_ctx}.")
     start_t = time.time()
 
-    def do_call(msgs: List[Dict[str, str]]) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    def do_call(msgs: List[Dict[str, str]], force_ollama: bool = False) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+        m: Dict[str, Any] = {}
         try:
             if client is not None:
                 resp = client.chat(model=effective_model, messages=msgs, format="json", options=options)
@@ -808,18 +1031,19 @@ def extract_state_updates(
                     "prompt_eval_count": resp.get("prompt_eval_count", 0),
                     "eval_duration": resp.get("eval_duration", 0),
                     "total_duration": resp.get("total_duration", 0),
+                    "engine": "client",
                 }
                 content = resp.get("message", {}).get("content", "")
-            elif get_active_engine() == "gemini" and get_gemini_api_key():
+            elif not force_ollama and get_active_engine() == "gemini" and get_gemini_api_key():
                 g_prompt = msgs[-1].get("content", "")
                 g_text, g_metrics = call_gemini_api(
                     contents=[{"role": "user", "parts": [{"text": g_prompt}]}],
                     temperature=0.1,
                     response_mime_type="application/json",
                 )
+                m = g_metrics or {}
                 if g_text is not None:
                     content = g_text
-                    m = g_metrics
                 else:
                     import ollama  # type: ignore
                     resp = ollama.chat(model=effective_model, messages=msgs, format="json", options=options)
@@ -828,6 +1052,7 @@ def extract_state_updates(
                         "prompt_eval_count": resp.get("prompt_eval_count", 0),
                         "eval_duration": resp.get("eval_duration", 0),
                         "total_duration": resp.get("total_duration", 0),
+                        "engine": "ollama",
                     }
                     content = resp.get("message", {}).get("content", "")
             else:
@@ -838,6 +1063,7 @@ def extract_state_updates(
                     "prompt_eval_count": resp.get("prompt_eval_count", 0),
                     "eval_duration": resp.get("eval_duration", 0),
                     "total_duration": resp.get("total_duration", 0),
+                    "engine": "ollama",
                 }
                 content = resp.get("message", {}).get("content", "")
 
@@ -846,19 +1072,36 @@ def extract_state_updates(
                 parsed = {}
             return parsed, m
         except Exception as ex:
-            return None, {"error": str(ex)}
+            err_m = dict(m) if m else {}
+            err_m["error"] = str(ex)
+            return None, err_m
 
     # Attempt 1
     raw_dict, metrics1 = do_call(messages)
 
-    # Retry Policy (Spec 13b): if JSON syntax parse failed, retry ONCE with strict reminder
+    # Retry Policy (Spec 13b & Step 3 Hardening):
+    # Stop double-billing quota on retries.
+    # When Gemini is used, response_mime_type="application/json" guarantees structured JSON output
+    # directly from the Gemini API, making malformed JSON syntax exceedingly rare.
+    # If attempt 1 was served by Gemini and still failed to parse valid JSON, calling Gemini a second time
+    # would consume another cloud API request in the same turn (up to 3 calls: narrative + 2 extraction).
+    # To protect the user's daily Gemini free-tier quota from double-billing, we route the retry
+    # to local Ollama (force_ollama=True) or fall back to an empty update {} if Ollama is unreachable.
     if raw_dict is None:
-        logger.warning(f"Extraction attempt 1 failed to parse valid JSON ({metrics1.get('error')}). Retrying once...")
+        was_gemini = metrics1.get("engine") == "gemini"
+        if was_gemini:
+            logger.warning(
+                f"Extraction attempt 1 via Gemini failed to parse valid JSON ({metrics1.get('error')}). "
+                "Skipping second Gemini call to prevent double-billing quota; attempting local Ollama fallback retry..."
+            )
+        else:
+            logger.warning(f"Extraction attempt 1 failed to parse valid JSON ({metrics1.get('error')}). Retrying once...")
+
         messages.append({
             "role": "user",
             "content": "CRITICAL ERROR: Your previous response was not valid JSON. Output ONLY a raw, valid JSON object matching the requested schema. No markdown, no prose.",
         })
-        raw_dict, metrics2 = do_call(messages)
+        raw_dict, metrics2 = do_call(messages, force_ollama=was_gemini)
         if raw_dict is None:
             logger.error(f"Extraction attempt 2 failed after retry ({metrics2.get('error')}). Falling back to empty update.")
             return {}

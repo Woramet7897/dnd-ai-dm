@@ -1159,16 +1159,32 @@ def render_sidebar():
                 help="กดรับ API Key ฟรีได้ที่ https://aistudio.google.com"
             )
 
-            gemini_model_opts = ["gemini-2.0-flash", "gemini-1.5-flash"]
+            gemini_model_opts = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
             cur_cfg = llm_handler.load_gemini_config()
-            cur_g_model = cur_cfg.get("model", "gemini-2.0-flash")
+            cur_g_model = cur_cfg.get("model", llm_handler.DEFAULT_GEMINI_MODEL)
+            if cur_g_model in llm_handler.KNOWN_SHUTDOWN_MODELS:
+                cur_g_model = llm_handler.DEFAULT_GEMINI_MODEL
+            if cur_g_model not in gemini_model_opts:
+                gemini_model_opts.append(cur_g_model)
+            gemini_model_opts.append("Other (กำหนดเอง)")
+
             g_idx = gemini_model_opts.index(cur_g_model) if cur_g_model in gemini_model_opts else 0
             chosen_g_model = st.selectbox(
                 "รุ่นโมเดล Gemini:",
                 options=gemini_model_opts,
                 index=g_idx,
-                key="sb_gemini_model_selector"
+                key="sb_gemini_model_selector",
+                help="เลือกรุ่นโมเดล Gemini จาก Google AI Studio"
             )
+            if chosen_g_model == "Other (กำหนดเอง)":
+                custom_model_name = st.text_input(
+                    "ป้อนชื่อรุ่นโมเดล:",
+                    value=cur_g_model if cur_g_model not in ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"] else "",
+                    placeholder="e.g. gemini-3.6-flash",
+                    key="sb_gemini_custom_model_input"
+                )
+                if custom_model_name.strip():
+                    chosen_g_model = custom_model_name.strip()
 
             col_k1, col_k2 = st.columns(2)
             with col_k1:
@@ -1190,10 +1206,43 @@ def render_sidebar():
                     else:
                         st.warning("กรุณาใส่ API Key")
 
-            if gemini_key:
+            # Gemini engine status & Daily calls display
+            g_status = llm_handler.get_gemini_status()
+            calls_today = g_status.get("calls_today", 0)
+
+            st.markdown(f"📊 **Gemini calls today:** `{calls_today}` *(รีเซ็ตเที่ยงคืน Pacific)*")
+
+            if g_status.get("session_disabled"):
+                st.error(f"⚠️ **สถานะ:** ถูกระงับในเซสชันนี้ ({g_status.get('disabled_reason', 'Error')})")
+            elif g_status.get("cooldown_seconds_remaining", 0) > 0:
+                st.warning(f"⏳ **สถานะ:** พักคูลดาวน์โควต้า (HTTP 429) — เหลืออีก {g_status['cooldown_seconds_remaining']} วินาที")
+            elif gemini_key:
                 st.markdown("🟢 **สถานะ:** พร้อมใช้งาน (Gemini Flash)")
             else:
                 st.markdown("🟡 **สถานะ:** รอใส่ API Key")
+
+            # User-customizable daily quota limit (from https://aistudio.google.com/rate-limit)
+            user_lim = llm_handler.get_gemini_user_daily_limit()
+            user_lim_input = st.number_input(
+                "กำหนดขีดจำกัดจำนวนครั้งต่อวัน (Optional):",
+                min_value=0,
+                max_value=100000,
+                value=int(user_lim) if user_lim is not None else 0,
+                step=50,
+                key="sb_gemini_daily_limit_input",
+                help="ป้อนขีดจำกัดจากหน้า AI Studio ของคุณ (https://aistudio.google.com/rate-limit) เพื่อให้ระบบช่วยเตือน (ใส่ 0 หากไม่ระบุ)"
+            )
+            if user_lim_input > 0:
+                if user_lim != user_lim_input:
+                    llm_handler.set_gemini_user_daily_limit(user_lim_input)
+                pct = calls_today / user_lim_input
+                if pct >= 1.0:
+                    st.error(f"🚨 ใช้โควต้าครบกำหนด {calls_today}/{user_lim_input} ครั้งแล้ว")
+                elif pct >= 0.8:
+                    st.warning(f"⚠️ เรียกใช้งานเกิน 80% ของขีดจำกัดที่ตั้งไว้ ({calls_today}/{user_lim_input} ครั้ง - {int(pct * 100)}%)")
+            elif user_lim is not None and user_lim_input == 0:
+                llm_handler.set_gemini_user_daily_limit(None)
+
             st.markdown("[👉 คลิกที่นี่เพื่อรับ Gemini API Key ฟรี](https://aistudio.google.com/app/apikey)")
 
         else:
