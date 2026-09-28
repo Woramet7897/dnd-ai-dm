@@ -1435,6 +1435,62 @@ def attempt_escape(world: Dict[str, Any], player: Dict[str, Any]) -> Dict[str, A
     }
 
 
+def resolve_inspiration_reroll(
+    pending: Dict[str, Any],
+    player: Dict[str, Any],
+    world: Dict[str, Any],
+    roll_fn: Any = state_manager._roll_d20,
+) -> Dict[str, Any]:
+    """
+    Resolve an inspiration reroll using D&D 5e / BG3 rules.
+    Takes max(original_roll, reroll_die), calculates total against dc.
+    If pending kind is 'escape', success is True, and player is held captive/imprisoned:
+        calls apply_escape_success(world, player) and sets escaped=True.
+    Returns:
+        dict with keys:
+            reroll_die: int
+            final_die: int
+            new_total: int
+            success: bool
+            escaped: bool
+            safe_room: Optional[str]
+    """
+    reroll_die = roll_fn()
+    original_roll = pending.get("original_roll", 1)
+    final_die = max(original_roll, reroll_die)
+    mod = pending.get("modifier", 0)
+    prof = pending.get("proficiency", 0)
+    bonus = pending.get("bonus", 0)
+    dc = pending.get("dc", 10)
+
+    new_total = final_die + mod + prof + bonus
+    is_crit = (final_die == 20)
+    is_fumble = (final_die == 1)
+    new_succ = True if is_crit else (False if is_fumble else (new_total >= dc))
+
+    escaped = False
+    safe_room = None
+
+    if pending.get("kind") == "escape" and new_succ:
+        is_held = (
+            player.get("status") == "captive"
+            or bool(player.get("crime_state", {}).get("imprisoned"))
+            or bool(world.get("is_imprisoned"))
+        )
+        if is_held:
+            safe_room = apply_escape_success(world, player)
+            escaped = True
+
+    return {
+        "reroll_die": reroll_die,
+        "final_die": final_die,
+        "new_total": new_total,
+        "success": new_succ,
+        "escaped": escaped,
+        "safe_room": safe_room,
+    }
+
+
 def resolve_player_combat_action(
     action_type: str,
     player_c: Dict[str, Any],
@@ -2092,12 +2148,11 @@ def render_playing_view():
                 with col_reroll_btn:
                     if st.button("✨ ใช้ 1 Inspiration เพื่อทอยใหม่ (Reroll)", type="primary", use_container_width=True, key="btn_insp_reroll"):
                         if state_manager.spend_inspiration(player):
-                            reroll_die = state_manager._roll_d20()
-                            final_die = max(pending_reroll["original_roll"], reroll_die)
-                            new_total = final_die + pending_reroll["modifier"] + pending_reroll.get("proficiency", 0) + pending_reroll.get("bonus", 0)
-                            is_crit = (final_die == 20)
-                            is_fumble = (final_die == 1)
-                            new_succ = True if is_crit else (False if is_fumble else (new_total >= pending_reroll["dc"]))
+                            reroll_res = resolve_inspiration_reroll(pending_reroll, player, world)
+                            reroll_die = reroll_res["reroll_die"]
+                            final_die = reroll_res["final_die"]
+                            new_total = reroll_res["new_total"]
+                            new_succ = reroll_res["success"]
                             res_str = "SUCCESS ✅" if new_succ else "FAILURE ❌"
                             st.session_state["narrative_log"].append({
                                 "role": "assistant",
@@ -2107,18 +2162,11 @@ def render_playing_view():
                                     f"+ mod {pending_reroll['modifier']} = **{new_total}** → **{res_str}**"
                                 )
                             })
-                            if pending_reroll.get("kind") == "escape" and new_succ:
-                                is_held = (
-                                    player.get("status") == "captive"
-                                    or bool(player.get("crime_state", {}).get("imprisoned"))
-                                    or bool(world.get("is_imprisoned"))
-                                )
-                                if is_held:
-                                    safe_room = apply_escape_success(world, player)
-                                    st.session_state["narrative_log"].append({
-                                        "role": "assistant",
-                                        "content": f"🔓 **Escape Successful!** You used Inspiration to break free from your bonds and fled to **{safe_room}**."
-                                    })
+                            if reroll_res["escaped"]:
+                                st.session_state["narrative_log"].append({
+                                    "role": "assistant",
+                                    "content": f"🔓 **Escape Successful!** You used Inspiration to break free from your bonds and fled to **{reroll_res['safe_room']}**."
+                                })
                             del st.session_state["pending_inspiration_reroll"]
                             auto_save()
                             st.rerun()

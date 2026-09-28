@@ -541,6 +541,100 @@ class TestAppIntegrations(unittest.TestCase):
             self.assertIsNone(msg)
             mock_start.assert_not_called()
 
+    # ────────────────────────────────────────────────────────────────────────────
+    # Task A: resolve_inspiration_reroll Tests
+    # ────────────────────────────────────────────────────────────────────────────
+
+    def test_resolve_inspiration_reroll_escape_success(self):
+        """(1) escape + reroll success -> status normal, location changed, escaped True."""
+        self.fighter["status"] = "captive"
+        self.world["current_location"] = "crossroads"
+        self.world["visited_rooms"] = ["town_riverside", "crossroads"]
+        pending = {"kind": "escape", "original_roll": 4, "modifier": 2, "proficiency": 0, "bonus": 0, "dc": 15, "stat": "DEX"}
+
+        res = app.resolve_inspiration_reroll(pending, self.fighter, self.world, roll_fn=lambda: 18)
+
+        self.assertEqual(res["reroll_die"], 18)
+        self.assertEqual(res["final_die"], 18)
+        self.assertEqual(res["new_total"], 20)
+        self.assertTrue(res["success"])
+        self.assertTrue(res["escaped"])
+        self.assertEqual(res["safe_room"], "town_riverside")
+        self.assertEqual(self.fighter["status"], "normal")
+        self.assertEqual(self.world["current_location"], "town_riverside")
+
+    def test_resolve_inspiration_reroll_escape_failure(self):
+        """(2) escape + reroll failure -> player remains captive, location unchanged, escaped False."""
+        self.fighter["status"] = "captive"
+        self.world["current_location"] = "crossroads"
+        self.world["visited_rooms"] = ["town_riverside", "crossroads"]
+        pending = {"kind": "escape", "original_roll": 2, "modifier": 1, "proficiency": 0, "bonus": 0, "dc": 15, "stat": "DEX"}
+
+        res = app.resolve_inspiration_reroll(pending, self.fighter, self.world, roll_fn=lambda: 5)
+
+        self.assertEqual(res["reroll_die"], 5)
+        self.assertEqual(res["final_die"], 5)
+        self.assertEqual(res["new_total"], 6)
+        self.assertFalse(res["success"])
+        self.assertFalse(res["escaped"])
+        self.assertIsNone(res["safe_room"])
+        self.assertEqual(self.fighter["status"], "captive")
+        self.assertEqual(self.world["current_location"], "crossroads")
+
+    def test_resolve_inspiration_reroll_success_not_held(self):
+        """(3) reroll success but player is not captive/imprisoned -> escaped False, no room move."""
+        self.fighter["status"] = "normal"
+        self.world["current_location"] = "dungeon_room_1"
+        pending = {"kind": "escape", "original_roll": 3, "modifier": 2, "proficiency": 0, "bonus": 0, "dc": 10, "stat": "DEX"}
+
+        res = app.resolve_inspiration_reroll(pending, self.fighter, self.world, roll_fn=lambda: 15)
+
+        self.assertTrue(res["success"])
+        self.assertFalse(res["escaped"])
+        self.assertIsNone(res["safe_room"])
+        self.assertEqual(self.fighter["status"], "normal")
+        self.assertEqual(self.world["current_location"], "dungeon_room_1")
+
+    def test_resolve_inspiration_reroll_no_kind_ability_check(self):
+        """(4) pending without kind (normal ability check) -> does not touch status or location."""
+        self.fighter["status"] = "captive"
+        self.world["current_location"] = "crossroads"
+        pending = {"stat": "STR", "dc": 12, "modifier": 3, "original_roll": 4}
+
+        res = app.resolve_inspiration_reroll(pending, self.fighter, self.world, roll_fn=lambda: 16)
+
+        self.assertTrue(res["success"])
+        self.assertFalse(res["escaped"])
+        self.assertIsNone(res["safe_room"])
+        self.assertEqual(self.fighter["status"], "captive")
+        self.assertEqual(self.world["current_location"], "crossroads")
+
+    def test_resolve_inspiration_reroll_crit_fumble_and_max_selection(self):
+        """(5) roll 20 -> always success, roll 1 -> always fail, uses max(original, reroll)."""
+        # Roll 20 critical success against impossible DC
+        pending_crit = {"stat": "INT", "dc": 35, "modifier": -2, "original_roll": 5}
+        res_crit = app.resolve_inspiration_reroll(pending_crit, self.fighter, self.world, roll_fn=lambda: 20)
+        self.assertEqual(res_crit["final_die"], 20)
+        self.assertTrue(res_crit["success"])
+
+        # Roll 1 fumble failure even when total >= DC
+        pending_fumble = {"stat": "STR", "dc": 5, "modifier": 10, "original_roll": 1}
+        res_fumble = app.resolve_inspiration_reroll(pending_fumble, self.fighter, self.world, roll_fn=lambda: 1)
+        self.assertEqual(res_fumble["final_die"], 1)
+        self.assertFalse(res_fumble["success"])
+
+        # Takes max(original, reroll): original higher than reroll
+        pending_max1 = {"stat": "DEX", "dc": 15, "modifier": 0, "original_roll": 14}
+        res_max1 = app.resolve_inspiration_reroll(pending_max1, self.fighter, self.world, roll_fn=lambda: 8)
+        self.assertEqual(res_max1["reroll_die"], 8)
+        self.assertEqual(res_max1["final_die"], 14)
+
+        # Takes max(original, reroll): reroll higher than original
+        pending_max2 = {"stat": "DEX", "dc": 15, "modifier": 0, "original_roll": 6}
+        res_max2 = app.resolve_inspiration_reroll(pending_max2, self.fighter, self.world, roll_fn=lambda: 16)
+        self.assertEqual(res_max2["reroll_die"], 16)
+        self.assertEqual(res_max2["final_die"], 16)
+
 
 if __name__ == "__main__":
     unittest.main()
