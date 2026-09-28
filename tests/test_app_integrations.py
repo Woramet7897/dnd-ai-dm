@@ -643,6 +643,35 @@ class TestAppIntegrations(unittest.TestCase):
         self.assertEqual(res_max2["reroll_die"], 16)
         self.assertEqual(res_max2["final_die"], 16)
 
+    # ────────────────────────────────────────────────────────────────────────────
+    # Task A: Sell Tab Key Uniqueness Tests
+    # ────────────────────────────────────────────────────────────────────────────
+
+    def test_sell_button_keys_unique_with_duplicate_item_stacks(self):
+        """Task A: Multiple stacks of same item_id (e.g. from pickpocket) generate distinct widget keys."""
+        inventory = [
+            {"item_id": "dagger", "quantity": 1, "equipped": False},
+            {"item_id": "shield", "quantity": 1, "equipped": True},
+            {"item_id": "dagger", "quantity": 1, "equipped": False, "stolen": True},
+            {"item_id": "dagger", "quantity": 1, "equipped": False, "stolen": True},
+            {"item_id": "shortsword", "quantity": 1, "equipped": False},
+        ]
+        shop_id = "shop_blacksmith"
+        keys = app.get_sell_button_keys(shop_id, inventory)
+
+        # 4 unequipped items (3 daggers + 1 shortsword)
+        self.assertEqual(len(keys), 4)
+        # All keys must be strictly unique to prevent StreamlitDuplicateElementKey
+        self.assertEqual(len(keys), len(set(keys)))
+
+        expected_keys = [
+            "sell_shop_blacksmith_0_dagger",
+            "sell_shop_blacksmith_2_dagger",
+            "sell_shop_blacksmith_3_dagger",
+            "sell_shop_blacksmith_4_shortsword",
+        ]
+        self.assertEqual(keys, expected_keys)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1557,6 +1557,20 @@ def _select_enemy_target(living_enemies: List[Dict[str, Any]], label: str, key: 
     return target_map[chosen_target_label]
 
 
+def get_sell_button_key(shop_id: str, index: int, item_id: str) -> str:
+    """Generate a unique Streamlit widget key for selling an inventory item."""
+    return f"sell_{shop_id}_{index}_{item_id}"
+
+
+def get_sell_button_keys(shop_id: str, inventory: List[Dict[str, Any]]) -> List[str]:
+    """Generate all sell button widget keys for unequipped items in inventory."""
+    return [
+        get_sell_button_key(shop_id, idx, item.get("item_id", ""))
+        for idx, item in enumerate(inventory)
+        if isinstance(item, dict) and not item.get("equipped")
+    ]
+
+
 def render_playing_view():
     player = st.session_state.get("player_state")
     world = st.session_state.get("world_state")
@@ -2565,12 +2579,12 @@ def render_playing_view():
 
                             with sell_tab:
                                 inv = player.get("inventory", [])
-                                non_equipped = [i for i in inv if isinstance(i, dict) and not i.get("equipped")]
+                                non_equipped = [(idx, i) for idx, i in enumerate(inv) if isinstance(i, dict) and not i.get("equipped")]
                                 if not non_equipped:
                                     st.info("No unequipped items available to sell.")
                                 else:
                                     item_cat = state_manager._get_item_catalog()
-                                    for s_item in non_equipped:
+                                    for idx, s_item in non_equipped:
                                         s_iid = s_item.get("item_id")
                                         s_qty = s_item.get("quantity", 1)
                                         i_info = item_cat.get(s_iid, {})
@@ -2581,7 +2595,8 @@ def render_playing_view():
                                         with col_s1:
                                             st.markdown(f"**{i_name}** (x{s_qty}) — Sells for {gain_text}")
                                         with col_s2:
-                                            if st.button(f"Sell (+{gain_text})", key=f"sell_{active_shop}_{s_iid}", use_container_width=True):
+                                            sell_key = get_sell_button_key(active_shop, idx, s_iid)
+                                            if st.button(f"Sell (+{gain_text})", key=sell_key, use_container_width=True):
                                                 ok_s, msg_s = state_manager.sell_item(s_iid, active_shop, player, world)
                                                 if ok_s:
                                                     st.toast(msg_s)
