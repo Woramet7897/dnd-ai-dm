@@ -308,6 +308,138 @@ def validate_generated_monster(m_data: Any, player_level: int = 1) -> Optional[D
     return monster_dict
 
 
+# ─── Dynamic NPC / Companion Safety Bounds & Validator ────────────────────────
+NPC_BOUNDS_BY_LEVEL: Dict[int, Dict[str, Any]] = {
+    1: {"max_hp": 30,  "max_ac": 16, "max_attack_bonus": 5, "max_avg_damage": 10.0},
+    2: {"max_hp": 40,  "max_ac": 16, "max_attack_bonus": 6, "max_avg_damage": 14.0},
+    3: {"max_hp": 55,  "max_ac": 17, "max_attack_bonus": 7, "max_avg_damage": 18.0},
+    4: {"max_hp": 70,  "max_ac": 17, "max_attack_bonus": 7, "max_avg_damage": 22.0},
+    5: {"max_hp": 85,  "max_ac": 18, "max_attack_bonus": 8, "max_avg_damage": 26.0},
+}
+
+
+def validate_generated_npc(npc_data: Any, player_level: int = 1) -> Optional[Dict[str, Any]]:
+    """
+    Validate a dynamic NPC/companion definition against safety bounds and sanitize text.
+    Returns cleaned companion template dict or None if invalid.
+    """
+    if not isinstance(npc_data, dict):
+        logger.debug(f"validate_generated_npc: input is not a dict ({type(npc_data).__name__}) — dropped.")
+        return None
+
+    # 1. Name
+    name = sanitize_text(npc_data.get("name"), max_len=40)
+    if not name:
+        logger.debug("validate_generated_npc: missing or empty NPC name — dropped.")
+        return None
+
+    # 2. Role / Title
+    role = sanitize_text(npc_data.get("role", npc_data.get("title", "Companion")), max_len=40) or "Companion"
+
+    # 3. Personality / Persona Seed
+    raw_persona = npc_data.get("persona_seed", npc_data.get("personality", ""))
+    persona_seed = sanitize_text(raw_persona, max_len=150) if raw_persona else f"A companion named {name}."
+
+    # 4. Level bounds
+    lvl = max(1, min(5, int(player_level) if isinstance(player_level, (int, float)) else 1))
+    bounds = NPC_BOUNDS_BY_LEVEL[lvl]
+
+    # 5. HP
+    raw_hp = npc_data.get("hp", 15)
+    if isinstance(raw_hp, dict):
+        hp_val = raw_hp.get("max") or raw_hp.get("current", 15)
+    elif isinstance(raw_hp, (int, float)):
+        hp_val = int(raw_hp)
+    else:
+        logger.debug(f"validate_generated_npc: invalid hp spec ({raw_hp!r}) — dropped.")
+        return None
+
+    if not isinstance(hp_val, int) or hp_val < 1 or hp_val > bounds["max_hp"]:
+        logger.debug(f"validate_generated_npc: hp={hp_val} out of bounds (1..{bounds['max_hp']}) — dropped.")
+        return None
+
+    # 6. AC
+    raw_ac = npc_data.get("ac", 12)
+    if not isinstance(raw_ac, (int, float)):
+        logger.debug(f"validate_generated_npc: invalid ac ({raw_ac!r}) — dropped.")
+        return None
+    ac = int(raw_ac)
+    if ac < 8 or ac > bounds["max_ac"]:
+        logger.debug(f"validate_generated_npc: ac={ac} out of bounds (8..{bounds['max_ac']}) — dropped.")
+        return None
+
+    # 7. Ability Stats
+    raw_stats = npc_data.get("stats")
+    clean_stats: Dict[str, int] = {}
+    default_stats = {"STR": 10, "DEX": 10, "CON": 10, "INT": 10, "WIS": 10, "CHA": 10}
+    if isinstance(raw_stats, dict):
+        for st in ("STR", "DEX", "CON", "INT", "WIS", "CHA"):
+            v = raw_stats.get(st, 10)
+            if not isinstance(v, (int, float)) or int(v) < 3 or int(v) > 20:
+                clean_stats[st] = 10
+            else:
+                clean_stats[st] = int(v)
+    else:
+        clean_stats = default_stats
+
+    # 8. Attacks
+    raw_attacks = npc_data.get("attacks")
+    clean_attacks: List[Dict[str, Any]] = []
+    if isinstance(raw_attacks, list) and raw_attacks:
+        for atk in raw_attacks[:2]:
+            if not isinstance(atk, dict):
+                continue
+            atk_name = sanitize_text(atk.get("name", "Attack"), max_len=30) or "Attack"
+            bonus = atk.get("attack_bonus", 2)
+            if not isinstance(bonus, (int, float)) or not (-2 <= int(bonus) <= bounds["max_attack_bonus"]):
+                bonus = 2
+            else:
+                bonus = int(bonus)
+
+            dmg_str = str(atk.get("damage", "1d6")).strip().lower()
+            avg_dmg = calculate_average_dice_damage(dmg_str)
+            if avg_dmg <= 0.0 or avg_dmg > bounds["max_avg_damage"]:
+                dmg_str = "1d6"
+
+            dtype = str(atk.get("damage_type", "slashing")).strip().lower()
+            if dtype not in VALID_DAMAGE_TYPES:
+                dtype = "slashing"
+
+            clean_attacks.append({
+                "name": atk_name,
+                "attack_bonus": bonus,
+                "damage": dmg_str,
+                "damage_type": dtype,
+            })
+
+    if not clean_attacks:
+        clean_attacks = [{
+            "name": f"{name}'s Strike",
+            "attack_bonus": 3,
+            "damage": "1d6+1",
+            "damage_type": "slashing",
+        }]
+
+    # 9. Approval
+    raw_approval = npc_data.get("approval", 50)
+    approval = int(raw_approval) if isinstance(raw_approval, (int, float)) else 50
+    approval = max(0, min(100, approval))
+
+    return {
+        "name": name,
+        "role": role,
+        "persona_seed": persona_seed,
+        "hp": {"current": hp_val, "max": hp_val},
+        "ac": ac,
+        "stats": clean_stats,
+        "attacks": clean_attacks,
+        "approval": approval,
+        "active_conditions": [],
+        "side": "player",
+        "death_saves": {"success": 0, "fail": 0},
+    }
+
+
 # ─── Dynamic Item Safety Bounds & Validator ──────────────────────────────────
 VALID_ITEM_TYPES: set = {
     "weapon", "wearable", "consumable", "tool", "food", "instrument", "ration", "raw_food",
@@ -626,7 +758,7 @@ def validate_monster_ids(enemy_ids: Any, world_state: Optional[Dict] = None) -> 
 
 def validate_npc_id(npc_id: Any, world_state: Dict) -> bool:
     """
-    Return True if npc_id exists in npc_relationships OR party.companions in the current world_state.
+    Return True if npc_id exists in npc_relationships, party.companions, or generated_npcs in world_state.
     Unknown NPC IDs are logged and must be dropped by the caller.
 
     Args:
@@ -652,7 +784,12 @@ def validate_npc_id(npc_id: Any, world_state: Dict) -> bool:
     if npc_id in companion_ids:
         return True
 
-    logger.debug(f"Unknown npc_id '{npc_id}' — not in npc_relationships or party.companions, dropped.")
+    # Check generated_npcs
+    gen_npcs = world_state.get("generated_npcs", {})
+    if npc_id in gen_npcs:
+        return True
+
+    logger.debug(f"Unknown npc_id '{npc_id}' — not in npc_relationships, party.companions, or generated_npcs, dropped.")
     return False
 
 
@@ -787,6 +924,48 @@ def validate_extraction_output(
             alias_to_real_item_id[alias] = real_id
             alias_to_real_item_id[alias_clean] = real_id
 
+    # ── generated_npcs (Spec: Dynamic NPC / Companion Generation) ────────────
+    alias_to_real_npc_id: Dict[str, str] = {}
+    if "generated_npcs" in raw and isinstance(raw["generated_npcs"], dict):
+        p_lvl = 1
+        if player_state and isinstance(player_state, dict):
+            p_lvl = player_state.get("level", 1)
+
+        party_comp_ids = set()
+        if world_state and isinstance(world_state, dict):
+            party_comp_ids = {
+                c.get("id") for c in world_state.get("party", {}).get("companions", [])
+                if isinstance(c, dict) and c.get("id")
+            }
+
+        for alias, n_data in raw["generated_npcs"].items():
+            if not isinstance(alias, str) or not alias.strip():
+                continue
+            alias_clean = alias.strip().lower()
+
+            if alias_clean in party_comp_ids:
+                logger.warning(
+                    f"generated_npcs rejected override of existing companion '{alias_clean}'."
+                )
+                continue
+
+            valid_npc = validate_generated_npc(n_data, player_level=p_lvl)
+            if valid_npc is None:
+                logger.debug(f"generated_npc '{alias}' failed validation — dropped.")
+                continue
+
+            # Rule 6: Python-generated ID (prevent LLM ID spoofing)
+            real_id = f"gen_npc_{uuid.uuid4().hex[:8]}"
+            valid_npc["id"] = real_id
+
+            if world_state is not None and isinstance(world_state, dict):
+                gen_npcs = world_state.setdefault("generated_npcs", {})
+                gen_npcs[real_id] = valid_npc
+                logger.info(f"Registered dynamic NPC '{valid_npc['name']}' as '{real_id}' in world_state.")
+
+            alias_to_real_npc_id[alias] = real_id
+            alias_to_real_npc_id[alias_clean] = real_id
+
     # ── state_updates ──────────────────────────────────────────────────────────
     if "state_updates" in raw:
         su_raw = raw["state_updates"]
@@ -825,6 +1004,15 @@ def validate_extraction_output(
                 result = validate_numeric_range("gold_change", su_raw["gold_change"], -10000, 10000)
                 if result is not None:
                     su_clean["gold_change"] = result
+
+            # recruit_companion_id / add_companion_id
+            if "recruit_companion_id" in su_raw or "add_companion_id" in su_raw:
+                raw_cid = su_raw.get("recruit_companion_id") or su_raw.get("add_companion_id")
+                target_cid = alias_to_real_npc_id.get(
+                    raw_cid, alias_to_real_npc_id.get(str(raw_cid).lower(), raw_cid)
+                ) if isinstance(raw_cid, str) else raw_cid
+                if validate_npc_id(target_cid, world_state):
+                    su_clean["recruit_companion_id"] = target_cid
 
             # move_to_location_id — relocate player to an EXISTING room (Issue C fix).
             # Renamed from 'new_location' to avoid collision with world_updates.new_location
@@ -933,15 +1121,18 @@ def validate_extraction_output(
     if "npc_relationship_change" in raw:
         nrc = raw["npc_relationship_change"]
         if isinstance(nrc, dict):
-            npc_id = nrc.get("npc_id")
+            raw_nid = nrc.get("npc_id")
+            target_nid = alias_to_real_npc_id.get(
+                raw_nid, alias_to_real_npc_id.get(str(raw_nid).lower(), raw_nid)
+            ) if isinstance(raw_nid, str) else raw_nid
             delta = nrc.get("delta")
 
-            npc_ok = validate_npc_id(npc_id, world_state)
+            npc_ok = validate_npc_id(target_nid, world_state)
             d_min, d_max = NUMERIC_BOUNDS["npc_relationship_change_delta"]
             delta_ok = validate_numeric_range("npc_relationship_change.delta", delta, d_min, d_max)
 
             if npc_ok and delta_ok is not None:
-                cleaned["npc_relationship_change"] = {"npc_id": npc_id, "delta": delta_ok}
+                cleaned["npc_relationship_change"] = {"npc_id": target_nid, "delta": delta_ok}
             else:
                 logger.debug("npc_relationship_change dropped (bad npc_id or delta out of range).")
         else:

@@ -1231,6 +1231,17 @@ def apply_state_updates(updates: Dict[str, Any], state: Dict[str, Any],
         if dest_id not in visited:
             visited.append(dest_id)
 
+    # ── Recruit companion (recruit_companion_id) ─────────────────────────────
+    if world_state is not None and "recruit_companion_id" in updates:
+        cid = updates["recruit_companion_id"]
+        gen_npcs = world_state.get("generated_npcs", {})
+        npc_data = gen_npcs.get(cid)
+        if not npc_data:
+            former = world_state.get("party", {}).get("former_companions", [])
+            npc_data = next((c for c in former if c.get("id") == cid), None)
+        if npc_data:
+            recruit_companion(npc_data, world_state)
+
     return state, concentration_result
 
 
@@ -2036,6 +2047,52 @@ def dismiss_companion(npc_id: str, world_state: Dict[str, Any]) -> Dict[str, Any
 
     logger.info(f"dismiss_companion: '{npc_id}' moved to former_companions at {target_comp['last_location']}.")
     return {"npc_id": npc_id, "dismissed_at": target_comp["last_location"]}
+
+
+MAX_PARTY_COMPANIONS = 3
+
+
+def recruit_companion(companion_data: Dict[str, Any], world_state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Recruit an NPC/companion into world_state['party']['companions'].
+    Enforces MAX_PARTY_COMPANIONS cap (default 3 active companions).
+    Initializes approval state in world_state['companions_approval'].
+    """
+    party = world_state.setdefault("party", {"companions": [], "former_companions": []})
+    companions = party.setdefault("companions", [])
+    cid = companion_data.get("id")
+
+    # Check if already in active party
+    for c in companions:
+        if c.get("id") == cid or (cid and c.get("name") == companion_data.get("name")):
+            return {"status": "already_in_party", "companion": c}
+
+    # Capacity check
+    if len(companions) >= MAX_PARTY_COMPANIONS:
+        logger.warning(
+            f"recruit_companion: party already full ({len(companions)}/{MAX_PARTY_COMPANIONS}). "
+            f"Cannot recruit '{cid}'."
+        )
+        return {"status": "party_full", "companion": companion_data}
+
+    # If was in former_companions, remove from there
+    former = party.setdefault("former_companions", [])
+    party["former_companions"] = [c for c in former if c.get("id") != cid]
+
+    comp_entry = dict(companion_data)
+    comp_entry.setdefault("side", "player")
+    comp_entry.setdefault("active_conditions", [])
+    comp_entry.setdefault("death_saves", {"success": 0, "fail": 0})
+    companions.append(comp_entry)
+
+    # Initialize approval
+    if cid:
+        app_info = get_companion_approval(world_state, cid)
+        if "approval" in companion_data:
+            app_info["approval"] = companion_data["approval"]
+
+    logger.info(f"recruit_companion: '{companion_data.get('name')}' ({cid}) recruited into active party.")
+    return {"status": "recruited", "companion": comp_entry}
 
 
 def resolve_item(
