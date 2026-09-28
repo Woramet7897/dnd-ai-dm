@@ -57,9 +57,9 @@ NUMERIC_BOUNDS: Dict[str, tuple] = {
 
 # ─── Prompt Injection & Sanitization Patterns ────────────────────────────────
 PROMPT_INJECTION_PATTERNS: List[re.Pattern] = [
+    re.compile(r"\[/?system[^\]]*\]", re.IGNORECASE),
     re.compile(r"ignore\s+(all\s+|previous\s+|prior\s+)?instructions?", re.IGNORECASE),
     re.compile(r"system\s*prompt:?", re.IGNORECASE),
-    re.compile(r"\[/?system\]", re.IGNORECASE),
     re.compile(r"new\s+instructions?:?", re.IGNORECASE),
 ]
 
@@ -306,6 +306,126 @@ def validate_generated_monster(m_data: Any, player_level: int = 1) -> Optional[D
         ]
 
     return monster_dict
+
+
+# ─── Dynamic Item Safety Bounds & Validator ──────────────────────────────────
+VALID_ITEM_TYPES: set = {
+    "weapon", "wearable", "consumable", "tool", "food", "instrument", "ration", "raw_food",
+}
+
+VALID_WEAPON_SLOTS: set = {"main_hand", "off_hand"}
+VALID_WEARABLE_SLOTS: set = {"chest", "cloak", "ring", "off_hand", "head", "feet"}
+
+
+def validate_generated_item(item_data: Any) -> Optional[Dict[str, Any]]:
+    """
+    Validate a dynamic item definition against safety bounds and sanitize text.
+    Returns cleaned item template dict or None if invalid.
+    """
+    if not isinstance(item_data, dict):
+        logger.debug(f"validate_generated_item: input is not a dict ({type(item_data).__name__}) — dropped.")
+        return None
+
+    # 1. Name
+    name = sanitize_text(item_data.get("name"), max_len=40)
+    if not name:
+        logger.debug("validate_generated_item: missing or empty item name — dropped.")
+        return None
+
+    # 2. Type
+    itype = str(item_data.get("type", "")).strip().lower()
+    if itype not in VALID_ITEM_TYPES:
+        logger.debug(f"validate_generated_item: unknown item type '{itype}' — dropped.")
+        return None
+
+    # 3. Slot (for weapons and wearables)
+    slot = item_data.get("slot")
+    if itype == "weapon":
+        slot_clean = str(slot).strip().lower() if slot else "main_hand"
+        if slot_clean not in VALID_WEAPON_SLOTS:
+            slot_clean = "main_hand"
+    elif itype == "wearable":
+        slot_clean = str(slot).strip().lower() if slot else "chest"
+        if slot_clean not in VALID_WEARABLE_SLOTS:
+            slot_clean = "chest"
+    else:
+        slot_clean = None
+
+    # 4. Rarity
+    rarity = str(item_data.get("rarity", "common")).strip().lower()
+    if rarity not in ("common", "uncommon", "rare"):
+        rarity = "common"
+
+    # 5. Value gold
+    raw_gold = item_data.get("value_gold", 15)
+    gold_val = int(raw_gold) if isinstance(raw_gold, (int, float)) else 15
+    gold_val = max(0, min(1000, gold_val))
+
+    # 6. Description
+    raw_desc = item_data.get("description", "")
+    desc = sanitize_text(raw_desc, max_len=200, allow_newlines=False) if raw_desc else f"A {rarity} {name}."
+
+    # 7. Effects
+    raw_effects = item_data.get("effects", {})
+    clean_effects: Dict[str, Any] = {}
+    if isinstance(raw_effects, dict):
+        if itype == "weapon":
+            ab = raw_effects.get("attack_bonus", 0)
+            if isinstance(ab, (int, float)) and -2 <= int(ab) <= 5:
+                clean_effects["attack_bonus"] = int(ab)
+            else:
+                clean_effects["attack_bonus"] = 0
+
+            raw_dmg = str(raw_effects.get("damage", "1d6")).strip().lower()
+            if 0.0 < calculate_average_dice_damage(raw_dmg) <= 15.0:
+                clean_effects["damage"] = raw_dmg
+            else:
+                clean_effects["damage"] = "1d6"
+
+            dtype = str(raw_effects.get("damage_type", "slashing")).strip().lower()
+            if dtype in VALID_DAMAGE_TYPES:
+                clean_effects["damage_type"] = dtype
+            else:
+                clean_effects["damage_type"] = "slashing"
+
+            if raw_effects.get("ranged"):
+                clean_effects["ranged"] = True
+        elif itype == "wearable":
+            ac_b = raw_effects.get("ac_bonus")
+            if isinstance(ac_b, (int, float)) and 0 <= int(ac_b) <= 3:
+                clean_effects["ac_bonus"] = int(ac_b)
+            ac_base = raw_effects.get("ac_base")
+            if isinstance(ac_base, (int, float)) and 10 <= int(ac_base) <= 18:
+                clean_effects["ac_base"] = int(ac_base)
+            st_b = raw_effects.get("saving_throw_bonus")
+            if isinstance(st_b, (int, float)) and 0 <= int(st_b) <= 2:
+                clean_effects["saving_throw_bonus"] = int(st_b)
+        elif itype in ("consumable", "food"):
+            raw_heal = raw_effects.get("heal")
+            if raw_heal and calculate_average_dice_damage(str(raw_heal)) > 0:
+                clean_effects["heal"] = str(raw_heal).strip().lower()
+            temp_hp = raw_effects.get("temp_hp")
+            if isinstance(temp_hp, (int, float)) and 0 < int(temp_hp) <= 20:
+                clean_effects["temp_hp"] = int(temp_hp)
+
+    item_dict: Dict[str, Any] = {
+        "name": name,
+        "type": itype,
+        "rarity": rarity,
+        "value_gold": gold_val,
+        "description": desc,
+        "effects": clean_effects,
+    }
+    if slot_clean is not None:
+        item_dict["slot"] = slot_clean
+
+    if item_data.get("finesse"):
+        item_dict["finesse"] = True
+    if item_data.get("ranged"):
+        item_dict["ranged"] = True
+
+    return item_dict
+
 
 # ─── Catalog caches (loaded once, then reused) ───────────────────────────────
 _item_catalog: Optional[Dict] = None
@@ -634,6 +754,39 @@ def validate_extraction_output(
             alias_to_real_mon_id[alias] = real_id
             alias_to_real_mon_id[alias_clean] = real_id
 
+    # ── generated_items (Spec: Dynamic Item Generation) ───────────────────────
+    alias_to_real_item_id: Dict[str, str] = {}
+    if "generated_items" in raw and isinstance(raw["generated_items"], dict):
+        item_catalog = _get_item_catalog()
+        for alias, i_data in raw["generated_items"].items():
+            if not isinstance(alias, str) or not alias.strip():
+                continue
+            alias_clean = alias.strip().lower()
+
+            # Rule 6: Catalog collision guard — Static catalog ALWAYS wins!
+            if alias_clean in item_catalog:
+                logger.warning(
+                    f"generated_items rejected override of static catalog item '{alias_clean}'."
+                )
+                continue
+
+            valid_item = validate_generated_item(i_data)
+            if valid_item is None:
+                logger.debug(f"generated_item '{alias}' failed validation — dropped.")
+                continue
+
+            # Rule 6: Python-generated ID (prevent LLM ID spoofing)
+            real_id = f"gen_item_{uuid.uuid4().hex[:8]}"
+            valid_item["item_id"] = real_id
+
+            if world_state is not None and isinstance(world_state, dict):
+                gen_items = world_state.setdefault("generated_items", {})
+                gen_items[real_id] = valid_item
+                logger.info(f"Registered dynamic item '{valid_item['name']}' as '{real_id}' in world_state.")
+
+            alias_to_real_item_id[alias] = real_id
+            alias_to_real_item_id[alias_clean] = real_id
+
     # ── state_updates ──────────────────────────────────────────────────────────
     if "state_updates" in raw:
         su_raw = raw["state_updates"]
@@ -651,13 +804,21 @@ def validate_extraction_output(
 
             # add_item_id
             if "add_item_id" in su_raw:
-                if validate_item_id(su_raw["add_item_id"], world_state):
-                    su_clean["add_item_id"] = su_raw["add_item_id"]
+                raw_iid = su_raw["add_item_id"]
+                target_iid = alias_to_real_item_id.get(
+                    raw_iid, alias_to_real_item_id.get(raw_iid.lower(), raw_iid)
+                ) if isinstance(raw_iid, str) else raw_iid
+                if validate_item_id(target_iid, world_state):
+                    su_clean["add_item_id"] = target_iid
 
             # remove_item_id
             if "remove_item_id" in su_raw:
-                if validate_item_id(su_raw["remove_item_id"], world_state):
-                    su_clean["remove_item_id"] = su_raw["remove_item_id"]
+                raw_iid = su_raw["remove_item_id"]
+                target_iid = alias_to_real_item_id.get(
+                    raw_iid, alias_to_real_item_id.get(raw_iid.lower(), raw_iid)
+                ) if isinstance(raw_iid, str) else raw_iid
+                if validate_item_id(target_iid, world_state):
+                    su_clean["remove_item_id"] = target_iid
 
             # gold_change — allow any int within reason
             if "gold_change" in su_raw:

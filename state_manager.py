@@ -2105,6 +2105,27 @@ def generate_item(
     return gen_id, item_dict
 
 
+def register_generated_item(
+    item_data: Dict[str, Any],
+    world_state: Dict[str, Any],
+    item_id: Optional[str] = None,
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    Register a dynamic item definition into world_state["generated_items"].
+    Does NOT modify item_catalog.json.
+    Returns (item_id, item_dict).
+    """
+    import copy
+    if not item_id or not isinstance(item_id, str):
+        item_id = f"gen_item_{uuid.uuid4().hex[:8]}"
+    item_dict = copy.deepcopy(item_data)
+    item_dict["item_id"] = item_id
+    gen_items = world_state.setdefault("generated_items", {})
+    gen_items[item_id] = item_dict
+    logger.info(f"register_generated_item: registered dynamic item '{item_id}' ({item_dict.get('name')}) in world_state.")
+    return item_id, item_dict
+
+
 class ConditionEntry(dict):
     """
     A dict subclass for active conditions that compares equal to strings,
