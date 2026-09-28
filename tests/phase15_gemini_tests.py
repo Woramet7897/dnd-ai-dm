@@ -384,6 +384,104 @@ class TestPhase15GeminiHardening(unittest.TestCase):
             loaded = llm_handler.load_gemini_config()
             self.assertEqual(loaded.get("model"), val)
 
+    def test_healthy_session_failed_test_404_preserves_live_session(self):
+        """Healthy session + failed test with 404 keeps get_active_engine() 'gemini' and session not disabled."""
+        llm_handler.save_gemini_config(api_key=self.dummy_key, model="gemini-3.6-flash", engine="gemini")
+        self.assertEqual(llm_handler.get_active_engine(), "gemini")
+
+        mock_404 = MagicMock()
+        mock_404.status_code = 404
+        mock_404.text = json.dumps({"error": {"code": 404, "message": "Model not found"}})
+
+        with patch("requests.post", return_value=mock_404):
+            ok, msg = llm_handler.test_gemini_connection(self.dummy_key, model="nonexistent-model-404")
+
+        self.assertFalse(ok)
+        self.assertEqual(llm_handler.get_active_engine(), "gemini")
+        status = llm_handler.get_gemini_status()
+        self.assertFalse(status["session_disabled"])
+        self.assertIsNone(status["disabled_reason"])
+        self.assertIsNone(status["last_error_type"])
+
+    def test_healthy_session_failed_test_401_preserves_live_session(self):
+        """Healthy session + failed test with 401 (new wrong key) keeps live session intact."""
+        llm_handler.save_gemini_config(api_key=self.dummy_key, model="gemini-3.6-flash", engine="gemini")
+        self.assertEqual(llm_handler.get_active_engine(), "gemini")
+
+        mock_401 = MagicMock()
+        mock_401.status_code = 401
+        mock_401.text = json.dumps({"error": {"code": 401, "message": "API key not valid"}})
+
+        with patch("requests.post", return_value=mock_401):
+            ok, msg = llm_handler.test_gemini_connection("AIzaSyWrongKey99999", model="gemini-3.6-flash")
+
+        self.assertFalse(ok)
+        self.assertEqual(llm_handler.get_active_engine(), "gemini")
+        status = llm_handler.get_gemini_status()
+        self.assertFalse(status["session_disabled"])
+        self.assertIsNone(status["disabled_reason"])
+
+    def test_healthy_session_failed_test_429_sets_no_cooldown_on_live_session(self):
+        """Healthy session + failed test with 429 sets no cooldown on the live session."""
+        llm_handler.save_gemini_config(api_key=self.dummy_key, model="gemini-3.6-flash", engine="gemini")
+        self.assertEqual(llm_handler.get_active_engine(), "gemini")
+
+        mock_429 = MagicMock()
+        mock_429.status_code = 429
+        mock_429.text = json.dumps({"error": {"code": 429, "message": "Quota exceeded", "status": "RESOURCE_EXHAUSTED"}})
+
+        with patch("requests.post", return_value=mock_429):
+            ok, msg = llm_handler.test_gemini_connection(self.dummy_key, model="gemini-3.6-flash")
+
+        self.assertFalse(ok)
+        self.assertEqual(llm_handler.get_active_engine(), "gemini")
+        status = llm_handler.get_gemini_status()
+        self.assertEqual(status["cooldown_seconds_remaining"], 0)
+        self.assertIsNone(status["cooldown_until"])
+
+    def test_healthy_session_successful_test_different_model_leaves_config_unchanged(self):
+        """Healthy session + successful test of a different model leaves data/gemini_config.json unchanged."""
+        llm_handler.save_gemini_config(api_key=self.dummy_key, model="gemini-3.6-flash", engine="gemini")
+        self.assertEqual(llm_handler.get_active_engine(), "gemini")
+
+        mock_200 = MagicMock()
+        mock_200.status_code = 200
+        mock_200.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": "OK"}]}}],
+            "usageMetadata": {"candidatesTokenCount": 2, "promptTokenCount": 5},
+        }
+
+        with patch("requests.post", return_value=mock_200):
+            ok, msg = llm_handler.test_gemini_connection(self.dummy_key, model="gemini-3.5-flash-lite")
+
+        self.assertTrue(ok)
+        self.assertEqual(llm_handler.get_active_engine(), "gemini")
+        # Saved model in config file must still be gemini-3.6-flash
+        loaded = llm_handler.load_gemini_config()
+        self.assertEqual(loaded.get("model"), "gemini-3.6-flash")
+
+    def test_test_button_failures_redact_key_and_log_as_warning(self):
+        """Failed test pings log at WARNING (not ERROR) and never leak the API key in log records."""
+        secret_test_key = "AIzaSySecretNetworkKeyForTest_778899"
+        llm_handler.save_gemini_config(api_key=secret_test_key, model="gemini-3.6-flash", engine="gemini")
+
+        mock_404 = MagicMock()
+        mock_404.status_code = 404
+        mock_404.text = json.dumps({"error": {"code": 404, "message": f"Model not found for key {secret_test_key}"}})
+
+        with self.assertLogs("llm_handler", level="WARNING") as log_ctx:
+            with patch("requests.post", return_value=mock_404):
+                ok, msg = llm_handler.test_gemini_connection(secret_test_key, model="invalid-model")
+
+            self.assertFalse(ok)
+            self.assertNotIn(secret_test_key, msg)
+
+            # Ensure logs are at WARNING (none at ERROR) and key is redacted
+            for record in log_ctx.records:
+                self.assertEqual(record.levelname, "WARNING")
+                self.assertIn("Gemini connection test failed", record.getMessage())
+                self.assertNotIn(secret_test_key, record.getMessage())
+
 
 if __name__ == "__main__":
     unittest.main()

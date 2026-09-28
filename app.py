@@ -1213,7 +1213,7 @@ def render_sidebar():
                         if ok_conn:
                             st.success(msg_conn)
                         else:
-                            st.error(f"ทดสอบไม่สำเร็จ: {msg_conn}")
+                            st.error(f"ทดสอบไม่สำเร็จ (เกมปัจจุบันยังใช้ค่าเดิมอยู่): {msg_conn}")
 
             # Gemini engine status & Daily calls display
             g_status = llm_handler.get_gemini_status()

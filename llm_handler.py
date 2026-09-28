@@ -291,6 +291,9 @@ def call_gemini_api(
     When bypass_state=True (used by test_gemini_connection):
       - Skips session_disabled and cooldown short-circuits.
       - Does not increment daily call counter.
+      - Free of side-effects on live session globals (_gemini_session_disabled,
+        _gemini_cooldown_until, _gemini_disabled_reason, _gemini_last_error_type).
+      - Logs test failures at WARNING level instead of ERROR.
     """
     global _gemini_cooldown_until, _gemini_session_disabled, _gemini_disabled_reason, _gemini_last_error_type
     import requests
@@ -313,7 +316,8 @@ def call_gemini_api(
 
     key = api_key or get_gemini_api_key()
     if not key:
-        _gemini_last_error_type = "auth"
+        if not bypass_state:
+            _gemini_last_error_type = "auth"
         return None, {"error": "Missing Gemini API Key", "error_type": "auth", "elapsed_seconds": 0.0}
 
     cfg = load_gemini_config()
@@ -365,54 +369,70 @@ def call_gemini_api(
 
             if resp.status_code == 429 or "RESOURCE_EXHAUSTED" in resp_text:
                 error_type = "quota"
-                _gemini_cooldown_until = time.time() + GEMINI_COOLDOWN_SECONDS
-                _gemini_last_error_type = "quota"
-                logger.warning(
-                    _redact(
-                        f"Gemini quota exhausted (HTTP {resp.status_code}). "
-                        f"Cooldown activated for {GEMINI_COOLDOWN_SECONDS}s. Falling back to Ollama.",
-                        key,
-                    )
-                )
             elif resp.status_code in (401, 403) or "PERMISSION_DENIED" in resp_text or "API_KEY_INVALID" in resp_text:
                 error_type = "auth"
-                _gemini_session_disabled = True
-                _gemini_disabled_reason = "Authentication failed (Invalid API key)"
-                _gemini_last_error_type = "auth"
-                logger.error(
-                    _redact(
-                        f"Gemini authentication failed (HTTP {resp.status_code}): {truncated_body}. "
-                        "Gemini has been disabled for this session. Please check your API key at https://aistudio.google.com/app/apikey",
-                        key,
-                    )
-                )
             elif resp.status_code == 404:
                 error_type = "not_found"
-                _gemini_session_disabled = True
-                _gemini_disabled_reason = (
-                    f"Model '{chosen_model}' not found or project lacks access (HTTP 404). "
-                    "Choose another model and press 'ทดสอบ'."
-                )
-                _gemini_last_error_type = "not_found"
-                logger.error(
+            else:
+                error_type = "other"
+
+            if bypass_state:
+                logger.warning(
                     _redact(
-                        f"Gemini model '{chosen_model}' not found (HTTP 404). "
-                        "Model may be shut down or the API key's project may not have access to this model. "
-                        "Gemini has been disabled for this session. Please choose an active model in AI settings and press 'ทดสอบ' (Test) to reactivate.",
+                        f"Gemini connection test failed ({error_type}, HTTP {resp.status_code}): {truncated_body}",
                         key,
                     )
                 )
             else:
-                error_type = "other"
-                _gemini_last_error_type = "other"
-                logger.error(_redact(f"Gemini API returned error: {err_msg}", key))
+                if error_type == "quota":
+                    _gemini_cooldown_until = time.time() + GEMINI_COOLDOWN_SECONDS
+                    _gemini_last_error_type = "quota"
+                    logger.warning(
+                        _redact(
+                            f"Gemini quota exhausted (HTTP {resp.status_code}). "
+                            f"Cooldown activated for {GEMINI_COOLDOWN_SECONDS}s. Falling back to Ollama.",
+                            key,
+                        )
+                    )
+                elif error_type == "auth":
+                    _gemini_session_disabled = True
+                    _gemini_disabled_reason = "Authentication failed (Invalid API key)"
+                    _gemini_last_error_type = "auth"
+                    logger.error(
+                        _redact(
+                            f"Gemini authentication failed (HTTP {resp.status_code}): {truncated_body}. "
+                            "Gemini has been disabled for this session. Please check your API key at https://aistudio.google.com/app/apikey",
+                            key,
+                        )
+                    )
+                elif error_type == "not_found":
+                    _gemini_session_disabled = True
+                    _gemini_disabled_reason = (
+                        f"Model '{chosen_model}' not found or project lacks access (HTTP 404). "
+                        "Choose another model and press 'ทดสอบ'."
+                    )
+                    _gemini_last_error_type = "not_found"
+                    logger.error(
+                        _redact(
+                            f"Gemini model '{chosen_model}' not found (HTTP 404). "
+                            "Model may be shut down or the API key's project may not have access to this model. "
+                            "Gemini has been disabled for this session. Please choose an active model in AI settings and press 'ทดสอบ' (Test) to reactivate.",
+                            key,
+                        )
+                    )
+                else:
+                    _gemini_last_error_type = "other"
+                    logger.error(_redact(f"Gemini API returned error: {err_msg}", key))
 
             return None, {"error": _redact(err_msg, key), "error_type": error_type, "elapsed_seconds": elapsed}
 
         data = resp.json()
         candidates = data.get("candidates", [])
         if not candidates:
-            _gemini_last_error_type = "other"
+            if bypass_state:
+                logger.warning("Gemini connection test failed: No candidates returned by Gemini")
+            else:
+                _gemini_last_error_type = "other"
             return None, {"error": "No candidates returned by Gemini", "error_type": "other", "elapsed_seconds": elapsed}
 
         first_cand = candidates[0]
@@ -435,27 +455,39 @@ def call_gemini_api(
         redacted_ex = _redact(str(ex), key)
         if isinstance(ex, requests.Timeout):
             error_type = "timeout"
-            logger.warning(
-                _redact(
-                    f"Gemini API call timed out after {elapsed:.2f}s: {redacted_ex}. "
-                    "Falling back to Ollama without cooldown.",
-                    key,
-                )
-            )
         elif isinstance(ex, (requests.ConnectionError, requests.RequestException)):
             error_type = "network"
-            logger.error(
+        else:
+            error_type = "other"
+
+        if bypass_state:
+            logger.warning(
                 _redact(
-                    f"Gemini API network error after {elapsed:.2f}s: {redacted_ex}. "
-                    "Falling back to Ollama.",
+                    f"Gemini connection test failed ({error_type}): {redacted_ex}",
                     key,
                 )
             )
         else:
-            error_type = "other"
-            logger.error(_redact(f"Gemini API call failed after {elapsed:.2f}s: {redacted_ex}", key))
+            _gemini_last_error_type = error_type
+            if error_type == "timeout":
+                logger.warning(
+                    _redact(
+                        f"Gemini API call timed out after {elapsed:.2f}s: {redacted_ex}. "
+                        "Falling back to Ollama without cooldown.",
+                        key,
+                    )
+                )
+            elif error_type == "network":
+                logger.error(
+                    _redact(
+                        f"Gemini API network error after {elapsed:.2f}s: {redacted_ex}. "
+                        "Falling back to Ollama.",
+                        key,
+                    )
+                )
+            else:
+                logger.error(_redact(f"Gemini API call failed after {elapsed:.2f}s: {redacted_ex}", key))
 
-        _gemini_last_error_type = error_type
         return None, {"error": redacted_ex, "error_type": error_type, "elapsed_seconds": elapsed}
 
 
@@ -463,7 +495,8 @@ def test_gemini_connection(api_key: str, model: str = DEFAULT_GEMINI_MODEL) -> T
     """
     Test Gemini API connectivity with a simple ping prompt.
     Bypasses cooldown/disabled checks so users can test and recover after fixing model or key.
-    If connectivity succeeds, resets cooldown/disabled state immediately.
+    If connectivity succeeds, resets cooldown/disabled state ONLY IF the tested (api_key, model)
+    pair equals the currently configured pair OR the session was already disabled/in cooldown.
     """
     res, metrics = call_gemini_api(
         contents=[{"role": "user", "parts": [{"text": "Reply with 'OK' only."}]}],
@@ -473,7 +506,17 @@ def test_gemini_connection(api_key: str, model: str = DEFAULT_GEMINI_MODEL) -> T
         bypass_state=True,
     )
     if res is not None:
-        reset_gemini_state()
+        cfg = load_gemini_config()
+        configured_key = (get_gemini_api_key() or "").strip()
+        configured_model = (cfg.get("model") or DEFAULT_GEMINI_MODEL).strip()
+
+        now = time.time()
+        was_impaired = _gemini_session_disabled or (now < _gemini_cooldown_until)
+        is_same_pair = (api_key.strip() == configured_key) and (model.strip() == configured_model)
+
+        if was_impaired or is_same_pair:
+            reset_gemini_state()
+
         elapsed = metrics.get("elapsed_seconds", 0)
         return True, f"เชื่อมต่อสำเร็จใน {elapsed:.2f}s! ({model})"
     return False, metrics.get("error", "Unknown error")
