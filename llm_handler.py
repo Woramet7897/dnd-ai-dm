@@ -1098,15 +1098,17 @@ If an entirely new monster appears in combat not present in standard enemies (go
 If an entirely new custom item is found/rewarded not present in standard catalog, specify its definition under "generated_items" keyed by an alias name, and put that alias in "state_updates.add_item_id".
 If an entirely new NPC or companion appears or joins the party, specify their definition under "generated_npcs" keyed by an alias name. If they join the party, put that alias in "state_updates.recruit_companion_id".
 If an entirely new world event, rumor, or notice board announcement occurs, specify its definition under "generated_events" keyed by an alias name.
+If an entirely new custom spell or ancient scroll is learned/discovered, specify its definition under "generated_spells" keyed by an alias name. If the player learns it, put that alias in "state_updates.learn_spell_id".
 
 JSON Schema (all fields optional/nullable):
 {
-  "state_updates": {"hp_change": (int|null), "add_item_id": (str|null), "remove_item_id": (str|null), "gold_change": (int|null), "move_to_location_id": (str|null), "recruit_companion_id": (str|null)},
+  "state_updates": {"hp_change": (int|null), "add_item_id": (str|null), "remove_item_id": (str|null), "gold_change": (int|null), "move_to_location_id": (str|null), "recruit_companion_id": (str|null), "learn_spell_id": (str|null)},
   "requires_roll": {"stat": ("STR"|"DEX"|"CON"|"INT"|"WIS"|"CHA"), "difficulty": ("easy"|"medium"|"hard"|"very_hard")},
   "generated_monsters": {"<enemy_alias>": {"name": (str), "hp": {"current": (int), "max": (int)}, "ac": (int), "stats": {"STR":(int),"DEX":(int),"CON":(int),"INT":(int),"WIS":(int),"CHA":(int)}, "attacks": [{"name":(str),"attack_bonus":(int),"damage":(str),"damage_type":(str),"applies_condition":(str|null)}], "xp_value":(int), "gold_drop":{"min":(int),"max":(int)}, "challenge_rating":(float)}},
   "generated_items": {"<item_alias>": {"name": (str), "type": ("weapon"|"wearable"|"consumable"|"tool"|"food"), "slot": (str|null), "effects": (object), "rarity": ("common"|"uncommon"|"rare"), "value_gold": (int), "description": (str)}},
   "generated_npcs": {"<npc_alias>": {"name": (str), "role": (str|null), "persona_seed": (str|null), "hp": (int|null), "ac": (int|null), "stats": {"STR":(int),"DEX":(int),"CON":(int),"INT":(int),"WIS":(int),"CHA":(int)}, "attacks": [{"name":(str),"attack_bonus":(int),"damage":(str),"damage_type":(str)}], "approval":(int|null)}},
   "generated_events": {"<event_alias>": {"title": (str), "location_id": (str|null), "context_line": (str), "rumor_text": (str|null), "post_to_notice_board": (bool|null), "reward_gold": (int|null)}},
+  "generated_spells": {"<spell_alias>": {"name": (str), "level": (int), "type": ("attack_roll"|"attack_save"|"heal"|"buff"|"utility"), "save_stat": (str|null), "effect": (object), "description": (str)}},
   "combat_start": {"enemies": [(str)]},
   "world_updates": {"new_location": (object|null)},
   "quest_updates": {"new_quest": (object|null), "objective_update": (object|null)},

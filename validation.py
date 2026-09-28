@@ -612,6 +612,132 @@ def validate_generated_event(
     }
 
 
+# ─── Dynamic Spell / Ancient Scroll Safety Bounds & Validator ────────────────
+SPELL_BOUNDS_BY_LEVEL: Dict[int, Dict[str, float]] = {
+    0: {"max_avg_damage": 10.0, "max_avg_heal": 0.0},
+    1: {"max_avg_damage": 16.0, "max_avg_heal": 12.0},
+    2: {"max_avg_damage": 24.0, "max_avg_heal": 20.0},
+    3: {"max_avg_damage": 35.0, "max_avg_heal": 30.0},
+}
+
+VALID_SPELL_TYPES: set = {"attack_roll", "attack_save", "heal", "buff", "utility"}
+VALID_SAVE_STATS: set = {"STR", "DEX", "CON", "INT", "WIS", "CHA"}
+
+
+def validate_generated_spell(spell_data: Any, player_level: int = 1) -> Optional[Dict[str, Any]]:
+    """
+    Validate a dynamic spell or ancient scroll definition against D&D 5e bounds and sanitize text.
+    Returns cleaned spell dict or None if invalid.
+    """
+    if not isinstance(spell_data, dict):
+        logger.debug(f"validate_generated_spell: input is not a dict ({type(spell_data).__name__}) — dropped.")
+        return None
+
+    # 1. Name
+    name = sanitize_text(spell_data.get("name"), max_len=40)
+    if not name:
+        logger.debug("validate_generated_spell: missing or empty spell name — dropped.")
+        return None
+
+    # 2. Level (0 to 3 in Tier 1-5 gameplay)
+    raw_lvl = spell_data.get("level", 1)
+    if not isinstance(raw_lvl, (int, float)):
+        lvl = 1
+    else:
+        lvl = max(0, min(3, int(raw_lvl)))
+
+    bounds = SPELL_BOUNDS_BY_LEVEL[lvl]
+
+    # 3. Type
+    stype = str(spell_data.get("type", "attack_roll")).strip().lower()
+    if stype not in VALID_SPELL_TYPES:
+        stype = "attack_roll"
+
+    # 4. Save Stat (for attack_save)
+    save_stat = None
+    if stype == "attack_save":
+        raw_stat = str(spell_data.get("save_stat", "DEX")).strip().upper()
+        save_stat = raw_stat if raw_stat in VALID_SAVE_STATS else "DEX"
+
+    # 5. Slot Cost (cantrips = 0, spells = lvl)
+    slot_cost = lvl
+
+    # 6. Effect
+    raw_effect = spell_data.get("effect", {})
+    if not isinstance(raw_effect, dict):
+        raw_effect = {}
+
+    clean_effect: Dict[str, Any] = {}
+    if stype in ("attack_roll", "attack_save"):
+        raw_dmg = str(raw_effect.get("damage", "1d6")).strip().lower()
+        avg_dmg = calculate_average_dice_damage(raw_dmg)
+        if avg_dmg <= 0.0 or avg_dmg > bounds["max_avg_damage"]:
+            raw_dmg = f"{lvl+1}d6" if lvl > 0 else "1d8"
+        clean_effect["damage"] = raw_dmg
+
+        dtype = str(raw_effect.get("damage_type", "force")).strip().lower()
+        if dtype not in VALID_DAMAGE_TYPES:
+            dtype = "force"
+        clean_effect["damage_type"] = dtype
+
+        if raw_effect.get("auto_hit") and stype == "attack_roll":
+            clean_effect["auto_hit"] = True
+
+    elif stype == "heal":
+        if lvl == 0:
+            lvl = 1
+            slot_cost = 1
+        raw_heal = str(raw_effect.get("heal", "1d4+3")).strip().lower()
+        avg_h = calculate_average_dice_damage(raw_heal)
+        if avg_h <= 0.0 or avg_h > bounds["max_avg_heal"]:
+            raw_heal = "1d4+3"
+        clean_effect["heal"] = raw_heal
+
+    elif stype == "buff":
+        ac_b = raw_effect.get("ac_bonus", 2)
+        ac_b = max(1, min(5, int(ac_b))) if isinstance(ac_b, (int, float)) else 2
+        dur = raw_effect.get("duration_rounds", 3)
+        dur = max(1, min(10, int(dur))) if isinstance(dur, (int, float)) else 3
+        clean_effect["ac_bonus"] = ac_b
+        clean_effect["duration_rounds"] = dur
+
+    elif stype == "utility":
+        if raw_effect.get("remove_curse"):
+            clean_effect["remove_curse"] = True
+        else:
+            clean_effect["utility_desc"] = sanitize_text(
+                raw_effect.get("utility_desc", "Magical utility effect"), max_len=100
+            )
+
+    # 7. Description
+    raw_desc = spell_data.get("description", "")
+    desc = sanitize_text(raw_desc, max_len=200, allow_newlines=False) if raw_desc else f"An ancient {stype} spell."
+
+    # 8. Classes
+    raw_classes = spell_data.get("class", ["Wizard", "Cleric", "Bard"])
+    clean_classes = []
+    if isinstance(raw_classes, list):
+        for c in raw_classes:
+            if isinstance(c, str) and c.strip():
+                clean_classes.append(c.strip().title())
+    if not clean_classes:
+        clean_classes = ["Wizard", "Cleric", "Bard"]
+
+    spell_dict: Dict[str, Any] = {
+        "name": name,
+        "level": lvl,
+        "type": stype,
+        "slot_cost": slot_cost,
+        "effect": clean_effect,
+        "description": desc,
+        "class": clean_classes,
+    }
+    if save_stat is not None:
+        spell_dict["save_stat"] = save_stat
+
+    return spell_dict
+
+
 # ─── Catalog caches (loaded once, then reused) ───────────────────────────────
 _item_catalog: Optional[Dict] = None
 _monster_catalog: Optional[Dict] = None
@@ -639,6 +765,42 @@ def _get_monster_catalog() -> Dict:
             logger.error(f"Failed to load monster_catalog.json: {e}")
             _monster_catalog = {}
     return _monster_catalog
+
+
+_spell_catalog: Optional[Dict] = None
+
+def _get_spell_catalog() -> Dict:
+    global _spell_catalog
+    if _spell_catalog is None:
+        try:
+            path = os.path.join(_CATALOG_DIR, "spell_catalog.json")
+            with open(path, "r", encoding="utf-8") as f:
+                _spell_catalog = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to load spell_catalog.json: {e}")
+            _spell_catalog = {}
+    return _spell_catalog
+
+
+def validate_spell_id(spell_id: Any, world_state: Optional[Dict] = None) -> bool:
+    """
+    Return True if spell_id exists in spell_catalog.json OR generated_spells in world_state.
+    """
+    if not isinstance(spell_id, str):
+        logger.debug(f"spell_id is not a string (got {type(spell_id).__name__}: {spell_id!r}) — invalid.")
+        return False
+
+    catalog = _get_spell_catalog()
+    if spell_id in catalog:
+        return True
+
+    if world_state and isinstance(world_state, dict):
+        gen_spells = world_state.get("generated_spells", {})
+        if spell_id in gen_spells:
+            return True
+
+    logger.debug(f"Unknown spell_id '{spell_id}' — not in spell_catalog.json or generated_spells, dropped.")
+    return False
 
 
 # ─── Sub-validators ───────────────────────────────────────────────────────────
@@ -1037,6 +1199,43 @@ def validate_extraction_output(
             alias_to_real_event_id[alias] = real_id
             alias_to_real_event_id[alias_clean] = real_id
 
+    # ── generated_spells (Spec: Dynamic Spells & Ancient Scrolls) ────────────
+    alias_to_real_spell_id: Dict[str, str] = {}
+    if "generated_spells" in raw and isinstance(raw["generated_spells"], dict):
+        spell_cat = _get_spell_catalog()
+        p_lvl = 1
+        if player_state and isinstance(player_state, dict):
+            p_lvl = player_state.get("level", 1)
+
+        for alias, s_data in raw["generated_spells"].items():
+            if not isinstance(alias, str) or not alias.strip():
+                continue
+            alias_clean = alias.strip().lower()
+
+            # Rule 6: Catalog collision guard — Static catalog ALWAYS wins!
+            if alias_clean in spell_cat:
+                logger.warning(
+                    f"generated_spells rejected override of static catalog spell '{alias_clean}'."
+                )
+                continue
+
+            valid_spell = validate_generated_spell(s_data, player_level=p_lvl)
+            if valid_spell is None:
+                logger.debug(f"generated_spell '{alias}' failed validation — dropped.")
+                continue
+
+            # Python-generated ID
+            real_id = f"gen_spell_{uuid.uuid4().hex[:8]}"
+            valid_spell["spell_id"] = real_id
+
+            if world_state is not None and isinstance(world_state, dict):
+                gen_spells = world_state.setdefault("generated_spells", {})
+                gen_spells[real_id] = valid_spell
+                logger.info(f"Registered dynamic spell '{valid_spell['name']}' as '{real_id}' in world_state.")
+
+            alias_to_real_spell_id[alias] = real_id
+            alias_to_real_spell_id[alias_clean] = real_id
+
     # ── state_updates ──────────────────────────────────────────────────────────
     if "state_updates" in raw:
         su_raw = raw["state_updates"]
@@ -1084,6 +1283,15 @@ def validate_extraction_output(
                 ) if isinstance(raw_cid, str) else raw_cid
                 if validate_npc_id(target_cid, world_state):
                     su_clean["recruit_companion_id"] = target_cid
+
+            # learn_spell_id / add_spell_id
+            if "learn_spell_id" in su_raw or "add_spell_id" in su_raw:
+                raw_sid = su_raw.get("learn_spell_id") or su_raw.get("add_spell_id")
+                target_sid = alias_to_real_spell_id.get(
+                    raw_sid, alias_to_real_spell_id.get(str(raw_sid).lower(), raw_sid)
+                ) if isinstance(raw_sid, str) else raw_sid
+                if validate_spell_id(target_sid, world_state):
+                    su_clean["learn_spell_id"] = target_sid
 
             # move_to_location_id — relocate player to an EXISTING room (Issue C fix).
             # Renamed from 'new_location' to avoid collision with world_updates.new_location

@@ -1242,6 +1242,12 @@ def apply_state_updates(updates: Dict[str, Any], state: Dict[str, Any],
         if npc_data:
             recruit_companion(npc_data, world_state)
 
+    # ── Learn spell (learn_spell_id / add_spell_id) ──────────────────────────
+    if "learn_spell_id" in updates or "add_spell_id" in updates:
+        sid = updates.get("learn_spell_id") or updates.get("add_spell_id")
+        if sid:
+            learn_spell(sid, state, world_state=world_state)
+
     return state, concentration_result
 
 
@@ -1665,6 +1671,49 @@ def _get_spell_catalog() -> Dict[str, Any]:
     return _spell_catalog
 
 
+def resolve_spell(
+    spell_id: str,
+    world_state: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Single source of truth for resolving spell definitions.
+    Checks static spell_catalog.json first, falls back to world_state["generated_spells"].
+    """
+    catalog = _get_spell_catalog()
+    if spell_id in catalog:
+        return catalog[spell_id]
+
+    if world_state and isinstance(world_state, dict):
+        gen_spells = world_state.get("generated_spells", {})
+        if spell_id in gen_spells:
+            return gen_spells[spell_id]
+
+    return None
+
+
+def learn_spell(
+    spell_id: str,
+    player_state: Dict[str, Any],
+    world_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Learn a spell by adding its spell_id to player_state['known_spells'].
+    Validates against static and generated spells via resolve_spell().
+    """
+    spell = resolve_spell(spell_id, world_state=world_state)
+    if not spell:
+        logger.warning(f"learn_spell: unknown spell '{spell_id}'.")
+        return {"status": "unknown_spell", "spell_id": spell_id}
+
+    known = player_state.setdefault("known_spells", [])
+    if spell_id in known:
+        return {"status": "already_known", "spell_id": spell_id, "spell": spell}
+
+    known.append(spell_id)
+    logger.info(f"learn_spell: {player_state.get('name')} learned '{spell.get('name')}' ({spell_id}).")
+    return {"status": "learned", "spell_id": spell_id, "spell": spell}
+
+
 def resolve_spell_save(
     caster: Dict[str, Any],
     target: Dict[str, Any],
@@ -1860,8 +1909,7 @@ def cast_spell(
     """
     Cast a spell by spell_id. Validates spell, decrements slots if level > 0, and resolves effect.
     """
-    catalog = _get_spell_catalog()
-    spell = catalog.get(spell_id)
+    spell = resolve_spell(spell_id, world_state=world_state)
     if not spell:
         return {"success": False, "reason": f"Unknown spell '{spell_id}'."}
 
