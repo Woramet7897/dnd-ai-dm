@@ -220,13 +220,14 @@ def load_game(char_name: str, client: Optional[Any] = None) -> bool:
                 docs = docs_res.get("documents", [])
                 if len(docs) >= 2:
                     major_entries = [{"text": d, "type": "major"} for d in docs[-3:]]
-                    res = llm_handler.generate_narrative_response(
-                        user_input="Please provide a concise 'Previously, in your story...' recap paragraph summarizing our major past chapters.",
-                        player_state=player,
-                        world_state=world,
-                        lore_entries=major_entries,
-                        client=client,
-                    )
+                    with st.spinner("📜 กำลังสรุปเรื่องราวที่ผ่านมา..."):
+                        res = llm_handler.generate_narrative_response(
+                            user_input="Please provide a concise 'Previously, in your story...' recap paragraph summarizing our major past chapters.",
+                            player_state=player,
+                            world_state=world,
+                            lore_entries=major_entries,
+                            client=client,
+                        )
                     recap_narrative = res.get("narrative", "")
                     if res.get("suggestions"):
                         st.session_state["action_suggestions"] = res["suggestions"]
@@ -1803,14 +1804,15 @@ def render_playing_view():
                 # 3. EXACTLY ONE narrative LLM call for the entire round
                 hist = st.session_state.get("history_buffer", [])
                 chosen_m = st.session_state.get("selected_model")
-                narrative_res = llm_handler.generate_narrative_response(
-                    user_input="",
-                    player_state=player,
-                    world_state=world,
-                    history=hist,
-                    round_result=narration_block,
-                    model=chosen_m if chosen_m else llm_handler.DEFAULT_MODEL,
-                )
+                with st.spinner("⚔️ DM กำลังบรรยายผลการต่อสู้..."):
+                    narrative_res = llm_handler.generate_narrative_response(
+                        user_input="",
+                        player_state=player,
+                        world_state=world,
+                        history=hist,
+                        round_result=narration_block,
+                        model=chosen_m if chosen_m else llm_handler.DEFAULT_MODEL,
+                    )
 
                 narration_text = narrative_res.get("narrative", "")
                 if narrative_res.get("suggestions"):
@@ -2092,24 +2094,25 @@ def render_playing_view():
                     hist = st.session_state.get("history_buffer", [])
                     chosen_m = st.session_state.get("selected_model")
                     active_model = chosen_m if chosen_m else llm_handler.DEFAULT_MODEL
-                    res = llm_handler.generate_narrative_response(
-                        user_input=action_to_process,
-                        player_state=player,
-                        world_state=world,
-                        history=hist,
-                        model=active_model,
-                    )
-                    narrative_text = res.get("narrative", "")
-                    if res.get("suggestions"):
-                        st.session_state["action_suggestions"] = res["suggestions"]
+                    with st.spinner("📖 DM กำลังเล่าเรื่องราวต่อ..."):
+                        res = llm_handler.generate_narrative_response(
+                            user_input=action_to_process,
+                            player_state=player,
+                            world_state=world,
+                            history=hist,
+                            model=active_model,
+                        )
+                        narrative_text = res.get("narrative", "")
+                        if res.get("suggestions"):
+                            st.session_state["action_suggestions"] = res["suggestions"]
 
-                    # 2. Extraction Call
-                    ext_res = llm_handler.extract_state_updates(
-                        narrative_text=narrative_text,
-                        user_input=action_to_process,
-                        world_state=world,
-                        model=active_model,
-                    )
+                        # 2. Extraction Call
+                        ext_res = llm_handler.extract_state_updates(
+                            narrative_text=narrative_text,
+                            user_input=action_to_process,
+                            world_state=world,
+                            model=active_model,
+                        )
 
                     # 3. Apply state updates and events if present
                     if ext_res:
