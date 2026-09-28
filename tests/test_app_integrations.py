@@ -672,6 +672,40 @@ class TestAppIntegrations(unittest.TestCase):
         ]
         self.assertEqual(keys, expected_keys)
 
+    # ────────────────────────────────────────────────────────────────────────────
+    # Task B: gold_change Bounds and Sync Tests in apply_state_updates
+    # ────────────────────────────────────────────────────────────────────────────
+
+    def test_apply_state_updates_gold_change_exceeds_funds_zeroes_all_coins(self):
+        """Task B: 10gp 5sp 30cp with gold_change -50 drops to 0/0/0, gold synced to 0."""
+        self.fighter["currency"] = {"gp": 10, "sp": 5, "cp": 30}
+        self.fighter["gold"] = 10
+
+        state_manager.apply_state_updates({"gold_change": -50}, self.fighter, self.world)
+
+        self.assertEqual(self.fighter["currency"], {"gp": 0, "sp": 0, "cp": 0})
+        self.assertEqual(self.fighter["gold"], 0)
+        self.assertEqual(self.fighter["gold"], self.fighter["currency"]["gp"])
+
+    def test_apply_state_updates_gold_change_sufficient_funds_and_addition(self):
+        """Task B: 100gp with -30 drops to 70gp; then +20 increases to 90gp; gold synced."""
+        self.fighter["currency"] = {"gp": 100, "sp": 0, "cp": 0}
+        self.fighter["gold"] = 100
+
+        # Deduct 30 GP
+        state_manager.apply_state_updates({"gold_change": -30}, self.fighter, self.world)
+        self.assertEqual(self.fighter["currency"]["gp"], 70)
+        self.assertEqual(self.fighter["currency"]["sp"], 0)
+        self.assertEqual(self.fighter["currency"]["cp"], 0)
+        self.assertEqual(self.fighter["gold"], 70)
+        self.assertEqual(self.fighter["gold"], self.fighter["currency"]["gp"])
+
+        # Add 20 GP
+        state_manager.apply_state_updates({"gold_change": 20}, self.fighter, self.world)
+        self.assertEqual(self.fighter["currency"]["gp"], 90)
+        self.assertEqual(self.fighter["gold"], 90)
+        self.assertEqual(self.fighter["gold"], self.fighter["currency"]["gp"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1193,7 +1193,9 @@ def apply_state_updates(updates: Dict[str, Any], state: Dict[str, Any],
         if change >= 0:
             add_currency(state, gp=change)
         else:
-            subtract_currency(state, gp=abs(change))
+            if not subtract_currency(state, gp=abs(change)):
+                state["currency"] = {"gp": 0, "sp": 0, "cp": 0}
+                state["gold"] = 0
 
     # ── Add item ──────────────────────────────────────────────────────────────
     if "add_item_id" in updates:
