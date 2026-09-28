@@ -215,14 +215,19 @@ def move_player(
     if direction not in _VALID_DIRECTIONS:
         return False, f"'{direction}' is not a valid direction. Use north, south, east, or west.", None
 
+    if character_state is None:
+        character_state = world_state.get("player_state") if isinstance(world_state, dict) else None
+        if character_state is None:
+            logger.warning("move_player called without character_state; captive/imprisonment check may be incomplete.")
+
+    is_locked_up = bool(world_state.get("is_imprisoned"))
     if character_state:
-        is_locked_up = (
+        is_locked_up = is_locked_up or (
             character_state.get("status") == "captive"
             or bool(character_state.get("crime_state", {}).get("imprisoned"))
-            or bool(world_state.get("is_imprisoned"))
         )
-        if is_locked_up:
-            return False, "Cannot move — you are imprisoned or held captive! You must escape first.", None
+    if is_locked_up:
+        return False, "Cannot move — you are imprisoned or held captive! You must escape first.", None
 
     current_room = get_current_room(world_state)
     if current_room is None:

@@ -357,7 +357,68 @@ class TestAppIntegrations(unittest.TestCase):
         self.assertFalse(ok2)
         self.assertIn("imprisoned or held captive", msg2)
 
+    def test_move_player_failsafe_when_character_state_none(self):
+        """DoD: move_player blocks movement when world_state.is_imprisoned is True even if character_state is None."""
+        self.world["is_imprisoned"] = True
+        ok, msg, _ = dungeon_manager.move_player("north", self.world, character_state=None)
+        self.assertFalse(ok)
+        self.assertIn("imprisoned or held captive", msg)
+
+    def test_state_extraction_helpers_currency_rations_quests_spells(self):
+        """DoD: Verify shared helpers correctly extract non-zero values matching actual state schema."""
+        test_player = {
+            "currency": {"gp": 42, "sp": 17, "cp": 9},
+            "inventory": [
+                {"item_id": "trail_rations", "quantity": 5},
+                {"item_id": "torch", "quantity": 2},
+                {"item_id": "trail_rations", "quantity": 3},
+            ],
+            "known_spells": ["fire_bolt", "magic_missile", "shield"],
+        }
+        test_world = {
+            "quest_log": {
+                "main": [
+                    {"id": "mq1", "status": "active", "title": "Main 1"},
+                    {"id": "mq2", "status": "completed", "title": "Main 2"},
+                ],
+                "side": [
+                    {"id": "sq1", "status": "active", "title": "Side 1"},
+                    {"id": "sq2", "status": "failed", "title": "Side 2"},
+                ],
+            }
+        }
+
+        # Currency helper
+        curr = app.get_player_currency(test_player)
+        self.assertEqual(curr["gp"], 42)
+        self.assertEqual(curr["sp"], 17)
+        self.assertEqual(curr["cp"], 9)
+
+        # Rations helper: 5 + 3 = 8
+        self.assertEqual(app.get_ration_count(test_player), 8)
+
+        # Known spells helper: 3
+        self.assertEqual(app.get_known_spell_count(test_player), 3)
+
+        # Active quests helper: 1 main active + 1 side active = 2
+        self.assertEqual(app.get_active_quest_count(test_world), 2)
+
+        # Null / Empty state safety guards
+        self.assertEqual(app.get_ration_count(None), 0)
+        self.assertEqual(app.get_ration_count({}), 0)
+        self.assertEqual(app.get_known_spell_count(None), 0)
+        self.assertEqual(app.get_known_spell_count({}), 0)
+        self.assertEqual(app.get_active_quest_count(None), 0)
+        self.assertEqual(app.get_active_quest_count({}), 0)
+        self.assertEqual(app.get_player_currency(None), {"gp": 0, "sp": 0, "cp": 0})
+
+    def test_time_module_imported(self):
+        """DoD: Verify time module is imported in app.py to prevent NameError in Ollama starter button."""
+        self.assertTrue(hasattr(app, "time"))
+        self.assertTrue(callable(getattr(app.time, "sleep", None)))
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

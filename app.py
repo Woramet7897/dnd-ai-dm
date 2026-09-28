@@ -11,6 +11,7 @@ import json
 import logging
 import math
 import os
+import time
 import streamlit as st
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -564,6 +565,54 @@ def render_landing_view():
 
 
 # ────────────────────────────────────────────────────────────────────────────────
+# State Extraction Helpers (Shared between Sidebar, Top HUD Bar & Dialogs)
+# ────────────────────────────────────────────────────────────────────────────────
+
+def get_ration_count(player: Optional[Dict[str, Any]]) -> int:
+    """Return total quantity of trail rations in player inventory."""
+    if not player or not isinstance(player, dict):
+        return 0
+    inv = player.get("inventory", [])
+    return sum(
+        item.get("quantity", 1)
+        for item in inv
+        if isinstance(item, dict) and item.get("item_id") == "trail_rations"
+    )
+
+
+def get_active_quest_count(world: Optional[Dict[str, Any]]) -> int:
+    """Return count of active quests in quest_log (main + side)."""
+    if not world or not isinstance(world, dict):
+        return 0
+    q_log = world.get("quest_log", {})
+    if not isinstance(q_log, dict):
+        return 0
+    active_count = 0
+    for q in q_log.get("main", []):
+        if isinstance(q, dict) and q.get("status", "active") == "active":
+            active_count += 1
+    for q in q_log.get("side", []):
+        if isinstance(q, dict) and q.get("status", "active") == "active":
+            active_count += 1
+    return active_count
+
+
+def get_known_spell_count(player: Optional[Dict[str, Any]]) -> int:
+    """Return count of known spells (including cantrips) in player state."""
+    if not player or not isinstance(player, dict):
+        return 0
+    known = player.get("known_spells", [])
+    return len(known) if isinstance(known, list) else 0
+
+
+def get_player_currency(player: Optional[Dict[str, Any]]) -> Dict[str, int]:
+    """Return dict with gp, sp, cp currency keys from player state."""
+    if not player or not isinstance(player, dict):
+        return {"gp": 0, "sp": 0, "cp": 0}
+    return state_manager._ensure_currency(player)
+
+
+# ────────────────────────────────────────────────────────────────────────────────
 # Modal Dialogs (Character Sheet, Inventory, Quests, Spells, Rest & Camp)
 # ────────────────────────────────────────────────────────────────────────────────
 
@@ -633,7 +682,8 @@ def show_character_dialog():
                 is_pending = c_app.get("camp_dialogue_pending", True)
                 if is_pending:
                     if st.button(f"💬 พูดคุย", key=f"dlg_talk_{cid}", use_container_width=True):
-                        mm = llm_handler.resolve_model()
+                        chosen_m = st.session_state.get("selected_model")
+                        mm = llm_handler.resolve_model(chosen_m)
                         dlg = state_manager.generate_camp_dialogue(cid, mm, player, world)
                         if dlg:
                             st.session_state["active_camp_dialogue"] = dlg
@@ -661,8 +711,8 @@ def show_inventory_dialog():
         return
 
     inventory = player.get("inventory", [])
-    ration_qty = sum(i.get("quantity", 1) for i in inventory if isinstance(i, dict) and i.get("item_id") == "trail_rations")
-    curr = state_manager._ensure_currency(player)
+    ration_qty = get_ration_count(player)
+    curr = get_player_currency(player)
 
     pouch_html = (
         '<div style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">'
@@ -1019,11 +1069,9 @@ def render_sidebar():
     st.sidebar.caption(f"⏳ **Day {day}**, {period}")
 
     # Coin Pouch & Provisions
-    coins = player.get("coins", {"gold": player.get("gold", 0), "silver": 0, "copper": 0})
-    gp = coins.get("gold", 0)
-    sp = coins.get("silver", 0)
-    cp = coins.get("copper", 0)
-    rations = player.get("rations", 0)
+    curr = get_player_currency(player)
+    gp, sp, cp = curr.get("gp", 0), curr.get("sp", 0), curr.get("cp", 0)
+    rations = get_ration_count(player)
     st.sidebar.markdown(
         f"💰 **เงิน:** `{gp} GP` &nbsp; `{sp} SP` &nbsp; `{cp} CP`  \n"
         f"🍖 **เสบียง:** `{rations}` ชุด"
@@ -1039,11 +1087,11 @@ def render_sidebar():
     if st.sidebar.button(f"🎒 กระเป๋าสัมภาระ ({inv_count} ชิ้น)", use_container_width=True, key="sb_btn_inv"):
         show_inventory_dialog()
 
-    active_quests = [q for q in world.get("quests", {}).values() if q.get("status") == "active"]
-    if st.sidebar.button(f"📜 บันทึกภารกิจ ({len(active_quests)} รายการ)", use_container_width=True, key="sb_btn_quests"):
+    active_quests_cnt = get_active_quest_count(world)
+    if st.sidebar.button(f"📜 บันทึกภารกิจ ({active_quests_cnt} รายการ)", use_container_width=True, key="sb_btn_quests"):
         show_quests_dialog()
 
-    spell_cnt = len(player.get("spells_known", [])) + len(player.get("cantrips_known", []))
+    spell_cnt = get_known_spell_count(player)
     if st.sidebar.button(f"✨ คัมภีร์เวทมนตร์ ({spell_cnt})", use_container_width=True, key="sb_btn_spells"):
         show_spells_dialog()
 
@@ -1289,8 +1337,8 @@ def render_playing_view():
 
     # ── Top RPG Quick-Access HUD Bar ──────────────────────────────────────────
     inv_count = len(player.get("inventory", []))
-    active_q_count = len([q for q in world.get("quests", {}).values() if q.get("status") == "active"])
-    spell_cnt = len(player.get("spells_known", [])) + len(player.get("cantrips_known", []))
+    active_q_count = get_active_quest_count(world)
+    spell_cnt = get_known_spell_count(player)
 
     hud_c1, hud_c2, hud_c3, hud_c4, hud_c5 = st.columns(5)
     with hud_c1:

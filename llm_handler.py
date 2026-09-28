@@ -1036,21 +1036,4 @@ def generate_camp_dialogue(
     }
 
 
-def generate_extraction_response(
-    narrative_text: str,
-    player_state: Optional[Dict[str, Any]] = None,
-    world_state: Optional[Dict[str, Any]] = None,
-    user_input: str = "",
-    **kwargs: Any,
-) -> Dict[str, Any]:
-    """
-    Compatibility wrapper for extract_state_updates.
-    """
-    return extract_state_updates(
-        narrative_text=narrative_text,
-        user_input=user_input,
-        world_state=world_state,
-        **kwargs,
-    )
-
 
