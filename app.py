@@ -1212,6 +1212,8 @@ def render_sidebar():
                         ok_conn, msg_conn = llm_handler.test_gemini_connection(k_input, model=chosen_g_model)
                         if ok_conn:
                             st.success(msg_conn)
+                            if not llm_handler.is_saved_gemini_pair(k_input, chosen_g_model):
+                                st.info("ค่าที่ทดสอบนี้ยังไม่ได้ถูกบันทึก เกมยังใช้ Key/โมเดลเดิมอยู่ — กด '💾 บันทึก Key' เพื่อใช้ค่านี้จริง")
                         else:
                             st.error(f"ทดสอบไม่สำเร็จ (เกมปัจจุบันยังใช้ค่าเดิมอยู่): {msg_conn}")
 

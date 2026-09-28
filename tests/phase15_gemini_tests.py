@@ -482,6 +482,33 @@ class TestPhase15GeminiHardening(unittest.TestCase):
                 self.assertIn("Gemini connection test failed", record.getMessage())
                 self.assertNotIn(secret_test_key, record.getMessage())
 
+    def test_is_saved_gemini_pair_behavior(self):
+        """is_saved_gemini_pair returns True for identical pairs, False for different pairs, and compares env key when config absent."""
+        saved_key = "AIzaSySavedKey_112233"
+        saved_model = "gemini-3.6-flash"
+        llm_handler.save_gemini_config(api_key=saved_key, model=saved_model, engine="gemini")
+
+        # 1. Identical pair -> True
+        self.assertTrue(llm_handler.is_saved_gemini_pair(saved_key, saved_model))
+
+        # 2. Tested pair != saved pair -> False
+        self.assertFalse(llm_handler.is_saved_gemini_pair("DIFFERENT_KEY", saved_model))
+        self.assertFalse(llm_handler.is_saved_gemini_pair(saved_key, "gemini-3.5-flash-lite"))
+        self.assertFalse(llm_handler.is_saved_gemini_pair("DIFFERENT_KEY", "gemini-3.5-flash-lite"))
+
+        # 3. Key from GEMINI_API_KEY env var and no saved config -> compares against the env key
+        if os.path.exists(self.test_config_path):
+            os.remove(self.test_config_path)
+
+        env_key = "AIzaSyEnvKey_445566"
+        with patch.dict(os.environ, {"GEMINI_API_KEY": env_key}):
+            # Identical env key + default model -> True
+            self.assertTrue(llm_handler.is_saved_gemini_pair(env_key, llm_handler.DEFAULT_GEMINI_MODEL))
+            # Different key -> False
+            self.assertFalse(llm_handler.is_saved_gemini_pair("OTHER_KEY", llm_handler.DEFAULT_GEMINI_MODEL))
+            # Different model -> False
+            self.assertFalse(llm_handler.is_saved_gemini_pair(env_key, "other-model"))
+
 
 if __name__ == "__main__":
     unittest.main()

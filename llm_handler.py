@@ -491,6 +491,21 @@ def call_gemini_api(
         return None, {"error": redacted_ex, "error_type": error_type, "elapsed_seconds": elapsed}
 
 
+def is_saved_gemini_pair(api_key: Optional[str], model: Optional[str]) -> bool:
+    """
+    Check if the given (api_key, model) matches the currently configured / active pair.
+    Uses get_gemini_api_key() (which resolves env vars first, then saved config)
+    and load_gemini_config()["model"] (falling back to DEFAULT_GEMINI_MODEL).
+    """
+    cfg = load_gemini_config()
+    configured_key = (get_gemini_api_key() or "").strip()
+    configured_model = (cfg.get("model") or DEFAULT_GEMINI_MODEL).strip()
+
+    test_k = (api_key or "").strip()
+    test_m = (model or DEFAULT_GEMINI_MODEL).strip()
+    return (test_k == configured_key) and (test_m == configured_model)
+
+
 def test_gemini_connection(api_key: str, model: str = DEFAULT_GEMINI_MODEL) -> Tuple[bool, str]:
     """
     Test Gemini API connectivity with a simple ping prompt.
@@ -506,13 +521,9 @@ def test_gemini_connection(api_key: str, model: str = DEFAULT_GEMINI_MODEL) -> T
         bypass_state=True,
     )
     if res is not None:
-        cfg = load_gemini_config()
-        configured_key = (get_gemini_api_key() or "").strip()
-        configured_model = (cfg.get("model") or DEFAULT_GEMINI_MODEL).strip()
-
         now = time.time()
         was_impaired = _gemini_session_disabled or (now < _gemini_cooldown_until)
-        is_same_pair = (api_key.strip() == configured_key) and (model.strip() == configured_model)
+        is_same_pair = is_saved_gemini_pair(api_key, model)
 
         if was_impaired or is_same_pair:
             reset_gemini_state()
