@@ -1249,6 +1249,7 @@ def render_sidebar():
                     else:
                         saved_ok = llm_handler.save_gemini_config(api_key=k_input, model=chosen_g_model, engine="gemini")
                         if saved_ok:
+                            llm_handler.reset_gemini_state()
                             st.toast("บันทึก Gemini API Key เรียบร้อยแล้ว!")
                             st.rerun()
                         else:

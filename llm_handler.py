@@ -221,8 +221,6 @@ def save_gemini_config(
         )
         return False
     try:
-        if reset_state:
-            reset_gemini_state()
         os.makedirs(os.path.dirname(GEMINI_CONFIG_PATH), exist_ok=True)
         existing = {}
         if os.path.exists(GEMINI_CONFIG_PATH):
@@ -238,6 +236,8 @@ def save_gemini_config(
             existing[k] = v
         with open(GEMINI_CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(existing, f, indent=2)
+        if reset_state:
+            reset_gemini_state()
         return True
     except Exception as ex:
         logger.error(f"Failed to save Gemini config: {ex}")
@@ -511,7 +511,7 @@ def test_gemini_connection(api_key: str, model: str = DEFAULT_GEMINI_MODEL) -> T
     Test Gemini API connectivity with a simple ping prompt.
     Bypasses cooldown/disabled checks so users can test and recover after fixing model or key.
     If connectivity succeeds, resets cooldown/disabled state ONLY IF the tested (api_key, model)
-    pair equals the currently configured pair OR the session was already disabled/in cooldown.
+    pair equals the currently configured pair.
     """
     res, metrics = call_gemini_api(
         contents=[{"role": "user", "parts": [{"text": "Reply with 'OK' only."}]}],
@@ -521,11 +521,7 @@ def test_gemini_connection(api_key: str, model: str = DEFAULT_GEMINI_MODEL) -> T
         bypass_state=True,
     )
     if res is not None:
-        now = time.time()
-        was_impaired = _gemini_session_disabled or (now < _gemini_cooldown_until)
-        is_same_pair = is_saved_gemini_pair(api_key, model)
-
-        if was_impaired or is_same_pair:
+        if is_saved_gemini_pair(api_key, model):
             reset_gemini_state()
 
         elapsed = metrics.get("elapsed_seconds", 0)

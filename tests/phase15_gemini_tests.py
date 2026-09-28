@@ -15,6 +15,8 @@ import datetime
 import json
 import logging
 import os
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -323,7 +325,7 @@ class TestPhase15GeminiHardening(unittest.TestCase):
 
     def test_test_gemini_connection_bypasses_404_disabled_and_recovers_engine(self):
         """Test button bypasses session-disabled state, doesn't increment quota, and recovers engine to gemini."""
-        llm_handler.save_gemini_config(api_key=self.dummy_key, model="bad-model", engine="gemini")
+        llm_handler.save_gemini_config(api_key=self.dummy_key, model="gemini-3.6-flash", engine="gemini")
 
         # 1. Trigger 404 to disable Gemini
         mock_404 = MagicMock()
@@ -508,6 +510,176 @@ class TestPhase15GeminiHardening(unittest.TestCase):
             self.assertFalse(llm_handler.is_saved_gemini_pair("OTHER_KEY", llm_handler.DEFAULT_GEMINI_MODEL))
             # Different model -> False
             self.assertFalse(llm_handler.is_saved_gemini_pair(env_key, "other-model"))
+
+    def test_a_disabled_session_test_different_pair_does_not_reset_status(self):
+        """(a) session_disabled=True (from 401) + testing different pair + mock 200: returns (True, ...) but session remains disabled, engine=ollama."""
+        saved_key = "AIzaSySavedKey_AAAA"
+        saved_model = "gemini-3.6-flash"
+        llm_handler.save_gemini_config(api_key=saved_key, model=saved_model, engine="gemini")
+        self.assertEqual(llm_handler.get_active_engine(), "gemini")
+
+        # 1. Trigger 401
+        mock_401 = MagicMock()
+        mock_401.status_code = 401
+        mock_401.text = json.dumps({"error": {"code": 401, "message": "API key invalid", "status": "UNAUTHENTICATED"}})
+        with patch("requests.post", return_value=mock_401):
+            llm_handler.call_gemini_api([{"role": "user", "parts": [{"text": "hi"}]}], api_key=saved_key)
+
+        status_before = llm_handler.get_gemini_status()
+        self.assertTrue(status_before["session_disabled"])
+        self.assertEqual(llm_handler.get_active_engine(), "ollama")
+
+        # 2. Test different pair with mock 200
+        mock_200 = MagicMock()
+        mock_200.status_code = 200
+        mock_200.json.return_value = {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]}
+        mock_200.text = json.dumps({"candidates": [{"content": {"parts": [{"text": "OK"}]}}]})
+
+        with patch("requests.post", return_value=mock_200):
+            ok, msg = llm_handler.test_gemini_connection("NEW_KEY_DIFFERENT", saved_model)
+
+        self.assertTrue(ok)
+        self.assertIn("เชื่อมต่อสำเร็จ", msg)
+        status_after = llm_handler.get_gemini_status()
+        self.assertTrue(status_after["session_disabled"])
+        self.assertEqual(llm_handler.get_active_engine(), "ollama")
+
+    def test_b_cooldown_test_different_pair_does_not_clear_cooldown(self):
+        """(b) In cooldown (from 429) + testing different pair + mock 200: returns True but cooldown_until is not cleared."""
+        saved_key = "AIzaSySavedKey_BBBB"
+        saved_model = "gemini-3.6-flash"
+        llm_handler.save_gemini_config(api_key=saved_key, model=saved_model, engine="gemini")
+
+        # 1. Trigger 429
+        mock_429 = MagicMock()
+        mock_429.status_code = 429
+        mock_429.text = json.dumps({"error": {"code": 429, "message": "Resource exhausted", "status": "RESOURCE_EXHAUSTED"}})
+        with patch("requests.post", return_value=mock_429):
+            llm_handler.call_gemini_api([{"role": "user", "parts": [{"text": "hi"}]}], api_key=saved_key)
+
+        status_before = llm_handler.get_gemini_status()
+        old_cooldown = status_before["cooldown_until"]
+        self.assertIsNotNone(old_cooldown)
+        self.assertEqual(llm_handler.get_active_engine(), "ollama")
+
+        # 2. Test different pair with mock 200
+        mock_200 = MagicMock()
+        mock_200.status_code = 200
+        mock_200.json.return_value = {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]}
+        mock_200.text = json.dumps({"candidates": [{"content": {"parts": [{"text": "OK"}]}}]})
+
+        with patch("requests.post", return_value=mock_200):
+            ok, msg = llm_handler.test_gemini_connection("NEW_KEY_DIFFERENT", saved_model)
+
+        self.assertTrue(ok)
+        status_after = llm_handler.get_gemini_status()
+        self.assertEqual(status_after["cooldown_until"], old_cooldown)
+        self.assertEqual(llm_handler.get_active_engine(), "ollama")
+
+    def test_c_disabled_session_test_same_pair_resets_status(self):
+        """(c) session_disabled=True + testing SAME saved pair + mock 200: state is reset (engine=gemini, session_disabled=False)."""
+        saved_key = "AIzaSySavedKey_CCCC"
+        saved_model = "gemini-3.6-flash"
+        llm_handler.save_gemini_config(api_key=saved_key, model=saved_model, engine="gemini")
+
+        # 1. Trigger 401
+        mock_401 = MagicMock()
+        mock_401.status_code = 401
+        mock_401.text = json.dumps({"error": {"code": 401, "message": "API key invalid", "status": "UNAUTHENTICATED"}})
+        with patch("requests.post", return_value=mock_401):
+            llm_handler.call_gemini_api([{"role": "user", "parts": [{"text": "hi"}]}], api_key=saved_key)
+
+        self.assertTrue(llm_handler.get_gemini_status()["session_disabled"])
+
+        # 2. Test same pair with mock 200
+        mock_200 = MagicMock()
+        mock_200.status_code = 200
+        mock_200.json.return_value = {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]}
+        mock_200.text = json.dumps({"candidates": [{"content": {"parts": [{"text": "OK"}]}}]})
+
+        with patch("requests.post", return_value=mock_200):
+            ok, msg = llm_handler.test_gemini_connection(saved_key, saved_model)
+
+        self.assertTrue(ok)
+        status_after = llm_handler.get_gemini_status()
+        self.assertFalse(status_after["session_disabled"])
+        self.assertIsNone(status_after["cooldown_until"])
+        self.assertEqual(llm_handler.get_active_engine(), "gemini")
+
+    def test_d_disabled_session_test_different_pair_then_save_resets_status(self):
+        """(d) session_disabled=True + test different pair then save via save route: state is reset and is_saved_gemini_pair becomes True."""
+        saved_key = "AIzaSySavedKey_DDDD"
+        saved_model = "gemini-3.6-flash"
+        llm_handler.save_gemini_config(api_key=saved_key, model=saved_model, engine="gemini")
+
+        # 1. Trigger 401
+        mock_401 = MagicMock()
+        mock_401.status_code = 401
+        mock_401.text = json.dumps({"error": {"code": 401, "message": "API key invalid", "status": "UNAUTHENTICATED"}})
+        with patch("requests.post", return_value=mock_401):
+            llm_handler.call_gemini_api([{"role": "user", "parts": [{"text": "hi"}]}], api_key=saved_key)
+
+        self.assertTrue(llm_handler.get_gemini_status()["session_disabled"])
+
+        # 2. Test different pair -> still disabled
+        mock_200 = MagicMock()
+        mock_200.status_code = 200
+        mock_200.json.return_value = {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]}
+        mock_200.text = json.dumps({"candidates": [{"content": {"parts": [{"text": "OK"}]}}]})
+
+        new_key = "AIzaSyNewValidKey_DDDD2"
+        new_model = "gemini-2.5-flash"
+        with patch("requests.post", return_value=mock_200):
+            ok, msg = llm_handler.test_gemini_connection(new_key, new_model)
+
+        self.assertTrue(ok)
+        self.assertTrue(llm_handler.get_gemini_status()["session_disabled"])
+
+        # 3. Save via save_gemini_config route (same function invoked by '💾 บันทึก Key' button)
+        saved = llm_handler.save_gemini_config(api_key=new_key, model=new_model, engine="gemini")
+        self.assertTrue(saved)
+
+        status_after = llm_handler.get_gemini_status()
+        self.assertFalse(status_after["session_disabled"])
+        self.assertEqual(llm_handler.get_active_engine(), "gemini")
+        self.assertTrue(llm_handler.is_saved_gemini_pair(new_key, new_model))
+
+    def test_e_env_var_key_broken_session_test_env_key_resets_other_does_not(self):
+        """(e) Key from env var GEMINI_API_KEY (no saved config) + broken session:
+        testing env key + default model resets state, while testing other key does not reset."""
+        if os.path.exists(self.test_config_path):
+            os.remove(self.test_config_path)
+
+        env_key = "AIzaSyEnvKey_EEEE"
+        with patch.dict(os.environ, {"GEMINI_API_KEY": env_key, "LLM_ENGINE": "gemini"}):
+            # 1. Trigger 401 with env key
+            mock_401 = MagicMock()
+            mock_401.status_code = 401
+            mock_401.text = json.dumps({"error": {"code": 401, "message": "API key invalid", "status": "UNAUTHENTICATED"}})
+            with patch("requests.post", return_value=mock_401):
+                llm_handler.call_gemini_api([{"role": "user", "parts": [{"text": "hi"}]}], api_key=env_key)
+
+            self.assertTrue(llm_handler.get_gemini_status()["session_disabled"])
+            self.assertEqual(llm_handler.get_active_engine(), "ollama")
+
+            mock_200 = MagicMock()
+            mock_200.status_code = 200
+            mock_200.json.return_value = {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]}
+            mock_200.text = json.dumps({"candidates": [{"content": {"parts": [{"text": "OK"}]}}]})
+
+            # 2. Test other key -> does NOT reset
+            with patch("requests.post", return_value=mock_200):
+                ok1, msg1 = llm_handler.test_gemini_connection("SOME_OTHER_KEY", llm_handler.DEFAULT_GEMINI_MODEL)
+            self.assertTrue(ok1)
+            self.assertTrue(llm_handler.get_gemini_status()["session_disabled"])
+            self.assertEqual(llm_handler.get_active_engine(), "ollama")
+
+            # 3. Test env key + default model -> RESETS
+            with patch("requests.post", return_value=mock_200):
+                ok2, msg2 = llm_handler.test_gemini_connection(env_key, llm_handler.DEFAULT_GEMINI_MODEL)
+            self.assertTrue(ok2)
+            self.assertFalse(llm_handler.get_gemini_status()["session_disabled"])
+            self.assertEqual(llm_handler.get_active_engine(), "gemini")
 
 
 if __name__ == "__main__":
