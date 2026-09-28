@@ -337,7 +337,7 @@ def call_gemini_api(
         "contents": contents,
         "generationConfig": {
             "temperature": temperature,
-            "maxOutputTokens": 2048,
+            "maxOutputTokens": 4096,
         }
     }
     if system_instruction:
@@ -926,6 +926,9 @@ def extract_and_strip_suggestions(raw_text: str) -> Tuple[str, List[str]]:
     clean_narrative = re.sub(r"```\s*\{[\s\S]*?\}\s*```", "", clean_narrative, flags=re.DOTALL).strip()
     raw_sug_pattern = r"\{[\s\r\n]*\"suggestions\"[\s\S]*?\}"
     clean_narrative = re.sub(raw_sug_pattern, "", clean_narrative, flags=re.DOTALL | re.IGNORECASE).strip()
+    # Also strip unclosed or truncated trailing JSON / markdown fences at the end of narrative
+    clean_narrative = re.sub(r"(?:```(?:json)?\s*)?\{[\s\r\n]*\"suggestions\"[\s\S]*$", "", clean_narrative, flags=re.DOTALL | re.IGNORECASE).strip()
+    clean_narrative = re.sub(r"```(?:json)?\s*$", "", clean_narrative, flags=re.DOTALL).strip()
 
     return clean_narrative, cleaned_suggestions
 

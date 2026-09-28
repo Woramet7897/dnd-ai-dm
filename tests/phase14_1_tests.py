@@ -123,6 +123,25 @@ class TestPhase14_1ContextualSuggestions(unittest.TestCase):
         self.assertNotIn("incomplete", res["narrative"])
         self.assertEqual(res["narrative"], "A sudden shadow passes overhead.")
 
+    def test_unclosed_truncated_json_stripped_completely(self):
+        """Unclosed/truncated JSON block at the end is completely stripped from narrative."""
+        raw_output = (
+            "The story ends here.\n\n"
+            "```json\n"
+            '{\n  "suggestions": [\n    "action 1",\n    "action 2"'
+        )
+        client = MockNarrativeClient(raw_output)
+        res = llm_handler.generate_narrative_response(
+            user_input="Continue",
+            player_state=self.player_sample,
+            world_state=self.world_sample,
+            client=client,
+        )
+        self.assertEqual(res["narrative"], "The story ends here.")
+        self.assertNotIn("suggestions", res["narrative"])
+        self.assertNotIn("{", res["narrative"])
+        self.assertEqual(len(res["suggestions"]), 3)
+
     def test_unfenced_raw_json_suggestions(self):
         """Unfenced raw JSON at response end is parsed and stripped completely."""
         raw_output = (
