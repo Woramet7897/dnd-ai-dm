@@ -11,6 +11,7 @@ import json
 import logging
 import math
 import os
+import re
 import time
 import streamlit as st
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -1135,7 +1136,7 @@ def render_sidebar():
     installed_models = llm_handler.get_installed_models()
 
     with st.sidebar.expander("🤖 Dungeon Master AI (Engine & Models)", expanded=False):
-        engine_opts = ["⚡ Google Gemini (Cloud 1-2s & ฟรี)", "🏠 Local Ollama (ในเครื่อง/ออฟไลน์)"]
+        engine_opts = ["⚡ Google Gemini (Cloud API • Free tier ตามโควตาบัญชี)", "🏠 Local Ollama (ในเครื่อง/ออฟไลน์)"]
         default_engine_idx = 0 if active_engine == "gemini" and gemini_key else 1
 
         chosen_engine_label = st.radio(
@@ -1148,7 +1149,7 @@ def render_sidebar():
 
         if is_gemini:
             st.markdown("##### ⚡ Google Gemini Flash")
-            st.caption("เร็ว 1-2 วินาที • จำ Context 1M tokens • ฟรี 100% จาก Google AI Studio")
+            st.caption("มี free tier จาก Google AI Studio (โควตาขึ้นกับบัญชี ดูได้ที่ aistudio.google.com/rate-limit) • ถ้าโควตาหมดหรือเน็ตหลุด ระบบจะสลับไปใช้ Ollama อัตโนมัติ")
 
             k_input = st.text_input(
                 "Gemini API Key:",
@@ -1159,7 +1160,7 @@ def render_sidebar():
                 help="กดรับ API Key ฟรีได้ที่ https://aistudio.google.com"
             )
 
-            gemini_model_opts = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+            gemini_model_opts = ["gemini-3.6-flash", "gemini-3.5-flash-lite"]
             cur_cfg = llm_handler.load_gemini_config()
             cur_g_model = cur_cfg.get("model", llm_handler.DEFAULT_GEMINI_MODEL)
             if cur_g_model in llm_handler.KNOWN_SHUTDOWN_MODELS:
@@ -1179,32 +1180,40 @@ def render_sidebar():
             if chosen_g_model == "Other (กำหนดเอง)":
                 custom_model_name = st.text_input(
                     "ป้อนชื่อรุ่นโมเดล:",
-                    value=cur_g_model if cur_g_model not in ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"] else "",
+                    value=cur_g_model if cur_g_model not in ["gemini-3.6-flash", "gemini-3.5-flash-lite"] else "",
                     placeholder="e.g. gemini-3.6-flash",
                     key="sb_gemini_custom_model_input"
                 )
-                if custom_model_name.strip():
-                    chosen_g_model = custom_model_name.strip()
+                chosen_g_model = custom_model_name.strip()
+
+            is_valid_model = bool(re.match(r"^[a-z0-9][a-z0-9.\-]*$", chosen_g_model))
 
             col_k1, col_k2 = st.columns(2)
             with col_k1:
                 if st.button("💾 บันทึก Key", use_container_width=True, key="btn_save_gemini_key"):
-                    if k_input:
-                        llm_handler.save_gemini_config(api_key=k_input, model=chosen_g_model, engine="gemini")
-                        st.toast("บันทึก Gemini API Key เรียบร้อยแล้ว!")
-                        st.rerun()
-                    else:
+                    if not k_input:
                         st.warning("กรุณากรอก API Key ก่อนบันทึก")
+                    elif not is_valid_model:
+                        st.error("ชื่อรุ่นโมเดลไม่ถูกต้อง (อนุญาตเฉพาะตัวพิมพ์เล็ก a-z, 0-9, จุด, และขีด เช่น gemini-3.6-flash)")
+                    else:
+                        saved_ok = llm_handler.save_gemini_config(api_key=k_input, model=chosen_g_model, engine="gemini")
+                        if saved_ok:
+                            st.toast("บันทึก Gemini API Key เรียบร้อยแล้ว!")
+                            st.rerun()
+                        else:
+                            st.error("ไม่สามารถบันทึกการตั้งค่า Gemini ได้ กรุณาตรวจสอบข้อมูล")
             with col_k2:
                 if st.button("🔌 ทดสอบ", use_container_width=True, key="btn_test_gemini"):
-                    if k_input:
+                    if not k_input:
+                        st.warning("กรุณาใส่ API Key")
+                    elif not is_valid_model:
+                        st.error("ชื่อรุ่นโมเดลไม่ถูกต้อง (อนุญาตเฉพาะตัวพิมพ์เล็ก a-z, 0-9, จุด, และขีด เช่น gemini-3.6-flash)")
+                    else:
                         ok_conn, msg_conn = llm_handler.test_gemini_connection(k_input, model=chosen_g_model)
                         if ok_conn:
                             st.success(msg_conn)
                         else:
                             st.error(f"ทดสอบไม่สำเร็จ: {msg_conn}")
-                    else:
-                        st.warning("กรุณาใส่ API Key")
 
             # Gemini engine status & Daily calls display
             g_status = llm_handler.get_gemini_status()

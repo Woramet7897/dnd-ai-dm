@@ -60,6 +60,19 @@ _gemini_disabled_reason: Optional[str] = None
 _gemini_last_error_type: Optional[str] = None
 
 
+def _redact(text: Any, key: Optional[str] = None) -> str:
+    """Redact API key and any URL query parameter containing a key from text."""
+    if text is None:
+        return ""
+    s = str(text)
+    active_key = key or get_gemini_api_key()
+    if active_key and str(active_key).strip():
+        s = s.replace(str(active_key).strip(), "[REDACTED_API_KEY]")
+    # Redact URL query parameter patterns like ?key=... or &key=...
+    s = re.sub(r"([?&]key=)[^&\s'\"]+", r"\1[REDACTED_API_KEY]", s)
+    return s
+
+
 def reset_gemini_state() -> None:
     """Reset Gemini runtime cooldown and session disabled state (for testing and UI reset)."""
     global _gemini_cooldown_until, _gemini_session_disabled, _gemini_disabled_reason, _gemini_last_error_type
@@ -89,25 +102,51 @@ def get_gemini_daily_calls() -> int:
     return 0
 
 
+def _update_gemini_config_fields(**fields: Any) -> bool:
+    """
+    Safely update non-credential metadata fields (e.g. daily_calls, user_daily_limit)
+    in data/gemini_config.json without touching api_key, model, or engine.
+    - Reads existing file directly.
+    - Merges ONLY the given fields, never writes api_key/model/engine.
+    - Does nothing (with logger.warning) if existing file is corrupt rather than overwriting it.
+    - If file does not exist, creates it with only the given fields.
+    """
+    protected_fields = {"api_key", "model", "engine"}
+    fields_to_write = {k: v for k, v in fields.items() if k not in protected_fields}
+    if not fields_to_write:
+        return False
+
+    existing_data: Dict[str, Any] = {}
+    if os.path.exists(GEMINI_CONFIG_PATH):
+        try:
+            with open(GEMINI_CONFIG_PATH, "r", encoding="utf-8") as f:
+                content = f.read()
+            parsed = json.loads(content)
+            if not isinstance(parsed, dict):
+                logger.warning("Gemini config file is not a valid JSON dictionary. Skipping metadata update to preserve file.")
+                return False
+            existing_data = parsed
+        except Exception as ex:
+            logger.warning(f"Gemini config file exists but is corrupt/unreadable: {ex}. Skipping metadata update to preserve file.")
+            return False
+
+    existing_data.update(fields_to_write)
+    try:
+        os.makedirs(os.path.dirname(GEMINI_CONFIG_PATH), exist_ok=True)
+        with open(GEMINI_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(existing_data, f, indent=2)
+        return True
+    except Exception as ex:
+        logger.warning(f"Failed to update Gemini config fields: {ex}")
+        return False
+
+
 def increment_gemini_daily_calls() -> int:
     """Increment successful Gemini call count for current Pacific date and persist."""
-    cfg = load_gemini_config()
     today_pt = get_pacific_date_str()
-    daily = cfg.get("daily_calls", {})
-    if daily.get("date") == today_pt:
-        count = int(daily.get("count", 0)) + 1
-    else:
-        count = 1
+    count = get_gemini_daily_calls() + 1
     daily_data = {"date": today_pt, "count": count}
-    cfg["daily_calls"] = daily_data
-    save_gemini_config(
-        api_key=cfg.get("api_key", ""),
-        model=cfg.get("model", DEFAULT_GEMINI_MODEL),
-        engine=cfg.get("engine", "gemini"),
-        reset_state=False,
-        daily_calls=daily_data,
-        user_daily_limit=cfg.get("user_daily_limit"),
-    )
+    _update_gemini_config_fields(daily_calls=daily_data)
     return count
 
 
@@ -122,15 +161,7 @@ def get_gemini_user_daily_limit() -> Optional[int]:
 
 def set_gemini_user_daily_limit(limit: Optional[int]) -> None:
     """Save user-configured daily Gemini call limit."""
-    cfg = load_gemini_config()
-    save_gemini_config(
-        api_key=cfg.get("api_key", ""),
-        model=cfg.get("model", DEFAULT_GEMINI_MODEL),
-        engine=cfg.get("engine", "gemini"),
-        reset_state=False,
-        daily_calls=cfg.get("daily_calls"),
-        user_daily_limit=limit,
-    )
+    _update_gemini_config_fields(user_daily_limit=limit)
 
 
 def get_gemini_status() -> Dict[str, Any]:
@@ -171,14 +202,24 @@ def load_gemini_config() -> Dict[str, Any]:
     return {}
 
 
+MODEL_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.\-]*$")
+
+
 def save_gemini_config(
     api_key: str,
     model: str = DEFAULT_GEMINI_MODEL,
     engine: str = "gemini",
     reset_state: bool = True,
     **kwargs: Any,
-) -> None:
+) -> bool:
     """Save Gemini API configuration locally in data/gemini_config.json."""
+    clean_model = model.strip() if model else DEFAULT_GEMINI_MODEL
+    if not MODEL_NAME_PATTERN.match(clean_model):
+        logger.warning(
+            f"Model name '{clean_model}' does not match allowed pattern. "
+            "Configuration was not saved."
+        )
+        return False
     try:
         if reset_state:
             reset_gemini_state()
@@ -191,14 +232,16 @@ def save_gemini_config(
             except Exception:
                 existing = {}
         existing["api_key"] = api_key.strip()
-        existing["model"] = model.strip()
+        existing["model"] = clean_model
         existing["engine"] = engine.strip()
         for k, v in kwargs.items():
             existing[k] = v
         with open(GEMINI_CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(existing, f, indent=2)
+        return True
     except Exception as ex:
         logger.error(f"Failed to save Gemini config: {ex}")
+        return False
 
 
 def get_gemini_api_key() -> Optional[str]:
@@ -239,29 +282,34 @@ def call_gemini_api(
     response_mime_type: Optional[str] = None,
     api_key: Optional[str] = None,
     model: Optional[str] = None,
+    bypass_state: bool = False,
 ) -> Tuple[Optional[str], Dict[str, Any]]:
     """
     Call Google Gemini REST API directly using requests.
     Zero heavy SDK dependencies, works across all Python versions.
     Classifies error kinds: 'quota', 'auth', 'not_found', 'timeout', 'network', 'other'.
+    When bypass_state=True (used by test_gemini_connection):
+      - Skips session_disabled and cooldown short-circuits.
+      - Does not increment daily call counter.
     """
     global _gemini_cooldown_until, _gemini_session_disabled, _gemini_disabled_reason, _gemini_last_error_type
     import requests
 
     now = time.time()
-    if _gemini_session_disabled:
-        return None, {
-            "error": f"Gemini is disabled for this session: {_gemini_disabled_reason}",
-            "error_type": _gemini_last_error_type or "other",
-            "elapsed_seconds": 0.0,
-        }
-    if now < _gemini_cooldown_until:
-        rem = int(_gemini_cooldown_until - now)
-        return None, {
-            "error": f"Gemini quota cooldown active ({rem}s remaining)",
-            "error_type": "quota",
-            "elapsed_seconds": 0.0,
-        }
+    if not bypass_state:
+        if _gemini_session_disabled:
+            return None, {
+                "error": _redact(f"Gemini is disabled for this session: {_gemini_disabled_reason}", api_key),
+                "error_type": _gemini_last_error_type or "other",
+                "elapsed_seconds": 0.0,
+            }
+        if now < _gemini_cooldown_until:
+            rem = int(_gemini_cooldown_until - now)
+            return None, {
+                "error": _redact(f"Gemini quota cooldown active ({rem}s remaining)", api_key),
+                "error_type": "quota",
+                "elapsed_seconds": 0.0,
+            }
 
     key = api_key or get_gemini_api_key()
     if not key:
@@ -272,8 +320,11 @@ def call_gemini_api(
     chosen_model = model or cfg.get("model") or DEFAULT_GEMINI_MODEL
     if chosen_model in KNOWN_SHUTDOWN_MODELS:
         logger.warning(
-            f"Requested model '{chosen_model}' is shut down. "
-            f"Substituting default '{DEFAULT_GEMINI_MODEL}'."
+            _redact(
+                f"Requested model '{chosen_model}' is shut down. "
+                f"Substituting default '{DEFAULT_GEMINI_MODEL}'.",
+                key,
+            )
         )
         chosen_model = DEFAULT_GEMINI_MODEL
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{chosen_model}:generateContent"
@@ -308,18 +359,20 @@ def call_gemini_api(
         elapsed = time.time() - start_t
         if resp.status_code != 200:
             resp_text = resp.text or ""
-            if key and key in resp_text:
-                resp_text = resp_text.replace(key, "[REDACTED_API_KEY]")
+            resp_text = _redact(resp_text, key)
             truncated_body = resp_text[:300] + "..." if len(resp_text) > 300 else resp_text
-            err_msg = f"HTTP {resp.status_code}: {truncated_body}"
+            err_msg = _redact(f"HTTP {resp.status_code}: {truncated_body}", key)
 
             if resp.status_code == 429 or "RESOURCE_EXHAUSTED" in resp_text:
                 error_type = "quota"
                 _gemini_cooldown_until = time.time() + GEMINI_COOLDOWN_SECONDS
                 _gemini_last_error_type = "quota"
                 logger.warning(
-                    f"Gemini quota exhausted (HTTP {resp.status_code}). "
-                    f"Cooldown activated for {GEMINI_COOLDOWN_SECONDS}s. Falling back to Ollama."
+                    _redact(
+                        f"Gemini quota exhausted (HTTP {resp.status_code}). "
+                        f"Cooldown activated for {GEMINI_COOLDOWN_SECONDS}s. Falling back to Ollama.",
+                        key,
+                    )
                 )
             elif resp.status_code in (401, 403) or "PERMISSION_DENIED" in resp_text or "API_KEY_INVALID" in resp_text:
                 error_type = "auth"
@@ -327,25 +380,34 @@ def call_gemini_api(
                 _gemini_disabled_reason = "Authentication failed (Invalid API key)"
                 _gemini_last_error_type = "auth"
                 logger.error(
-                    f"Gemini authentication failed (HTTP {resp.status_code}): {truncated_body}. "
-                    "Gemini has been disabled for this session. Please check your API key at https://aistudio.google.com/app/apikey"
+                    _redact(
+                        f"Gemini authentication failed (HTTP {resp.status_code}): {truncated_body}. "
+                        "Gemini has been disabled for this session. Please check your API key at https://aistudio.google.com/app/apikey",
+                        key,
+                    )
                 )
             elif resp.status_code == 404:
                 error_type = "not_found"
                 _gemini_session_disabled = True
-                _gemini_disabled_reason = f"Model '{chosen_model}' not found (HTTP 404)"
+                _gemini_disabled_reason = (
+                    f"Model '{chosen_model}' not found or project lacks access (HTTP 404). "
+                    "Choose another model and press 'ทดสอบ'."
+                )
                 _gemini_last_error_type = "not_found"
                 logger.error(
-                    f"Gemini model '{chosen_model}' not found (HTTP 404). "
-                    "Model may be shut down or nonexistent. Gemini has been disabled for this session. "
-                    "Please choose an active model in AI settings."
+                    _redact(
+                        f"Gemini model '{chosen_model}' not found (HTTP 404). "
+                        "Model may be shut down or the API key's project may not have access to this model. "
+                        "Gemini has been disabled for this session. Please choose an active model in AI settings and press 'ทดสอบ' (Test) to reactivate.",
+                        key,
+                    )
                 )
             else:
                 error_type = "other"
                 _gemini_last_error_type = "other"
-                logger.error(f"Gemini API returned error: {err_msg}")
+                logger.error(_redact(f"Gemini API returned error: {err_msg}", key))
 
-            return None, {"error": err_msg, "error_type": error_type, "elapsed_seconds": elapsed}
+            return None, {"error": _redact(err_msg, key), "error_type": error_type, "elapsed_seconds": elapsed}
 
         data = resp.json()
         candidates = data.get("candidates", [])
@@ -356,7 +418,7 @@ def call_gemini_api(
         first_cand = candidates[0]
         text = first_cand.get("content", {}).get("parts", [{}])[0].get("text", "")
         usage = data.get("usageMetadata", {})
-        calls_today = increment_gemini_daily_calls()
+        calls_today = get_gemini_daily_calls() if bypass_state else increment_gemini_daily_calls()
         metrics = {
             "eval_count": usage.get("candidatesTokenCount", 0),
             "prompt_eval_count": usage.get("promptTokenCount", 0),
@@ -370,29 +432,48 @@ def call_gemini_api(
         return text, metrics
     except Exception as ex:
         elapsed = time.time() - start_t
+        redacted_ex = _redact(str(ex), key)
         if isinstance(ex, requests.Timeout):
             error_type = "timeout"
-            logger.warning(f"Gemini API call timed out after {elapsed:.2f}s: {ex}. Falling back to Ollama without cooldown.")
+            logger.warning(
+                _redact(
+                    f"Gemini API call timed out after {elapsed:.2f}s: {redacted_ex}. "
+                    "Falling back to Ollama without cooldown.",
+                    key,
+                )
+            )
         elif isinstance(ex, (requests.ConnectionError, requests.RequestException)):
             error_type = "network"
-            logger.error(f"Gemini API network error after {elapsed:.2f}s: {ex}. Falling back to Ollama.")
+            logger.error(
+                _redact(
+                    f"Gemini API network error after {elapsed:.2f}s: {redacted_ex}. "
+                    "Falling back to Ollama.",
+                    key,
+                )
+            )
         else:
             error_type = "other"
-            logger.error(f"Gemini API call failed after {elapsed:.2f}s: {ex}")
+            logger.error(_redact(f"Gemini API call failed after {elapsed:.2f}s: {redacted_ex}", key))
 
         _gemini_last_error_type = error_type
-        return None, {"error": str(ex), "error_type": error_type, "elapsed_seconds": elapsed}
+        return None, {"error": redacted_ex, "error_type": error_type, "elapsed_seconds": elapsed}
 
 
 def test_gemini_connection(api_key: str, model: str = DEFAULT_GEMINI_MODEL) -> Tuple[bool, str]:
-    """Test Gemini API connectivity with a simple ping prompt."""
+    """
+    Test Gemini API connectivity with a simple ping prompt.
+    Bypasses cooldown/disabled checks so users can test and recover after fixing model or key.
+    If connectivity succeeds, resets cooldown/disabled state immediately.
+    """
     res, metrics = call_gemini_api(
         contents=[{"role": "user", "parts": [{"text": "Reply with 'OK' only."}]}],
         api_key=api_key,
         model=model,
         temperature=0.1,
+        bypass_state=True,
     )
     if res is not None:
+        reset_gemini_state()
         elapsed = metrics.get("elapsed_seconds", 0)
         return True, f"เชื่อมต่อสำเร็จใน {elapsed:.2f}s! ({model})"
     return False, metrics.get("error", "Unknown error")

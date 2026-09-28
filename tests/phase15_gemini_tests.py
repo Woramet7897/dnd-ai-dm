@@ -246,6 +246,144 @@ class TestPhase15GeminiHardening(unittest.TestCase):
             for record in log_ctx.output:
                 self.assertNotIn(secret_key, record, f"API key leaked in log record: {record}")
 
+    def test_corrupt_config_not_overwritten_on_successful_call(self):
+        """A corrupt config file is preserved and not overwritten when recording daily calls."""
+        corrupt_content = '{"api_key": "saved_secret", "corrupt_json_missing_brace": '
+        with open(self.test_config_path, "w", encoding="utf-8") as f:
+            f.write(corrupt_content)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": "Hello world"}]}}],
+            "usageMetadata": {"candidatesTokenCount": 5, "promptTokenCount": 10},
+        }
+
+        with patch("requests.post", return_value=mock_resp):
+            res, metrics = llm_handler.call_gemini_api(
+                contents=[{"role": "user", "parts": [{"text": "Hi"}]}],
+                api_key="valid_key",
+            )
+            self.assertIsNotNone(res)
+
+        # Config file must remain completely unchanged
+        with open(self.test_config_path, "r", encoding="utf-8") as f:
+            content_after = f.read()
+        self.assertEqual(content_after, corrupt_content)
+
+    def test_env_key_only_does_not_create_engine_gemini_config(self):
+        """When API key comes from env var only, incrementing counter never writes engine or api_key."""
+        if os.path.exists(self.test_config_path):
+            os.remove(self.test_config_path)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": "Hello world"}]}}],
+            "usageMetadata": {"candidatesTokenCount": 5, "promptTokenCount": 10},
+        }
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "env_secret_key"}), \
+             patch("requests.post", return_value=mock_resp):
+            res, metrics = llm_handler.call_gemini_api(
+                contents=[{"role": "user", "parts": [{"text": "Hi"}]}],
+            )
+            self.assertIsNotNone(res)
+
+        # Config file may contain daily_calls, but must NEVER contain api_key or engine
+        if os.path.exists(self.test_config_path):
+            with open(self.test_config_path, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            self.assertNotIn("api_key", saved)
+            self.assertNotIn("engine", saved)
+
+    def test_connection_error_redacts_api_key_in_logs_and_metrics(self):
+        """ConnectionError with ?key=... URL fragment redacts key in logs and metrics."""
+        import requests
+        secret_key = "AIzaSySecretNetworkKey_998877"
+        llm_handler.save_gemini_config(api_key=secret_key, model="gemini-3.6-flash", engine="gemini")
+
+        conn_err_msg = f"Failed to establish connection: https://generativelanguage.googleapis.com/v1beta/models?key={secret_key}&alt=json"
+
+        with self.assertLogs("llm_handler", level="ERROR") as log_ctx:
+            with patch("requests.post", side_effect=requests.ConnectionError(conn_err_msg)):
+                res, metrics = llm_handler.call_gemini_api(
+                    contents=[{"role": "user", "parts": [{"text": "Hello"}]}],
+                    api_key=secret_key,
+                )
+
+        self.assertIsNone(res)
+        self.assertEqual(metrics.get("error_type"), "network")
+        self.assertNotIn(secret_key, metrics.get("error", ""))
+        self.assertIn("[REDACTED_API_KEY]", metrics.get("error", ""))
+
+        for record in log_ctx.output:
+            self.assertNotIn(secret_key, record, f"API key leaked in log record: {record}")
+            self.assertIn("[REDACTED_API_KEY]", record)
+
+    def test_test_gemini_connection_bypasses_404_disabled_and_recovers_engine(self):
+        """Test button bypasses session-disabled state, doesn't increment quota, and recovers engine to gemini."""
+        llm_handler.save_gemini_config(api_key=self.dummy_key, model="bad-model", engine="gemini")
+
+        # 1. Trigger 404 to disable Gemini
+        mock_404 = MagicMock()
+        mock_404.status_code = 404
+        mock_404.text = json.dumps({"error": {"code": 404, "message": "Model not found"}})
+
+        with patch("requests.post", return_value=mock_404):
+            res, metrics = llm_handler.call_gemini_api(
+                contents=[{"role": "user", "parts": [{"text": "Test"}]}],
+                api_key=self.dummy_key,
+            )
+
+        self.assertIsNone(res)
+        self.assertEqual(llm_handler.get_active_engine(), "ollama")
+        status = llm_handler.get_gemini_status()
+        self.assertTrue(status["session_disabled"])
+        self.assertIn("Choose another model and press 'ทดสอบ'", status["disabled_reason"])
+        initial_calls = llm_handler.get_gemini_daily_calls()
+
+        # 2. Test button called with valid model and 200 response
+        mock_200 = MagicMock()
+        mock_200.status_code = 200
+        mock_200.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": "OK"}]}}],
+            "usageMetadata": {"candidatesTokenCount": 2, "promptTokenCount": 5},
+        }
+
+        with patch("requests.post", return_value=mock_200):
+            ok, msg = llm_handler.test_gemini_connection(self.dummy_key, model="gemini-3.6-flash")
+
+        self.assertTrue(ok)
+        self.assertIn("เชื่อมต่อสำเร็จ", msg)
+        # Session disabled state should be recovered
+        recovered_status = llm_handler.get_gemini_status()
+        self.assertFalse(recovered_status["session_disabled"])
+        self.assertEqual(llm_handler.get_active_engine(), "gemini")
+        # Test ping must NOT increment daily calls
+        self.assertEqual(llm_handler.get_gemini_daily_calls(), initial_calls)
+
+    def test_invalid_model_name_rejected_by_save_config(self):
+        """save_gemini_config rejects invalid model names containing spaces, uppercase, or special characters."""
+        invalid_names = [
+            "Gemini-3.6-Flash",
+            "gemini 3.6 flash",
+            "gemini@3.6!",
+            "-invalid-start",
+            ".invalid-start",
+        ]
+        for inv in invalid_names:
+            saved = llm_handler.save_gemini_config(api_key=self.dummy_key, model=inv, engine="gemini")
+            self.assertFalse(saved, f"Expected model '{inv}' to be rejected")
+
+        # Valid names should be accepted
+        valid_names = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "custom-model.v1", "model123"]
+        for val in valid_names:
+            saved = llm_handler.save_gemini_config(api_key=self.dummy_key, model=val, engine="gemini")
+            self.assertTrue(saved, f"Expected model '{val}' to be accepted")
+            loaded = llm_handler.load_gemini_config()
+            self.assertEqual(loaded.get("model"), val)
+
 
 if __name__ == "__main__":
     unittest.main()
