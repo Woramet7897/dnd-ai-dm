@@ -491,7 +491,7 @@ class TestAppIntegrations(unittest.TestCase):
         """2.1: Safe room must never trigger an ambush, and short-circuit prevents calling random.random."""
         room = {"id": "safe_den", "is_safe": True, "type": "dungeon", "encounter_table": ["wolf"]}
         with patch("random.random") as mock_rand, patch("combat_manager.start_combat") as mock_start:
-            msg = app._maybe_rest_ambush(room, self.world, self.fighter, chance=0.15, message_prefix="Ambush")
+            msg = app._maybe_rest_ambush(room, self.world, self.fighter, chance=0.15, message_prefix="Ambush", message_suffix="suffix", check_town=True)
             self.assertIsNone(msg)
             mock_rand.assert_not_called()
             mock_start.assert_not_called()
@@ -501,7 +501,7 @@ class TestAppIntegrations(unittest.TestCase):
         room = {"id": "cleared_cave", "is_safe": False, "type": "dungeon", "encounter_table": ["wolf"]}
         self.world["cleared_rooms"] = ["cleared_cave"]
         with patch("random.random") as mock_rand, patch("combat_manager.start_combat") as mock_start:
-            msg = app._maybe_rest_ambush(room, self.world, self.fighter, chance=0.15, message_prefix="Ambush")
+            msg = app._maybe_rest_ambush(room, self.world, self.fighter, chance=0.15, message_prefix="Ambush", message_suffix="suffix", check_town=True)
             self.assertIsNone(msg)
             mock_rand.assert_not_called()
             mock_start.assert_not_called()
@@ -510,7 +510,7 @@ class TestAppIntegrations(unittest.TestCase):
         """2.1: Town room during short rest (check_town=True) must never trigger ambush and short-circuits RNG."""
         room = {"id": "town_inn", "is_safe": False, "type": "town", "encounter_table": ["wolf"]}
         with patch("random.random") as mock_rand, patch("combat_manager.start_combat") as mock_start:
-            msg = app._maybe_rest_ambush(room, self.world, self.fighter, chance=0.15, message_prefix="Ambush", check_town=True)
+            msg = app._maybe_rest_ambush(room, self.world, self.fighter, chance=0.15, message_prefix="Ambush", message_suffix="suffix", check_town=True)
             self.assertIsNone(msg)
             mock_rand.assert_not_called()
             mock_start.assert_not_called()
@@ -522,24 +522,32 @@ class TestAppIntegrations(unittest.TestCase):
         # Short rest ambush
         with patch("random.random", return_value=0.05), patch("combat_manager.start_combat") as mock_start:
             prefix = "🚨 **Ambush!** ขณะกำลังนั่งพักผ่อนสั้นๆ ศัตรู"
-            msg = app._maybe_rest_ambush(room, self.world, self.fighter, chance=0.15, message_prefix=prefix, check_town=True)
+            suffix = "พุ่งเข้าจู่โจมคุณอย่างกะทันหัน!"
+            msg = app._maybe_rest_ambush(room, self.world, self.fighter, chance=0.15, message_prefix=prefix, message_suffix=suffix, check_town=True)
             mock_start.assert_called_once_with(["goblin_scout"], self.fighter, self.world)
-            self.assertEqual(msg, f"{prefix} **Goblin Scout** พุ่งเข้าจู่โจมคุณอย่างกะทันหัน!")
+            self.assertEqual(msg, f"{prefix} **Goblin Scout** {suffix}")
 
         # Long rest outdoor camp ambush
         with patch("random.random", return_value=0.10), patch("combat_manager.start_combat") as mock_start:
             prefix = "🚨 **Night Ambush!** กลางดึกขณะกำลังหลับพักแรม กลิ่นคาวดึงดูด"
-            msg = app._maybe_rest_ambush(room, self.world, self.fighter, chance=0.25, message_prefix=prefix, check_town=False)
+            suffix = "มาจู่โจมแคมป์ของคุณ!"
+            msg = app._maybe_rest_ambush(room, self.world, self.fighter, chance=0.25, message_prefix=prefix, message_suffix=suffix, check_town=False)
             mock_start.assert_called_once_with(["goblin_scout"], self.fighter, self.world)
-            self.assertEqual(msg, f"{prefix} **Goblin Scout** มาจู่โจมแคมป์ของคุณ!")
+            self.assertEqual(msg, f"{prefix} **Goblin Scout** {suffix}")
 
     def test_maybe_rest_ambush_above_chance_no_ambush(self):
         """2.1: Unsafe room with random >= chance does not ambush and does not start combat."""
         room = {"id": "dark_woods", "is_safe": False, "type": "wilderness", "encounter_table": ["goblin_scout"]}
         with patch("random.random", return_value=0.50), patch("combat_manager.start_combat") as mock_start:
-            msg = app._maybe_rest_ambush(room, self.world, self.fighter, chance=0.15, message_prefix="Ambush", check_town=True)
+            msg = app._maybe_rest_ambush(room, self.world, self.fighter, chance=0.15, message_prefix="Ambush", message_suffix="suffix", check_town=True)
             self.assertIsNone(msg)
             mock_start.assert_not_called()
+
+    def test_maybe_rest_ambush_missing_required_parameters_raises_type_error(self):
+        """Task B: Calling _maybe_rest_ambush without check_town and message_suffix raises TypeError."""
+        room = {"id": "dark_woods", "is_safe": False, "type": "wilderness", "encounter_table": ["goblin_scout"]}
+        with self.assertRaises(TypeError):
+            app._maybe_rest_ambush(room, self.world, self.fighter, 0.15, "Ambush")
 
     # ────────────────────────────────────────────────────────────────────────────
     # Task A: resolve_inspiration_reroll Tests

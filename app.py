@@ -943,9 +943,8 @@ def _maybe_rest_ambush(
     player: Dict[str, Any],
     chance: float,
     message_prefix: str,
-    check_town: Optional[bool] = None,
-    message_suffix: Optional[str] = None,
-    **kwargs: Any,
+    message_suffix: str,
+    check_town: bool,
 ) -> Optional[str]:
     """
     Check for an ambush during a rest and initiate combat if triggered.
@@ -954,14 +953,6 @@ def _maybe_rest_ambush(
     Returns:
         Ambush narrative message if ambush occurs, else None.
     """
-    if check_town is None:
-        if "is_short" in kwargs:
-            check_town = bool(kwargs["is_short"])
-        elif "is_short_rest" in kwargs:
-            check_town = bool(kwargs["is_short_rest"])
-        else:
-            check_town = (chance == 0.15 or "นั่งพักผ่อน" in str(message_prefix) or "short" in str(message_prefix).lower())
-
     if check_town:
         is_unsafe = bool(
             current_room
@@ -982,20 +973,7 @@ def _maybe_rest_ambush(
         ambush_enemy = random.choice(enc_table)
         combat_manager.start_combat([ambush_enemy], player, world)
         enemy_title = ambush_enemy.replace("_", " ").title()
-
-        if message_suffix is not None:
-            suffix = message_suffix
-        elif "หลับพักแรม" in message_prefix or "Night" in message_prefix or "แคมป์" in message_prefix:
-            suffix = "มาจู่โจมแคมป์ของคุณ!"
-        elif "นั่งพักผ่อน" in message_prefix or "Ambush" in message_prefix or "สั้น" in message_prefix:
-            suffix = "พุ่งเข้าจู่โจมคุณอย่างกะทันหัน!"
-        else:
-            suffix = ""
-
-        if suffix:
-            return f"{message_prefix} **{enemy_title}** {suffix}"
-        else:
-            return f"{message_prefix} **{enemy_title}**"
+        return f"{message_prefix} **{enemy_title}** {message_suffix}"
 
     return None
 
@@ -1038,6 +1016,7 @@ def show_camp_dialog():
             player,
             chance=0.15,
             message_prefix="🚨 **Ambush!** ขณะกำลังนั่งพักผ่อนสั้นๆ ศัตรู",
+            message_suffix="พุ่งเข้าจู่โจมคุณอย่างกะทันหัน!",
             check_town=True,
         )
         if ambush_msg:
@@ -1075,6 +1054,7 @@ def show_camp_dialog():
                 player,
                 chance=0.25,
                 message_prefix="🚨 **Night Ambush!** กลางดึกขณะกำลังหลับพักแรม กลิ่นคาวดึงดูด",
+                message_suffix="มาจู่โจมแคมป์ของคุณ!",
                 check_town=False,
             )
             if ambush_msg:
