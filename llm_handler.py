@@ -1092,11 +1092,13 @@ def generate_narrative_response(
 EXTRACTION_INSTRUCTION = """
 Analyze the DM Narrative and Player Action below. Output a SINGLE JSON object detailing any state changes that occurred.
 Do NOT invent DC numbers. If a roll is required, set "requires_roll.difficulty" to one of: "easy", "medium", "hard", "very_hard".
+If an entirely new monster appears in combat not present in standard enemies (goblin_scout, goblin_warrior, skeleton, bandit, bandit_captain, giant_spider, wolf, orc, zombie, cultist, town_guard), specify its definition under "generated_monsters" keyed by an alias name, and put that alias in "combat_start.enemies".
 
 JSON Schema (all fields optional/nullable):
 {
   "state_updates": {"hp_change": (int|null), "add_item_id": (str|null), "remove_item_id": (str|null), "gold_change": (int|null), "move_to_location_id": (str|null)},
   "requires_roll": {"stat": ("STR"|"DEX"|"CON"|"INT"|"WIS"|"CHA"), "difficulty": ("easy"|"medium"|"hard"|"very_hard")},
+  "generated_monsters": {"<enemy_alias>": {"name": (str), "hp": {"current": (int), "max": (int)}, "ac": (int), "stats": {"STR":(int),"DEX":(int),"CON":(int),"INT":(int),"WIS":(int),"CHA":(int)}, "attacks": [{"name":(str),"attack_bonus":(int),"damage":(str),"damage_type":(str),"applies_condition":(str|null)}], "xp_value":(int), "gold_drop":{"min":(int),"max":(int)}, "challenge_rating":(float)}},
   "combat_start": {"enemies": [(str)]},
   "world_updates": {"new_location": (object|null)},
   "quest_updates": {"new_quest": (object|null), "objective_update": (object|null)},
@@ -1124,6 +1126,7 @@ def extract_state_updates(
     narrative_text: str,
     user_input: str,
     world_state: Optional[Dict[str, Any]] = None,
+    player_state: Optional[Dict[str, Any]] = None,
     combat_active: Optional[bool] = None,
     model: str = DEFAULT_MODEL,
     num_ctx: int = DEFAULT_NUM_CTX,
@@ -1251,7 +1254,7 @@ def extract_state_updates(
     )
 
     # Validate raw output through validation.py's validate_extraction_output()
-    cleaned = validation.validate_extraction_output(raw_dict, world_state=world_state)
+    cleaned = validation.validate_extraction_output(raw_dict, world_state=world_state, player_state=player_state)
     return cleaned
 
 

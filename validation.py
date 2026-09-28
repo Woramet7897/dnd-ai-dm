@@ -14,6 +14,8 @@ Design principles (per spec Section 13b / PART 5b):
 import json
 import logging
 import os
+import re
+import uuid
 from typing import Any, Dict, List, Optional
 
 # Catalog directory — resolved relative to this file so loading succeeds
@@ -52,6 +54,258 @@ NUMERIC_BOUNDS: Dict[str, tuple] = {
     "hp_change":           (-200, 200),   # max realistic single hit/heal in 1-5 scope
     "npc_relationship_change_delta": (-50, 50),
 }
+
+# ─── Prompt Injection & Sanitization Patterns ────────────────────────────────
+PROMPT_INJECTION_PATTERNS: List[re.Pattern] = [
+    re.compile(r"ignore\s+(all\s+|previous\s+|prior\s+)?instructions?", re.IGNORECASE),
+    re.compile(r"system\s*prompt:?", re.IGNORECASE),
+    re.compile(r"\[/?system\]", re.IGNORECASE),
+    re.compile(r"new\s+instructions?:?", re.IGNORECASE),
+]
+
+def sanitize_text(text: Any, max_len: int = 40, allow_newlines: bool = False) -> str:
+    """
+    Sanitize LLM-generated string:
+    - Enforces string type
+    - Strips HTML tags
+    - Strips URLs (http://, https://)
+    - Strips markdown link syntax [text](url) -> text
+    - Neutralizes known prompt injection phrases
+    - Strips markdown formatting characters (*, _, #, `, ~, >, [, ])
+    - Strips control characters (and newlines unless allow_newlines=True)
+    - Collapses multiple whitespace
+    - Clamps to max_len
+    """
+    if not isinstance(text, str):
+        return ""
+
+    s = text
+    # Remove HTML tags
+    s = re.sub(r"<[^>]+>", "", s)
+    # Remove URLs
+    s = re.sub(r"https?://\S+", "", s)
+    # Strip markdown link target syntax
+    s = re.sub(r"\[([^\]]+)\]\([^\)]*\)", r"\1", s)
+    # Neutralize prompt injection phrases
+    for pat in PROMPT_INJECTION_PATTERNS:
+        s = pat.sub("", s)
+    # Remove markdown formatting characters
+    s = re.sub(r"[*_#`~>\[\]\\]", "", s)
+
+    # Strip control characters
+    cleaned_chars = []
+    for ch in s:
+        if ch in ('\n', '\r'):
+            if allow_newlines:
+                cleaned_chars.append('\n')
+            else:
+                cleaned_chars.append(' ')
+        elif ch == '\t':
+            cleaned_chars.append(' ')
+        elif ch.isprintable():
+            cleaned_chars.append(ch)
+    s = "".join(cleaned_chars)
+
+    # Collapse multiple whitespace
+    s = re.sub(r"[ \t]+", " ", s).strip()
+    return s[:max_len].strip()
+
+
+DICE_FORMULA_REGEX: re.Pattern = re.compile(r"^(\d+)d(\d+)(?:([+-])(\d+))?$")
+
+def calculate_average_dice_damage(formula: str) -> float:
+    """
+    Parse a dice formula like '1d6+2', '2d8', '1d10-1' and compute average damage.
+    Returns 0.0 if invalid.
+    """
+    if not isinstance(formula, str):
+        return 0.0
+    m = DICE_FORMULA_REGEX.match(formula.strip().lower())
+    if not m:
+        return 0.0
+    num_dice = int(m.group(1))
+    die_size = int(m.group(2))
+    sign = m.group(3)
+    mod = int(m.group(4)) if m.group(4) else 0
+
+    if num_dice <= 0 or die_size <= 0:
+        return 0.0
+
+    avg_per_die = (die_size + 1) / 2.0
+    total = num_dice * avg_per_die
+    if sign == "+":
+        total += mod
+    elif sign == "-":
+        total -= mod
+    return max(0.0, total)
+
+
+# ─── Level-scaled monster safety bounds (D&D 5e CR guidelines) ────────────────
+MONSTER_BOUNDS_BY_LEVEL: Dict[int, Dict[str, Any]] = {
+    1: {"max_hp": 30,  "max_ac": 15, "max_attack_bonus": 5, "max_avg_damage": 10.0, "max_cr": 1.0, "max_xp": 200},
+    2: {"max_hp": 45,  "max_ac": 16, "max_attack_bonus": 6, "max_avg_damage": 15.0, "max_cr": 2.0, "max_xp": 450},
+    3: {"max_hp": 65,  "max_ac": 16, "max_attack_bonus": 7, "max_avg_damage": 22.0, "max_cr": 3.0, "max_xp": 700},
+    4: {"max_hp": 85,  "max_ac": 17, "max_attack_bonus": 7, "max_avg_damage": 28.0, "max_cr": 4.0, "max_xp": 1100},
+    5: {"max_hp": 110, "max_ac": 18, "max_attack_bonus": 8, "max_avg_damage": 35.0, "max_cr": 5.0, "max_xp": 1800},
+}
+
+VALID_DAMAGE_TYPES: set = {
+    "slashing", "piercing", "bludgeoning", "fire", "cold", "lightning",
+    "poison", "acid", "necrotic", "radiant", "force", "psychic",
+}
+
+VALID_MONSTER_CONDITIONS: set = {
+    "poisoned", "prone", "blinded", "stunned", "frightened", "charmed",
+}
+
+
+def validate_generated_monster(m_data: Any, player_level: int = 1) -> Optional[Dict[str, Any]]:
+    """
+    Validate a dynamic monster definition against level-scaled bounds and sanitize text.
+    Returns cleaned monster template dict or None if invalid/out-of-bounds.
+    """
+    if not isinstance(m_data, dict):
+        logger.debug(f"validate_generated_monster: input is not a dict ({type(m_data).__name__}) — dropped.")
+        return None
+
+    # 1. Name
+    name = sanitize_text(m_data.get("name"), max_len=40)
+    if not name:
+        logger.debug("validate_generated_monster: missing or empty monster name — dropped.")
+        return None
+
+    # 2. Level bounds
+    lvl = max(1, min(5, int(player_level) if isinstance(player_level, (int, float)) else 1))
+    bounds = MONSTER_BOUNDS_BY_LEVEL[lvl]
+
+    # 3. HP
+    raw_hp = m_data.get("hp")
+    if isinstance(raw_hp, dict):
+        hp_val = raw_hp.get("max") or raw_hp.get("current")
+    elif isinstance(raw_hp, (int, float)):
+        hp_val = int(raw_hp)
+    else:
+        logger.debug(f"validate_generated_monster: invalid hp spec ({raw_hp!r}) — dropped.")
+        return None
+
+    if not isinstance(hp_val, int) or hp_val < 1 or hp_val > bounds["max_hp"]:
+        logger.debug(f"validate_generated_monster: hp={hp_val} out of bounds (1..{bounds['max_hp']}) — dropped.")
+        return None
+
+    # 4. AC
+    ac = m_data.get("ac")
+    if not isinstance(ac, int) or ac < 5 or ac > bounds["max_ac"]:
+        logger.debug(f"validate_generated_monster: ac={ac} out of bounds (5..{bounds['max_ac']}) — dropped.")
+        return None
+
+    # 5. Stats
+    raw_stats = m_data.get("stats")
+    if not isinstance(raw_stats, dict):
+        logger.debug("validate_generated_monster: missing stats dict — dropped.")
+        return None
+    clean_stats: Dict[str, int] = {}
+    for st in ("STR", "DEX", "CON", "INT", "WIS", "CHA"):
+        v = raw_stats.get(st)
+        if not isinstance(v, int) or v < 1 or v > 24:
+            logger.debug(f"validate_generated_monster: stat {st}={v} invalid (1..24) — dropped.")
+            return None
+        clean_stats[st] = v
+
+    # 6. Attacks
+    raw_attacks = m_data.get("attacks")
+    if not isinstance(raw_attacks, list) or not raw_attacks:
+        logger.debug("validate_generated_monster: missing or empty attacks list — dropped.")
+        return None
+    if len(raw_attacks) > 3:
+        raw_attacks = raw_attacks[:3]
+
+    clean_attacks: List[Dict[str, Any]] = []
+    for atk in raw_attacks:
+        if not isinstance(atk, dict):
+            continue
+        atk_name = sanitize_text(atk.get("name", "Attack"), max_len=30) or "Attack"
+        bonus = atk.get("attack_bonus", 0)
+        if not isinstance(bonus, int) or bonus < -2 or bonus > bounds["max_attack_bonus"]:
+            logger.debug(f"validate_generated_monster: attack_bonus={bonus} out of bounds — dropped.")
+            return None
+
+        dmg_str = str(atk.get("damage", "")).strip().lower()
+        avg_dmg = calculate_average_dice_damage(dmg_str)
+        if avg_dmg <= 0.0 or avg_dmg > bounds["max_avg_damage"]:
+            logger.debug(f"validate_generated_monster: damage='{dmg_str}' (avg={avg_dmg}) out of bounds (max={bounds['max_avg_damage']}) — dropped.")
+            return None
+
+        dtype = str(atk.get("damage_type", "bludgeoning")).strip().lower()
+        if dtype not in VALID_DAMAGE_TYPES:
+            dtype = "bludgeoning"
+
+        cond = atk.get("applies_condition")
+        if cond and str(cond).strip().lower() in VALID_MONSTER_CONDITIONS:
+            clean_cond = str(cond).strip().lower()
+        else:
+            clean_cond = None
+
+        clean_attacks.append({
+            "name": atk_name,
+            "attack_bonus": bonus,
+            "damage": dmg_str,
+            "damage_type": dtype,
+            "applies_condition": clean_cond,
+        })
+
+    if not clean_attacks:
+        logger.debug("validate_generated_monster: no valid attacks survived — dropped.")
+        return None
+
+    # 7. XP Value
+    raw_xp = m_data.get("xp_value", 50)
+    xp_val = int(raw_xp) if isinstance(raw_xp, (int, float)) else 50
+    if xp_val < 0 or xp_val > bounds["max_xp"]:
+        xp_val = min(bounds["max_xp"], max(0, xp_val))
+
+    # 8. Gold drop
+    raw_gold = m_data.get("gold_drop", {})
+    if isinstance(raw_gold, dict):
+        g_min = max(0, min(50, int(raw_gold.get("min", 0))))
+        g_max = max(g_min, min(50, int(raw_gold.get("max", g_min))))
+    else:
+        g_min, g_max = 0, 5
+    clean_gold = {"min": g_min, "max": g_max}
+
+    # 9. Challenge rating
+    raw_cr = m_data.get("challenge_rating", 0.25)
+    try:
+        cr_val = float(raw_cr)
+        if cr_val < 0.0 or cr_val > bounds["max_cr"]:
+            cr_val = bounds["max_cr"]
+    except (ValueError, TypeError):
+        cr_val = 0.25
+
+    monster_dict: Dict[str, Any] = {
+        "name": name,
+        "hp": {"current": hp_val, "max": hp_val},
+        "ac": ac,
+        "stats": clean_stats,
+        "attacks": clean_attacks,
+        "xp_value": xp_val,
+        "gold_drop": clean_gold,
+        "challenge_rating": cr_val,
+        "active_conditions": [],
+    }
+
+    # Optional immunities / resistances
+    if isinstance(m_data.get("immunities"), list):
+        monster_dict["immunities"] = [
+            str(im).strip().lower() for im in m_data["immunities"]
+            if isinstance(im, str) and str(im).strip().lower() in (VALID_MONSTER_CONDITIONS | {"poison", "exhaustion"})
+        ]
+    if isinstance(m_data.get("resistances"), list):
+        monster_dict["resistances"] = [
+            str(res).strip().lower() for res in m_data["resistances"]
+            if isinstance(res, str) and str(res).strip().lower() in VALID_DAMAGE_TYPES
+        ]
+
+    return monster_dict
 
 # ─── Catalog caches (loaded once, then reused) ───────────────────────────────
 _item_catalog: Optional[Dict] = None
@@ -218,13 +472,14 @@ def validate_item_id(item_id: Any, world_state: Optional[Dict] = None) -> bool:
     return False
 
 
-def validate_monster_ids(enemy_ids: Any) -> List[str]:
+def validate_monster_ids(enemy_ids: Any, world_state: Optional[Dict] = None) -> List[str]:
     """
-    Validate a list of monster IDs against monster_catalog.json.
+    Validate a list of monster IDs against monster_catalog.json and world_state["generated_monsters"].
     Unknown IDs are dropped individually; valid ones are kept.
 
     Args:
         enemy_ids: raw value from extraction output (should be a list of strings).
+        world_state: optional world state dict containing dynamic monsters.
 
     Returns:
         list of valid monster IDs.
@@ -234,6 +489,7 @@ def validate_monster_ids(enemy_ids: Any) -> List[str]:
         return []
 
     catalog = _get_monster_catalog()
+    gen_monsters = world_state.get("generated_monsters", {}) if isinstance(world_state, dict) else {}
     valid = []
     for mid in enemy_ids:
         if not isinstance(mid, str):
@@ -241,8 +497,10 @@ def validate_monster_ids(enemy_ids: Any) -> List[str]:
             continue
         if mid in catalog:
             valid.append(mid)
+        elif mid in gen_monsters:
+            valid.append(mid)
         else:
-            logger.debug(f"Unknown monster_id '{mid}' — not in monster_catalog.json, dropped.")
+            logger.debug(f"Unknown monster_id '{mid}' — not in monster_catalog.json or generated_monsters, dropped.")
     return valid
 
 
@@ -308,7 +566,11 @@ def validate_numeric_range(field_name: str, value: Any, min_val: int, max_val: i
     return int_value
 
 
-def validate_extraction_output(raw: Any, world_state: Optional[Dict] = None) -> Dict:
+def validate_extraction_output(
+    raw: Any,
+    world_state: Optional[Dict] = None,
+    player_state: Optional[Dict] = None,
+) -> Dict:
     """
     Top-level entry point. Runs every sub-validator field by field on the raw extraction output.
     Returns a cleaned dict containing only what passed validation.
@@ -319,8 +581,9 @@ def validate_extraction_output(raw: Any, world_state: Optional[Dict] = None) -> 
 
     Args:
         raw: the raw dict from the extraction LLM call (already JSON-parsed).
-        world_state: current world save dict (needed for npc_id validation).
+        world_state: current world save dict (needed for npc_id validation and dynamic registries).
                      If None, npc_id validation is skipped and npc_relationship_change is dropped.
+        player_state: current player save dict (used for level-scaled monster bounds).
 
     Returns:
         Cleaned dict ready for apply_state_updates().
@@ -333,6 +596,43 @@ def validate_extraction_output(raw: Any, world_state: Optional[Dict] = None) -> 
         return {}
 
     cleaned: Dict = {}
+
+    # ── generated_monsters (Spec: Dynamic Monster Generation) ─────────────────
+    alias_to_real_mon_id: Dict[str, str] = {}
+    if "generated_monsters" in raw and isinstance(raw["generated_monsters"], dict):
+        catalog = _get_monster_catalog()
+        p_lvl = 1
+        if player_state and isinstance(player_state, dict):
+            p_lvl = player_state.get("level", 1)
+
+        for alias, m_data in raw["generated_monsters"].items():
+            if not isinstance(alias, str) or not alias.strip():
+                continue
+            alias_clean = alias.strip().lower()
+
+            # Rule 6: Catalog collision guard — Static catalog ALWAYS wins!
+            if alias_clean in catalog:
+                logger.warning(
+                    f"generated_monsters rejected override of static catalog monster '{alias_clean}'."
+                )
+                continue
+
+            valid_m = validate_generated_monster(m_data, player_level=p_lvl)
+            if valid_m is None:
+                logger.debug(f"generated_monster '{alias}' failed validation — dropped.")
+                continue
+
+            # Rule 6: Python-generated ID (prevent LLM ID spoofing)
+            real_id = f"gen_mon_{uuid.uuid4().hex[:8]}"
+            valid_m["id"] = real_id
+
+            if world_state is not None and isinstance(world_state, dict):
+                gen_monsters = world_state.setdefault("generated_monsters", {})
+                gen_monsters[real_id] = valid_m
+                logger.info(f"Registered dynamic monster '{valid_m['name']}' as '{real_id}' in world_state.")
+
+            alias_to_real_mon_id[alias] = real_id
+            alias_to_real_mon_id[alias_clean] = real_id
 
     # ── state_updates ──────────────────────────────────────────────────────────
     if "state_updates" in raw:
@@ -411,7 +711,18 @@ def validate_extraction_output(raw: Any, world_state: Optional[Dict] = None) -> 
     if "combat_start" in raw:
         cs = raw["combat_start"]
         if isinstance(cs, dict) and "enemies" in cs:
-            valid_enemies = validate_monster_ids(cs["enemies"])
+            raw_enemies = cs.get("enemies", [])
+            remapped_enemies = []
+            if isinstance(raw_enemies, list):
+                for e in raw_enemies:
+                    if isinstance(e, str):
+                        remapped_enemies.append(alias_to_real_mon_id.get(e, alias_to_real_mon_id.get(e.lower(), e)))
+                    else:
+                        remapped_enemies.append(e)
+            else:
+                remapped_enemies = raw_enemies
+
+            valid_enemies = validate_monster_ids(remapped_enemies, world_state=world_state)
             if valid_enemies:
                 cleaned["combat_start"] = {"enemies": valid_enemies}
             else:

@@ -444,16 +444,23 @@ def roll_initiative(combatants: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # COMBAT STATE MANAGEMENT
 # ════════════════════════════════════════════════════════════════════════════════
 
-def _build_combatant_from_catalog(monster_id: str, instance_index: int = 1) -> Optional[Dict[str, Any]]:
+def _build_combatant_from_catalog(
+    monster_id: str,
+    instance_index: int = 1,
+    world_state: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
     """
-    Build a live combatant dict from the monster catalog entry.
+    Build a live combatant dict from the monster catalog entry or world_state["generated_monsters"].
     Gives each instance a unique id suffix (e.g. 'goblin_scout_1', 'goblin_scout_2').
     Returns None if the monster_id is not found.
     """
     catalog = _get_monster_catalog()
     template = catalog.get(monster_id)
+    if template is None and world_state and isinstance(world_state, dict):
+        template = world_state.get("generated_monsters", {}).get(monster_id)
+
     if template is None:
-        logger.debug(f"_build_combatant_from_catalog: '{monster_id}' not in catalog.")
+        logger.debug(f"_build_combatant_from_catalog: '{monster_id}' not in catalog or generated_monsters.")
         return None
 
     c = copy.deepcopy(template)
@@ -501,7 +508,7 @@ def start_combat(
     enemies: List[Dict[str, Any]] = []
     for mid in enemy_ids:
         id_counts[mid] = id_counts.get(mid, 0) + 1
-        c = _build_combatant_from_catalog(mid, id_counts[mid])
+        c = _build_combatant_from_catalog(mid, id_counts[mid], world_state=world_state)
         if c is None:
             logger.debug(f"start_combat: unknown enemy '{mid}' — skipped.")
             continue

@@ -2225,6 +2225,7 @@ def render_playing_view():
                             narrative_text=narrative_text,
                             user_input=action_to_process,
                             world_state=world,
+                            player_state=player,
                             model=active_model,
                         )
 
