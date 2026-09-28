@@ -11,6 +11,7 @@ import json
 import logging
 import math
 import os
+import random
 import re
 import time
 import streamlit as st
@@ -936,6 +937,69 @@ def show_spells_dialog():
                     st.caption(sp_data["description"])
 
 
+def _maybe_rest_ambush(
+    current_room: Optional[Dict[str, Any]],
+    world: Dict[str, Any],
+    player: Dict[str, Any],
+    chance: float,
+    message_prefix: str,
+    check_town: Optional[bool] = None,
+    message_suffix: Optional[str] = None,
+    **kwargs: Any,
+) -> Optional[str]:
+    """
+    Check for an ambush during a rest and initiate combat if triggered.
+    Maintains exact short-circuit order:
+        is_unsafe and random.random() < chance and enc_table
+    Returns:
+        Ambush narrative message if ambush occurs, else None.
+    """
+    if check_town is None:
+        if "is_short" in kwargs:
+            check_town = bool(kwargs["is_short"])
+        elif "is_short_rest" in kwargs:
+            check_town = bool(kwargs["is_short_rest"])
+        else:
+            check_town = (chance == 0.15 or "นั่งพักผ่อน" in str(message_prefix) or "short" in str(message_prefix).lower())
+
+    if check_town:
+        is_unsafe = bool(
+            current_room
+            and (not current_room.get("is_safe"))
+            and (current_room.get("type") != "town")
+            and (current_room.get("id") not in world.get("cleared_rooms", []))
+        )
+    else:
+        is_unsafe = bool(
+            current_room
+            and (not current_room.get("is_safe"))
+            and (current_room.get("id") not in world.get("cleared_rooms", []))
+        )
+
+    enc_table = current_room.get("encounter_table", ["wolf"]) if current_room else ["wolf"]
+
+    if is_unsafe and random.random() < chance and enc_table:
+        ambush_enemy = random.choice(enc_table)
+        combat_manager.start_combat([ambush_enemy], player, world)
+        enemy_title = ambush_enemy.replace("_", " ").title()
+
+        if message_suffix is not None:
+            suffix = message_suffix
+        elif "หลับพักแรม" in message_prefix or "Night" in message_prefix or "แคมป์" in message_prefix:
+            suffix = "มาจู่โจมแคมป์ของคุณ!"
+        elif "นั่งพักผ่อน" in message_prefix or "Ambush" in message_prefix or "สั้น" in message_prefix:
+            suffix = "พุ่งเข้าจู่โจมคุณอย่างกะทันหัน!"
+        else:
+            suffix = ""
+
+        if suffix:
+            return f"{message_prefix} **{enemy_title}** {suffix}"
+        else:
+            return f"{message_prefix} **{enemy_title}**"
+
+    return None
+
+
 @st.dialog("⛺ พักผ่อน & ตั้งแคมป์ (Rest & Camp)", width="medium")
 def show_camp_dialog():
     player = st.session_state.get("player_state")
@@ -968,15 +1032,18 @@ def show_camp_dialog():
     st.markdown("##### ☕ พักช่วงสั้น (Short Rest - 1 hr)")
     st.caption("นั่งพักผ่อนสั้นๆ ตรวจเช็กอาวุธ ฟื้นฟูท่าไม้ตายอาวุธ (Weapon Actions)")
     if st.button("☕ Take Short Rest", key="dlg_btn_short_rest", use_container_width=True):
-        is_unsafe = current_room and (not current_room.get("is_safe")) and (current_room.get("type") != "town") and (current_room.get("id") not in world.get("cleared_rooms", []))
-        enc_table = current_room.get("encounter_table", ["wolf"]) if current_room else ["wolf"]
-        import random
-        if is_unsafe and random.random() < 0.15 and enc_table:
-            ambush_enemy = random.choice(enc_table)
-            combat_manager.start_combat([ambush_enemy], player, world)
+        ambush_msg = _maybe_rest_ambush(
+            current_room,
+            world,
+            player,
+            chance=0.15,
+            message_prefix="🚨 **Ambush!** ขณะกำลังนั่งพักผ่อนสั้นๆ ศัตรู",
+            check_town=True,
+        )
+        if ambush_msg:
             st.session_state["narrative_log"].append({
                 "role": "assistant",
-                "content": f"🚨 **Ambush!** ขณะกำลังนั่งพักผ่อนสั้นๆ ศัตรู **{ambush_enemy.replace('_', ' ').title()}** พุ่งเข้าจู่โจมคุณอย่างกะทันหัน!"
+                "content": ambush_msg
             })
         else:
             state_manager.perform_short_rest(player, world)
@@ -1002,15 +1069,18 @@ def show_camp_dialog():
     else:
         st.caption("ตั้งแคมป์พักแรมกลางแจ้ง ต้องใช้เสบียง (Trail Rations) 1 ชุด และระวังศัตรูซุ่มโจมตี")
         if st.button("⛺ Take Long Rest (Camp Outdoors)", key="dlg_btn_long_camp", use_container_width=True, type="primary"):
-            is_unsafe = current_room and (not current_room.get("is_safe")) and (current_room.get("id") not in world.get("cleared_rooms", []))
-            enc_table = current_room.get("encounter_table", ["wolf"]) if current_room else ["wolf"]
-            import random
-            if is_unsafe and random.random() < 0.25 and enc_table:
-                ambush_enemy = random.choice(enc_table)
-                combat_manager.start_combat([ambush_enemy], player, world)
+            ambush_msg = _maybe_rest_ambush(
+                current_room,
+                world,
+                player,
+                chance=0.25,
+                message_prefix="🚨 **Night Ambush!** กลางดึกขณะกำลังหลับพักแรม กลิ่นคาวดึงดูด",
+                check_town=False,
+            )
+            if ambush_msg:
                 st.session_state["narrative_log"].append({
                     "role": "assistant",
-                    "content": f"🚨 **Night Ambush!** กลางดึกขณะกำลังหลับพักแรม กลิ่นคาวดึงดูด **{ambush_enemy.replace('_', ' ').title()}** มาจู่โจมแคมป์ของคุณ!"
+                    "content": ambush_msg
                 })
             else:
                 state_manager.long_rest(world, player)
@@ -1441,6 +1511,16 @@ def resolve_player_combat_action(
     return player_attack_result, res_round
 
 
+def _select_enemy_target(living_enemies: List[Dict[str, Any]], label: str, key: str) -> Dict[str, Any]:
+    """
+    Render target selectbox for living enemies and return the chosen enemy dict.
+    Preserves exact label and widget key.
+    """
+    target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
+    chosen_target_label = st.selectbox(label, list(target_map.keys()), key=key)
+    return target_map[chosen_target_label]
+
+
 def render_playing_view():
     player = st.session_state.get("player_state")
     world = st.session_state.get("world_state")
@@ -1637,9 +1717,7 @@ def render_playing_view():
                 action_type = st.radio("Action:", act_options, horizontal=True, key=f"c_act_type_{round_num}")
 
                 if action_type == "⚔️ Weapon Attack" and living_enemies:
-                    target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
-                    chosen_target_label = st.selectbox("🎯 Target Enemy", list(target_map.keys()), key=f"target_sel_{round_num}")
-                    selected_target = target_map[chosen_target_label]
+                    selected_target = _select_enemy_target(living_enemies, "🎯 Target Enemy", key=f"target_sel_{round_num}")
 
                     attacks = player_c.get("attacks", [])
                     if not attacks:
@@ -1657,9 +1735,7 @@ def render_playing_view():
                     atk_rng = "Ranged" if selected_attack.get("ranged") else "Melee"
                     st.caption(f"💥 Damage: **{atk_dmg} {atk_dtype}** ({atk_rng}) | Attack Bonus: **+{selected_attack.get('attack_bonus', 0)}**")
                 elif action_type == "💥 Weapon Action" and living_enemies:
-                    target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
-                    chosen_target_label = st.selectbox("🎯 Target Enemy", list(target_map.keys()), key=f"wact_target_sel_{round_num}")
-                    selected_target = target_map[chosen_target_label]
+                    selected_target = _select_enemy_target(living_enemies, "🎯 Target Enemy", key=f"wact_target_sel_{round_num}")
 
                     attacks = player_c.get("attacks", [])
                     if not attacks:
@@ -1683,9 +1759,7 @@ def render_playing_view():
                             chosen_adj_label = st.selectbox("🎯 Adjacent Enemy (Cleave)", list(adj_map.keys()), key=f"cleave_adj_{round_num}")
                             selected_adj_target = adj_map[chosen_adj_label]
                 elif action_type == "🫸 Shove" and living_enemies:
-                    target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
-                    chosen_target_label = st.selectbox("🎯 Target Enemy to Shove", list(target_map.keys()), key=f"shove_target_sel_{round_num}")
-                    selected_target = target_map[chosen_target_label]
+                    selected_target = _select_enemy_target(living_enemies, "🎯 Target Enemy to Shove", key=f"shove_target_sel_{round_num}")
 
                     shove_goal = st.radio("Shove Goal:", ["Push 5ft", "Knock Prone"], horizontal=True, key=f"shove_goal_{round_num}")
                     selected_shove_type = "prone" if shove_goal == "Knock Prone" else "push"
@@ -1729,9 +1803,7 @@ def render_playing_view():
                         chosen_ht = st.selectbox("🎯 Target (Heal)", list(heal_targets.keys()), key=f"heal_target_sel_{round_num}")
                         selected_target = heal_targets[chosen_ht]
                     elif living_enemies:
-                        target_map = {f"{e.get('name', e.get('id'))} (HP: {e.get('hp', {}).get('current', 0)})": e for e in living_enemies}
-                        chosen_target_label = st.selectbox("🎯 Target Enemy", list(target_map.keys()), key=f"spell_target_sel_{round_num}")
-                        selected_target = target_map[chosen_target_label]
+                        selected_target = _select_enemy_target(living_enemies, "🎯 Target Enemy", key=f"spell_target_sel_{round_num}")
                     else:
                         selected_target = player_c
             elif not player_alive:
