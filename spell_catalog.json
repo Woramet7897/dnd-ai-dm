@@ -135,5 +135,91 @@
     "effect": {"remove_curse": true},
     "slot_cost": 3,
     "description": "At your touch, all curses affecting one creature or object end."
+  },
+  "scorching_ray": {
+    "name": "Scorching Ray",
+    "level": 2,
+    "class": ["Wizard"],
+    "type": "attack_roll",
+    "effect": {"damage": "2d6", "damage_type": "fire"},
+    "slot_cost": 2,
+    "description": "You hurl rays of fire at your foes. Make a ranged spell attack dealing 2d6 fire damage."
+  },
+  "misty_step": {
+    "name": "Misty Step",
+    "level": 2,
+    "class": ["Wizard"],
+    "type": "buff",
+    "effect": {"mobility": "teleport_30ft"},
+    "slot_cost": 2,
+    "description": "Briefly surrounded by silvery mist, you teleport up to 30 feet to an unoccupied space."
+  },
+  "shatter": {
+    "name": "Shatter",
+    "level": 2,
+    "class": ["Wizard", "Bard"],
+    "type": "attack_save",
+    "save_stat": "CON",
+    "effect": {"damage": "3d8", "damage_type": "thunder"},
+    "slot_cost": 2,
+    "description": "A sudden loud ringing noise painfully intense erupts. Creatures must CON save or take 3d8 thunder damage."
+  },
+  "hold_person": {
+    "name": "Hold Person",
+    "level": 2,
+    "class": ["Bard", "Cleric", "Wizard"],
+    "type": "attack_save",
+    "save_stat": "WIS",
+    "effect": {"condition": "paralyzed", "duration_rounds": 10},
+    "on_fail_extra": "paralyzed",
+    "slot_cost": 2,
+    "concentration": true,
+    "description": "Choose a humanoid. Must succeed on a WIS save or be paralyzed for the duration."
+  },
+  "spiritual_weapon": {
+    "name": "Spiritual Weapon",
+    "level": 2,
+    "class": ["Cleric"],
+    "type": "attack_roll",
+    "effect": {"damage": "1d8+3", "damage_type": "force"},
+    "slot_cost": 2,
+    "description": "You create a floating, spectral weapon that strikes a foe for 1d8 + modifier force damage."
+  },
+  "invisibility": {
+    "name": "Invisibility",
+    "level": 2,
+    "class": ["Bard", "Wizard"],
+    "type": "buff",
+    "effect": {"condition": "invisible", "duration_rounds": 10},
+    "slot_cost": 2,
+    "concentration": true,
+    "description": "A creature you touch becomes invisible until the spell ends."
+  },
+  "prayer_of_healing": {
+    "name": "Prayer of Healing",
+    "level": 2,
+    "class": ["Cleric"],
+    "type": "heal",
+    "effect": {"heal": "2d8+3"},
+    "slot_cost": 2,
+    "description": "Up to six creatures of your choice that you can see regain 2d8 + modifier hit points."
+  },
+  "mage_hand": {
+    "name": "Mage Hand",
+    "level": 0,
+    "class": ["Bard", "Wizard"],
+    "type": "utility",
+    "effect": {"utility": "manipulate_distant_object"},
+    "slot_cost": 0,
+    "description": "A spectral, floating hand appears to manipulate distant objects and open doors."
+  },
+  "light": {
+    "name": "Light",
+    "level": 0,
+    "class": ["Cleric", "Wizard", "Bard"],
+    "type": "utility",
+    "effect": {"light_radius": 20},
+    "slot_cost": 0,
+    "description": "You touch an object, causing it to shed bright light in a 20-foot radius."
   }
 }

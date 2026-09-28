@@ -148,6 +148,72 @@
     "gold_drop": {"min": 1, "max": 6},
     "challenge_rating": 0.25,
     "active_conditions": []
+  },
+  "goblin_boss": {
+    "name": "Goblin Boss",
+    "hp": {"current": 28, "max": 28},
+    "ac": 16,
+    "stats": {"STR": 14, "DEX": 14, "CON": 14, "INT": 10, "WIS": 10, "CHA": 10},
+    "attacks": [
+      {"name": "Boss Scimitar", "attack_bonus": 4, "damage": "1d6+2", "damage_type": "slashing", "applies_condition": null}
+    ],
+    "xp_value": 200,
+    "gold_drop": {"min": 15, "max": 45},
+    "challenge_rating": 1.0,
+    "active_conditions": []
+  },
+  "goblin_shaman": {
+    "name": "Goblin Shaman",
+    "hp": {"current": 18, "max": 18},
+    "ac": 13,
+    "stats": {"STR": 8, "DEX": 14, "CON": 12, "INT": 10, "WIS": 14, "CHA": 10},
+    "attacks": [
+      {"name": "Hex Bolt", "attack_bonus": 4, "damage": "1d8+2", "damage_type": "fire", "applies_condition": null}
+    ],
+    "xp_value": 100,
+    "gold_drop": {"min": 5, "max": 20},
+    "challenge_rating": 0.5,
+    "active_conditions": []
+  },
+  "ogre": {
+    "name": "Ogre",
+    "hp": {"current": 59, "max": 59},
+    "ac": 11,
+    "stats": {"STR": 19, "DEX": 8, "CON": 16, "INT": 5, "WIS": 7, "CHA": 7},
+    "attacks": [
+      {"name": "Greatclub", "attack_bonus": 6, "damage": "2d8+4", "damage_type": "bludgeoning", "applies_condition": null}
+    ],
+    "xp_value": 450,
+    "gold_drop": {"min": 10, "max": 50},
+    "challenge_rating": 2.0,
+    "active_conditions": []
+  },
+  "ghoul": {
+    "name": "Ghoul",
+    "hp": {"current": 22, "max": 22},
+    "ac": 12,
+    "stats": {"STR": 13, "DEX": 15, "CON": 10, "INT": 7, "WIS": 10, "CHA": 6},
+    "attacks": [
+      {"name": "Claws", "attack_bonus": 4, "damage": "2d4+2", "damage_type": "slashing", "applies_condition": "paralyzed"}
+    ],
+    "xp_value": 200,
+    "gold_drop": {"min": 0, "max": 10},
+    "challenge_rating": 1.0,
+    "active_conditions": [],
+    "immunities": ["poisoned", "charmed"]
+  },
+  "dire_wolf": {
+    "name": "Dire Wolf",
+    "hp": {"current": 37, "max": 37},
+    "ac": 14,
+    "stats": {"STR": 17, "DEX": 15, "CON": 15, "INT": 3, "WIS": 12, "CHA": 7},
+    "attacks": [
+      {"name": "Bite", "attack_bonus": 5, "damage": "2d6+3", "damage_type": "piercing", "applies_condition": "prone"}
+    ],
+    "xp_value": 200,
+    "gold_drop": {"min": 0, "max": 0},
+    "challenge_rating": 1.0,
+    "active_conditions": []
   }
 }
 

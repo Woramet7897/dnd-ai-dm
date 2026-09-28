@@ -10,7 +10,7 @@
       "south": null,
       "west": null
     },
-    "shops": ["general_store", "blacksmith"],
+    "shops": ["general_store", "blacksmith", "alchemist"],
     "npcs": ["innkeeper_mira", "captain_valdis"],
     "is_safe": true,
     "loot": []
@@ -101,14 +101,14 @@
     "exits": {
       "west": "forest_clearing",
       "south": "crossroads",
-      "north": null,
+      "north": "ancient_crypt",
       "east": null
     },
     "shops": [],
     "npcs": [],
     "is_safe": false,
     "loot": [{"item_id": "healing_potion", "quantity": 1}],
-    "encounter_table": ["giant_spider", "skeleton", "zombie"],
+    "encounter_table": ["giant_spider", "skeleton", "zombie", "ghoul"],
     "interactive_objects": [
       {
         "id": "chandelier",
@@ -136,7 +136,7 @@
     "description": "A crude camp of hide tents and sharpened stakes. Goblins chatter and argue over scraps of food. A larger tent at the centre must belong to their leader.",
     "exits": {
       "south": "forest_clearing",
-      "north": null,
+      "north": "goblin_chieftain_tent",
       "east": null,
       "west": null
     },
@@ -144,7 +144,7 @@
     "npcs": [],
     "is_safe": false,
     "loot": [{"item_id": "gold", "amount_min": 10, "amount_max": 30}, {"item_id": "dagger", "quantity": 1}],
-    "encounter_table": ["goblin_scout", "goblin_warrior", "orc"],
+    "encounter_table": ["goblin_scout", "goblin_warrior", "goblin_shaman", "orc"],
     "interactive_objects": [
       {
         "id": "boiling_cauldron",
@@ -156,6 +156,40 @@
         "used": false
       }
     ]
+  },
+  "goblin_chieftain_tent": {
+    "id": "goblin_chieftain_tent",
+    "name": "Goblin Chieftain's Tent",
+    "type": "dungeon",
+    "description": "A massive tent decorated with battle trophies and crude totems. A barbaric bone-carved throne dominates the far end, with a locked iron chest tucked beside it.",
+    "exits": {
+      "south": "goblin_camp",
+      "north": null,
+      "east": null,
+      "west": null
+    },
+    "shops": [],
+    "npcs": [],
+    "is_safe": false,
+    "loot": [{"item_id": "gold", "amount_min": 30, "amount_max": 80}, {"item_id": "greater_healing_potion", "quantity": 1}],
+    "encounter_table": ["goblin_boss", "goblin_shaman", "ogre"]
+  },
+  "ancient_crypt": {
+    "id": "ancient_crypt",
+    "name": "Ancient Crypt of the River Lords",
+    "type": "dungeon",
+    "description": "A subterranean burial vault hidden below the mill. Ancient stone sarcophagi line the damp walls beneath flickering green witchfire.",
+    "exits": {
+      "south": "ruined_mill",
+      "north": null,
+      "east": null,
+      "west": null
+    },
+    "shops": [],
+    "npcs": [],
+    "is_safe": false,
+    "loot": [{"item_id": "healing_potion", "quantity": 1}, {"item_id": "torch", "quantity": 1}],
+    "encounter_table": ["ghoul", "skeleton", "zombie"]
   },
   "town_jail": {
     "id": "town_jail",

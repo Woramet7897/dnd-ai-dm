@@ -2,7 +2,7 @@
   "general_store": {
     "name": "Riverside General Store",
     "description": "A cluttered shop selling everyday adventuring supplies.",
-    "sell_items": ["trail_rations", "healing_potion", "torch", "rope", "dagger", "dart"],
+    "sell_items": ["trail_rations", "healing_potion", "torch", "rope", "dagger", "dart", "antitoxin", "boots_of_elvenkind"],
     "open_periods": ["morning", "afternoon", "evening"],
     "buy_multiplier": 0.5,
     "sell_multiplier": 1.0
@@ -10,7 +10,7 @@
   "blacksmith": {
     "name": "Ironforge Smithy",
     "description": "The ring of hammer on anvil echoes from within. The smith sells quality arms and armor.",
-    "sell_items": ["longsword", "rapier", "mace", "shield", "leather_armor", "chain_mail"],
+    "sell_items": ["longsword", "rapier", "mace", "shield", "leather_armor", "chain_mail", "silvered_dagger", "silvered_longsword"],
     "open_periods": ["morning", "afternoon"],
     "buy_multiplier": 0.5,
     "sell_multiplier": 1.0
@@ -18,14 +18,16 @@
   "alchemist": {
     "name": "Mirela's Elixirs",
     "description": "Shelves of coloured vials line the walls. The proprietor peers at you over thick spectacles.",
-    "sell_items": ["healing_potion", "greater_healing_potion"],
+    "sell_items": ["healing_potion", "greater_healing_potion", "antitoxin", "potion_of_invisibility", "potion_of_speed"],
+    "open_periods": ["morning", "afternoon"],
     "buy_multiplier": 0.4,
     "sell_multiplier": 1.1
   },
   "market_stall": {
     "name": "Travelling Merchant Stall",
     "description": "A colourful wagon with goods piled high. The merchant haggles eagerly.",
-    "sell_items": ["trail_rations", "rope", "torch", "thieves_tools", "component_pouch", "dart"],
+    "sell_items": ["trail_rations", "rope", "torch", "thieves_tools", "component_pouch", "dart", "ring_of_protection", "antitoxin"],
+    "open_periods": ["morning", "afternoon"],
     "buy_multiplier": 0.5,
     "sell_multiplier": 1.0
   }

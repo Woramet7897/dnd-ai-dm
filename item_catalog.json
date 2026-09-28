@@ -300,6 +300,64 @@
     "price_sp": 4,
     "value_gold": 0,
     "description": "Preserved food rations suitable for a journey. (4 SP)"
+  },
+  "antitoxin": {
+    "name": "Antitoxin",
+    "type": "consumable",
+    "value_gold": 50,
+    "effects": {"cures_condition": "poisoned"},
+    "description": "A small vial of bitter liquid that cures the poisoned condition."
+  },
+  "potion_of_invisibility": {
+    "name": "Potion of Invisibility",
+    "type": "consumable",
+    "value_gold": 180,
+    "effects": {"condition": "invisible", "duration_rounds": 10},
+    "description": "Drinking this potion confers invisibility for 10 rounds or until you attack."
+  },
+  "potion_of_speed": {
+    "name": "Potion of Speed",
+    "type": "consumable",
+    "value_gold": 200,
+    "effects": {"buff": "speed", "ac_bonus": 2, "duration_rounds": 5},
+    "description": "A swirling yellow elixir that grants +2 AC and rapid reflexes."
+  },
+  "boots_of_elvenkind": {
+    "name": "Boots of Elvenkind",
+    "type": "wearable",
+    "slot": "feet",
+    "rarity": "uncommon",
+    "value_gold": 120,
+    "effects": {"stealth_advantage": true},
+    "description": "Soft leather boots that muffle your footsteps completely."
+  },
+  "ring_of_protection": {
+    "name": "Ring of Protection",
+    "type": "wearable",
+    "slot": "ring",
+    "rarity": "rare",
+    "value_gold": 250,
+    "effects": {"ac_bonus": 1, "saving_throw_bonus": 1},
+    "description": "A polished silver ring that hums with abjuration magic. +1 AC and +1 to all saves."
+  },
+  "silvered_dagger": {
+    "name": "Silvered Dagger",
+    "type": "weapon",
+    "slot": "off_hand",
+    "finesse": true,
+    "silvered": true,
+    "value_gold": 102,
+    "effects": {"damage": "1d4", "damage_type": "piercing"},
+    "description": "A dagger plated with pure silver, effective against supernatural beasts."
+  },
+  "silvered_longsword": {
+    "name": "Silvered Longsword",
+    "type": "weapon",
+    "slot": "main_hand",
+    "silvered": true,
+    "value_gold": 115,
+    "effects": {"damage": "1d8", "damage_type": "slashing"},
+    "description": "A finely forged longsword coated in gleaming silver to cut through supernatural hides."
   }
 }
 

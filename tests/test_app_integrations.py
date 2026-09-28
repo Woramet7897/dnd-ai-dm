@@ -1023,6 +1023,36 @@ class TestAppIntegrations(unittest.TestCase):
         # Catalog remains untouched
         self.assertNotIn(gen_id, state_manager._get_item_catalog())
 
+    def test_level_2_spell_casting_and_spell_catalog_expansion(self):
+        """Verify Level 2 spells exist in catalog and resolve with slot cost."""
+        spells = state_manager._get_spell_catalog()
+        self.assertIn("scorching_ray", spells)
+        self.assertIn("misty_step", spells)
+        self.assertIn("shatter", spells)
+        self.assertIn("hold_person", spells)
+        self.assertIn("spiritual_weapon", spells)
+        self.assertEqual(spells["scorching_ray"]["level"], 2)
+        self.assertEqual(spells["scorching_ray"]["slot_cost"], 2)
+
+    def test_expanded_dungeon_rooms_and_catalogs(self):
+        """Verify dungeon_data.json has alchemist in town_riverside and new boss rooms."""
+        rooms = dungeon_manager._load_static_catalog()
+        self.assertIn("alchemist", rooms["town_riverside"]["shops"])
+        self.assertIn("goblin_chieftain_tent", rooms)
+        self.assertIn("ancient_crypt", rooms)
+        self.assertIn("goblin_boss", rooms["goblin_chieftain_tent"]["encounter_table"])
+        self.assertIn("ghoul", rooms["ancient_crypt"]["encounter_table"])
+
+        monsters = combat_manager._get_monster_catalog()
+        self.assertIn("goblin_boss", monsters)
+        self.assertIn("ogre", monsters)
+        self.assertIn("ghoul", monsters)
+
+        items = state_manager._get_item_catalog()
+        self.assertIn("antitoxin", items)
+        self.assertIn("boots_of_elvenkind", items)
+        self.assertIn("ring_of_protection", items)
+
 
 if __name__ == "__main__":
     unittest.main()
