@@ -40,6 +40,141 @@ DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "llama3")
 DEFAULT_NUM_CTX = 4096
 MAX_PROMPT_RATIO = 0.70  # 70% of num_ctx for system prompt + history budget
 
+# ── Cloud Engine: Google Gemini Flash (Free Tier) ─────────────────────────────
+GEMINI_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "data", "gemini_config.json")
+DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
+
+
+def load_gemini_config() -> Dict[str, Any]:
+    """Load local Gemini API configuration if present."""
+    if os.path.exists(GEMINI_CONFIG_PATH):
+        try:
+            with open(GEMINI_CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def save_gemini_config(api_key: str, model: str = DEFAULT_GEMINI_MODEL, engine: str = "gemini") -> None:
+    """Save Gemini API configuration locally in data/gemini_config.json."""
+    try:
+        os.makedirs(os.path.dirname(GEMINI_CONFIG_PATH), exist_ok=True)
+        with open(GEMINI_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump({"api_key": api_key.strip(), "model": model.strip(), "engine": engine.strip()}, f, indent=2)
+    except Exception as ex:
+        logger.error(f"Failed to save Gemini config: {ex}")
+
+
+def get_gemini_api_key() -> Optional[str]:
+    """Retrieve Gemini API Key from environment or local config file."""
+    env_k = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if env_k and env_k.strip():
+        return env_k.strip()
+    cfg = load_gemini_config()
+    cfg_k = cfg.get("api_key")
+    if cfg_k and str(cfg_k).strip():
+        return str(cfg_k).strip()
+    return None
+
+
+def get_active_engine() -> str:
+    """Return active LLM engine: 'gemini' or 'ollama'."""
+    env_e = os.environ.get("LLM_ENGINE")
+    if env_e:
+        return env_e.lower().strip()
+    cfg = load_gemini_config()
+    if cfg.get("engine") == "gemini" and get_gemini_api_key():
+        return "gemini"
+    return "ollama"
+
+
+def call_gemini_api(
+    contents: List[Dict[str, Any]],
+    system_instruction: Optional[str] = None,
+    temperature: float = 0.7,
+    response_mime_type: Optional[str] = None,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+) -> Tuple[Optional[str], Dict[str, Any]]:
+    """
+    Call Google Gemini REST API directly using requests.
+    Zero heavy SDK dependencies, works across all Python versions.
+    """
+    import requests
+    key = api_key or get_gemini_api_key()
+    if not key:
+        return None, {"error": "Missing Gemini API Key"}
+
+    cfg = load_gemini_config()
+    chosen_model = model or cfg.get("model") or DEFAULT_GEMINI_MODEL
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{chosen_model}:generateContent?key={key}"
+
+    payload: Dict[str, Any] = {
+        "contents": contents,
+        "generationConfig": {
+            "temperature": temperature,
+            "maxOutputTokens": 2048,
+        }
+    }
+    if system_instruction:
+        payload["systemInstruction"] = {
+            "parts": [{"text": system_instruction}]
+        }
+    if response_mime_type:
+        payload["generationConfig"]["responseMimeType"] = response_mime_type
+
+    start_t = time.time()
+    try:
+        resp = requests.post(
+            url,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=25
+        )
+        elapsed = time.time() - start_t
+        if resp.status_code != 200:
+            err_msg = f"HTTP {resp.status_code}: {resp.text}"
+            logger.error(f"Gemini API returned error: {err_msg}")
+            return None, {"error": err_msg, "elapsed_seconds": elapsed}
+
+        data = resp.json()
+        candidates = data.get("candidates", [])
+        if not candidates:
+            return None, {"error": "No candidates returned by Gemini", "elapsed_seconds": elapsed}
+
+        first_cand = candidates[0]
+        text = first_cand.get("content", {}).get("parts", [{}])[0].get("text", "")
+        usage = data.get("usageMetadata", {})
+        metrics = {
+            "eval_count": usage.get("candidatesTokenCount", 0),
+            "prompt_eval_count": usage.get("promptTokenCount", 0),
+            "eval_duration": 0,
+            "total_duration": 0,
+            "elapsed_seconds": elapsed,
+            "engine": "gemini",
+            "model": chosen_model,
+        }
+        return text, metrics
+    except Exception as ex:
+        elapsed = time.time() - start_t
+        logger.error(f"Gemini API call failed after {elapsed:.2f}s: {ex}")
+        return None, {"error": str(ex), "elapsed_seconds": elapsed}
+
+
+def test_gemini_connection(api_key: str, model: str = DEFAULT_GEMINI_MODEL) -> Tuple[bool, str]:
+    """Test Gemini API connectivity with a simple ping prompt."""
+    res, metrics = call_gemini_api(
+        contents=[{"role": "user", "parts": [{"text": "Reply with 'OK' only."}]}],
+        api_key=api_key,
+        model=model,
+        temperature=0.1,
+    )
+    if res is not None:
+        elapsed = metrics.get("elapsed_seconds", 0)
+        return True, f"เชื่อมต่อสำเร็จใน {elapsed:.2f}s! ({model})"
+    return False, metrics.get("error", "Unknown error")
+
 
 def get_installed_models(client: Optional[Any] = None) -> List[str]:
     """Retrieve list of locally installed model names from Ollama."""
@@ -513,23 +648,55 @@ def generate_narrative_response(
     try:
         if client is not None:
             response = client.chat(model=effective_model, messages=messages, options=options)
+            raw_text = response.get("message", {}).get("content", "")
+            metrics = {
+                "eval_count": response.get("eval_count", 0),
+                "prompt_eval_count": response.get("prompt_eval_count", 0),
+                "eval_duration": response.get("eval_duration", 0),
+                "total_duration": response.get("total_duration", 0),
+                "elapsed_seconds": time.time() - start_t,
+            }
+        elif get_active_engine() == "gemini" and get_gemini_api_key():
+            gemini_contents = []
+            for h in format_llm_history(history, max_turns=12):
+                g_role = "model" if h.get("role") == "assistant" else "user"
+                gemini_contents.append({"role": g_role, "parts": [{"text": h.get("content", "")}]})
+            gemini_contents.append({"role": "user", "parts": [{"text": user_content}]})
+
+            g_text, g_metrics = call_gemini_api(
+                contents=gemini_contents,
+                system_instruction=system_prompt,
+                temperature=0.7,
+            )
+            if g_text is not None:
+                raw_text = g_text
+                metrics = g_metrics
+            else:
+                logger.warning("Gemini API call failed or timed out. Falling back to local Ollama...")
+                import ollama  # type: ignore
+                response = ollama.chat(model=effective_model, messages=messages, options=options)
+                raw_text = response.get("message", {}).get("content", "")
+                metrics = {
+                    "eval_count": response.get("eval_count", 0),
+                    "prompt_eval_count": response.get("prompt_eval_count", 0),
+                    "eval_duration": response.get("eval_duration", 0),
+                    "total_duration": response.get("total_duration", 0),
+                    "elapsed_seconds": time.time() - start_t,
+                }
         else:
             import ollama  # type: ignore
             response = ollama.chat(model=effective_model, messages=messages, options=options)
+            raw_text = response.get("message", {}).get("content", "")
+            metrics = {
+                "eval_count": response.get("eval_count", 0),
+                "prompt_eval_count": response.get("prompt_eval_count", 0),
+                "eval_duration": response.get("eval_duration", 0),
+                "total_duration": response.get("total_duration", 0),
+                "elapsed_seconds": time.time() - start_t,
+            }
 
         elapsed = time.time() - start_t
-        raw_text = response.get("message", {}).get("content", "")
-
-        # Extract suggestions and strip all JSON block leakage
         clean_narrative, suggestions = extract_and_strip_suggestions(raw_text)
-
-        metrics = {
-            "eval_count": response.get("eval_count", 0),
-            "prompt_eval_count": response.get("prompt_eval_count", 0),
-            "eval_duration": response.get("eval_duration", 0),
-            "total_duration": response.get("total_duration", 0),
-            "elapsed_seconds": elapsed,
-        }
 
         logger.info(
             f"Narrative response complete in {elapsed:.2f}s "
@@ -636,18 +803,44 @@ def extract_state_updates(
         try:
             if client is not None:
                 resp = client.chat(model=effective_model, messages=msgs, format="json", options=options)
+                m = {
+                    "eval_count": resp.get("eval_count", 0),
+                    "prompt_eval_count": resp.get("prompt_eval_count", 0),
+                    "eval_duration": resp.get("eval_duration", 0),
+                    "total_duration": resp.get("total_duration", 0),
+                }
+                content = resp.get("message", {}).get("content", "")
+            elif get_active_engine() == "gemini" and get_gemini_api_key():
+                g_prompt = msgs[-1].get("content", "")
+                g_text, g_metrics = call_gemini_api(
+                    contents=[{"role": "user", "parts": [{"text": g_prompt}]}],
+                    temperature=0.1,
+                    response_mime_type="application/json",
+                )
+                if g_text is not None:
+                    content = g_text
+                    m = g_metrics
+                else:
+                    import ollama  # type: ignore
+                    resp = ollama.chat(model=effective_model, messages=msgs, format="json", options=options)
+                    m = {
+                        "eval_count": resp.get("eval_count", 0),
+                        "prompt_eval_count": resp.get("prompt_eval_count", 0),
+                        "eval_duration": resp.get("eval_duration", 0),
+                        "total_duration": resp.get("total_duration", 0),
+                    }
+                    content = resp.get("message", {}).get("content", "")
             else:
                 import ollama  # type: ignore
                 resp = ollama.chat(model=effective_model, messages=msgs, format="json", options=options)
+                m = {
+                    "eval_count": resp.get("eval_count", 0),
+                    "prompt_eval_count": resp.get("prompt_eval_count", 0),
+                    "eval_duration": resp.get("eval_duration", 0),
+                    "total_duration": resp.get("total_duration", 0),
+                }
+                content = resp.get("message", {}).get("content", "")
 
-            m = {
-                "eval_count": resp.get("eval_count", 0),
-                "prompt_eval_count": resp.get("prompt_eval_count", 0),
-                "eval_duration": resp.get("eval_duration", 0),
-                "total_duration": resp.get("total_duration", 0),
-            }
-
-            content = resp.get("message", {}).get("content", "")
             parsed = json.loads(content)
             if not isinstance(parsed, dict):
                 parsed = {}

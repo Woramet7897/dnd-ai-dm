@@ -21,3 +21,9 @@ venv/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Secrets & API Config
+gemini_config.json
+data/gemini_config.json
+.env
+

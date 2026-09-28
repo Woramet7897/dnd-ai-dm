@@ -1081,37 +1081,107 @@ def render_sidebar():
                 auto_save()
                 st.rerun()
 
-    # ── Ollama Engine Status & Model Selector ──────────────────────────────────
+    # ── AI Engine & Model Settings ───────────────────────────────────────────
+    active_engine = llm_handler.get_active_engine()
+    gemini_key = llm_handler.get_gemini_api_key() or ""
     installed_models = llm_handler.get_installed_models()
-    with st.sidebar.expander("🤖 Dungeon Master AI (Ollama)", expanded=not bool(installed_models)):
-        if installed_models:
-            st.markdown("🟢 **สถานะ:** เชื่อมต่อสำเร็จ (Online)")
-            if "selected_model" not in st.session_state or st.session_state["selected_model"] not in installed_models:
-                st.session_state["selected_model"] = llm_handler.resolve_model()
 
-            curr_idx = installed_models.index(st.session_state["selected_model"]) if st.session_state["selected_model"] in installed_models else 0
-            chosen_m = st.selectbox(
-                "โมเดลที่ใช้งาน:",
-                options=installed_models,
-                index=curr_idx,
-                key="sb_model_selector",
-                help="เลือกโมเดล AI ในเครื่องที่จะใช้บรรยายเนื้อเรื่อง"
+    with st.sidebar.expander("🤖 Dungeon Master AI (Engine & Models)", expanded=False):
+        engine_opts = ["⚡ Google Gemini (Cloud 1-2s & ฟรี)", "🏠 Local Ollama (ในเครื่อง/ออฟไลน์)"]
+        default_engine_idx = 0 if active_engine == "gemini" and gemini_key else 1
+
+        chosen_engine_label = st.radio(
+            "เลือก Engine AI:",
+            options=engine_opts,
+            index=default_engine_idx,
+            key="sb_engine_radio"
+        )
+        is_gemini = "Gemini" in chosen_engine_label
+
+        if is_gemini:
+            st.markdown("##### ⚡ Google Gemini Flash")
+            st.caption("เร็ว 1-2 วินาที • จำ Context 1M tokens • ฟรี 100% จาก Google AI Studio")
+
+            k_input = st.text_input(
+                "Gemini API Key:",
+                value=gemini_key,
+                type="password",
+                placeholder="AIzaSy...",
+                key="sb_gemini_key_input",
+                help="กดรับ API Key ฟรีได้ที่ https://aistudio.google.com"
             )
-            if chosen_m != st.session_state.get("selected_model"):
-                st.session_state["selected_model"] = chosen_m
-                st.toast(f"เปลี่ยนโมเดล AI เป็น: {chosen_m}")
+
+            gemini_model_opts = ["gemini-2.0-flash", "gemini-1.5-flash"]
+            cur_cfg = llm_handler.load_gemini_config()
+            cur_g_model = cur_cfg.get("model", "gemini-2.0-flash")
+            g_idx = gemini_model_opts.index(cur_g_model) if cur_g_model in gemini_model_opts else 0
+            chosen_g_model = st.selectbox(
+                "รุ่นโมเดล Gemini:",
+                options=gemini_model_opts,
+                index=g_idx,
+                key="sb_gemini_model_selector"
+            )
+
+            col_k1, col_k2 = st.columns(2)
+            with col_k1:
+                if st.button("💾 บันทึก Key", use_container_width=True, key="btn_save_gemini_key"):
+                    if k_input:
+                        llm_handler.save_gemini_config(api_key=k_input, model=chosen_g_model, engine="gemini")
+                        st.toast("บันทึก Gemini API Key เรียบร้อยแล้ว!")
+                        st.rerun()
+                    else:
+                        st.warning("กรุณากรอก API Key ก่อนบันทึก")
+            with col_k2:
+                if st.button("🔌 ทดสอบ", use_container_width=True, key="btn_test_gemini"):
+                    if k_input:
+                        ok_conn, msg_conn = llm_handler.test_gemini_connection(k_input, model=chosen_g_model)
+                        if ok_conn:
+                            st.success(msg_conn)
+                        else:
+                            st.error(f"ทดสอบไม่สำเร็จ: {msg_conn}")
+                    else:
+                        st.warning("กรุณาใส่ API Key")
+
+            if gemini_key:
+                st.markdown("🟢 **สถานะ:** พร้อมใช้งาน (Gemini Flash)")
+            else:
+                st.markdown("🟡 **สถานะ:** รอใส่ API Key")
+            st.markdown("[👉 คลิกที่นี่เพื่อรับ Gemini API Key ฟรี](https://aistudio.google.com/app/apikey)")
+
         else:
-            st.markdown("🔴 **สถานะ:** ขาดการเชื่อมต่อ (Offline)")
-            st.caption("ระบบไม่พบ Ollama ที่กำลังทำงานอยู่ กรุณาเปิดโปรแกรม Ollama หรือคลิกปุ่มด้านล่างเพื่อเปิดระบบอัตโนมัติ")
-            if st.button("🚀 สตาร์ต Ollama อัตโนมัติ", use_container_width=True):
-                try:
-                    import subprocess
-                    subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    st.toast("กำลังเริ่มต้น Ollama Service...")
-                    time.sleep(2)
-                    st.rerun()
-                except Exception as ex:
-                    st.error(f"ไม่สามารถเริ่ม Ollama ได้: {ex}")
+            # Local Ollama Mode
+            if active_engine == "gemini" and st.button("สลับมาใช้ Ollama", key="btn_switch_ollama"):
+                llm_handler.save_gemini_config(api_key=gemini_key, engine="ollama")
+                st.rerun()
+
+            if installed_models:
+                st.markdown("🟢 **สถานะ:** เชื่อมต่อสำเร็จ (Online)")
+                if "selected_model" not in st.session_state or st.session_state["selected_model"] not in installed_models:
+                    st.session_state["selected_model"] = llm_handler.resolve_model()
+
+                curr_idx = installed_models.index(st.session_state["selected_model"]) if st.session_state["selected_model"] in installed_models else 0
+                chosen_m = st.selectbox(
+                    "โมเดลในเครื่อง:",
+                    options=installed_models,
+                    index=curr_idx,
+                    key="sb_model_selector",
+                    help="เลือกโมเดล AI ในเครื่องที่จะใช้บรรยายเนื้อเรื่อง"
+                )
+                if chosen_m != st.session_state.get("selected_model"):
+                    st.session_state["selected_model"] = chosen_m
+                    st.toast(f"เปลี่ยนโมเดล AI เป็น: {chosen_m}")
+            else:
+                st.markdown("🔴 **สถานะ:** ขาดการเชื่อมต่อ (Offline)")
+                st.caption("ระบบไม่พบ Ollama ที่กำลังทำงานอยู่ กรุณาเปิดโปรแกรม Ollama หรือคลิกปุ่มด้านล่างเพื่อเปิดระบบอัตโนมัติ")
+                if st.button("🚀 สตาร์ต Ollama อัตโนมัติ", use_container_width=True, key="sb_start_ollama"):
+                    try:
+                        import subprocess
+                        subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        st.toast("กำลังเริ่มต้น Ollama Service...")
+                        time.sleep(2)
+                        st.rerun()
+                    except Exception as ex:
+                        st.error(f"ไม่สามารถเริ่ม Ollama ได้: {ex}")
 
     st.sidebar.markdown("---")
 
