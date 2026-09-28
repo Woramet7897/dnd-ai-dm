@@ -1306,6 +1306,64 @@ def render_sidebar():
             st.rerun()
 
 
+def apply_escape_success(world: Dict[str, Any], player: Dict[str, Any]) -> str:
+    """
+    Apply state changes for a successful escape:
+    - Sets player status to 'normal'
+    - Relocates player to the nearest visited safe room
+    Returns the safe room id.
+    """
+    player["status"] = "normal"
+    safe_room = dungeon_manager.find_nearest_visited_safe_room(world)
+    world["current_location"] = safe_room
+    return safe_room
+
+
+def attempt_escape(world: Dict[str, Any], player: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Attempt to escape captive status via a Hard DEX check.
+    Advances game time by 1 step (turn cost).
+    If successful, applies escape state changes.
+    If failed and player has Inspiration > 0, constructs pending_reroll dictionary with kind='escape'.
+
+    Returns:
+        Dict with keys: 'success', 'res', 'safe_room', 'pending_reroll'
+    """
+    esc_res = state_manager.resolve_check("DEX", "hard", player)
+
+    # Advance time by 1 step (costs a turn)
+    time_res = dungeon_manager.advance_time(world, steps=1, character_state=player)
+    if time_res.get("period_changed"):
+        state_manager.handle_period_change(world, player)
+
+    safe_room = None
+    pending_reroll = None
+
+    if esc_res["success"]:
+        safe_room = apply_escape_success(world, player)
+    else:
+        if state_manager.get_inspiration(player) > 0:
+            pending_reroll = {
+                "stat": "DEX",
+                "difficulty": "hard",
+                "dc": esc_res["dc"],
+                "modifier": esc_res["modifier"],
+                "proficiency": esc_res.get("proficiency", 0),
+                "bonus": esc_res.get("bonus", 0),
+                "original_roll": esc_res["roll"],
+                "original_total": esc_res["total"],
+                "skill": None,
+                "kind": "escape",
+            }
+
+    return {
+        "success": esc_res["success"],
+        "res": esc_res,
+        "safe_room": safe_room,
+        "pending_reroll": pending_reroll,
+    }
+
+
 def resolve_player_combat_action(
     action_type: str,
     player_c: Dict[str, Any],
@@ -1860,18 +1918,16 @@ def render_playing_view():
                     st.markdown("##### 🔒 Captive — Attempt Escape")
                     st.info("You are held captive! Normal movement is disabled until you escape.")
                     if st.button("🔓 Attempt Escape", use_container_width=True, type="primary"):
-                        # One resolve_check against hard difficulty (DC 16)
-                        esc_res = state_manager.resolve_check("DEX", "hard", player)
-                        
-                        # Advance time by 1 step (costs a turn)
-                        time_res = dungeon_manager.advance_time(world, steps=1, character_state=player)
-                        if time_res.get("period_changed"):
-                            state_manager.handle_period_change(world, player)
+                        esc_out = attempt_escape(world, player)
+                        esc_res = esc_out["res"]
 
-                        if esc_res["success"]:
-                            player["status"] = "normal"
-                            safe_room = dungeon_manager.find_nearest_visited_safe_room(world)
-                            world["current_location"] = safe_room
+                        if esc_out["pending_reroll"]:
+                            st.session_state["pending_inspiration_reroll"] = esc_out["pending_reroll"]
+                        else:
+                            st.session_state.pop("pending_inspiration_reroll", None)
+
+                        if esc_out["success"]:
+                            safe_room = esc_out["safe_room"]
                             st.success("🎉 Escape Successful!")
                             st.session_state["narrative_log"].append({
                                 "role": "assistant",
@@ -1977,6 +2033,18 @@ def render_playing_view():
                                     f"+ mod {pending_reroll['modifier']} = **{new_total}** → **{res_str}**"
                                 )
                             })
+                            if pending_reroll.get("kind") == "escape" and new_succ:
+                                is_held = (
+                                    player.get("status") == "captive"
+                                    or bool(player.get("crime_state", {}).get("imprisoned"))
+                                    or bool(world.get("is_imprisoned"))
+                                )
+                                if is_held:
+                                    safe_room = apply_escape_success(world, player)
+                                    st.session_state["narrative_log"].append({
+                                        "role": "assistant",
+                                        "content": f"🔓 **Escape Successful!** You used Inspiration to break free from your bonds and fled to **{safe_room}**."
+                                    })
                             del st.session_state["pending_inspiration_reroll"]
                             auto_save()
                             st.rerun()

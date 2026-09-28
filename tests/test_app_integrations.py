@@ -417,6 +417,72 @@ class TestAppIntegrations(unittest.TestCase):
         self.assertTrue(hasattr(app, "time"))
         self.assertTrue(callable(getattr(app.time, "sleep", None)))
 
+    def test_attempt_escape_failure_with_inspiration(self):
+        """2.2a: Escape check failure with Inspiration sets pending_reroll with kind=='escape'."""
+        self.fighter["status"] = "captive"
+        self.world["current_location"] = "crossroads"
+        self.fighter["inspiration"] = 2
+
+        with patch("state_manager._roll_d20", return_value=1):
+            out = app.attempt_escape(self.world, self.fighter)
+
+        self.assertFalse(out["success"])
+        self.assertEqual(self.fighter["status"], "captive")
+        self.assertIsNotNone(out["pending_reroll"])
+        self.assertEqual(out["pending_reroll"]["kind"], "escape")
+        self.assertEqual(out["pending_reroll"]["stat"], "DEX")
+        self.assertEqual(out["pending_reroll"]["difficulty"], "hard")
+
+    def test_attempt_escape_failure_without_inspiration(self):
+        """2.2b: Escape check failure without Inspiration leaves pending_reroll as None."""
+        self.fighter["status"] = "captive"
+        self.world["current_location"] = "crossroads"
+        self.fighter["inspiration"] = 0
+
+        with patch("state_manager._roll_d20", return_value=1):
+            out = app.attempt_escape(self.world, self.fighter)
+
+        self.assertFalse(out["success"])
+        self.assertEqual(self.fighter["status"], "captive")
+        self.assertIsNone(out["pending_reroll"])
+
+    def test_attempt_escape_success_first_roll(self):
+        """2.2c: Escape check success on first roll sets status normal, moves to safe room, pending_reroll is None."""
+        self.fighter["status"] = "captive"
+        self.world["current_location"] = "crossroads"
+        self.fighter["inspiration"] = 2
+
+        with patch("state_manager._roll_d20", return_value=20):
+            out = app.attempt_escape(self.world, self.fighter)
+
+        self.assertTrue(out["success"])
+        self.assertEqual(self.fighter["status"], "normal")
+        self.assertNotEqual(self.world["current_location"], "crossroads")
+        self.assertEqual(out["safe_room"], self.world["current_location"])
+        self.assertIsNone(out["pending_reroll"])
+
+    def test_apply_escape_success_state_updates(self):
+        """2.2d: apply_escape_success properly sets status to normal and moves to safe room."""
+        self.fighter["status"] = "captive"
+        self.world["current_location"] = "crossroads"
+        self.world["visited_rooms"] = ["town_riverside", "crossroads"]
+
+        safe_room = app.apply_escape_success(self.world, self.fighter)
+
+        self.assertEqual(self.fighter["status"], "normal")
+        self.assertEqual(self.world["current_location"], safe_room)
+        self.assertEqual(safe_room, "town_riverside")
+
+    def test_attempt_escape_advances_time_exactly_one_step(self):
+        """2.2e: attempt_escape advances game time by exactly 1 step per attempt."""
+        self.fighter["status"] = "captive"
+        self.world["game_time"] = {"day": 1, "period": "morning", "steps_since_period_start": 0}
+
+        with patch("state_manager._roll_d20", return_value=1):
+            app.attempt_escape(self.world, self.fighter)
+
+        self.assertEqual(self.world["game_time"]["steps_since_period_start"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
