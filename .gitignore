@@ -25,5 +25,7 @@ Thumbs.db
 # Secrets & API Config
 gemini_config.json
 data/gemini_config.json
+groq_config.json
+data/groq_config.json
 .env
 

@@ -18,6 +18,7 @@ import streamlit as st
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import character_creator
+import check_manager
 import combat_manager
 import dungeon_manager
 import llm_handler
@@ -184,6 +185,19 @@ def list_saved_characters() -> List[str]:
     return sorted(saves)
 
 
+def get_current_active_model() -> str:
+    """Return appropriate model identifier matching the currently active LLM engine."""
+    engine = llm_handler.get_active_engine()
+    if engine == "groq":
+        cfg = llm_handler.load_groq_config()
+        return cfg.get("model") or llm_handler.DEFAULT_GROQ_MODEL
+    elif engine == "gemini":
+        cfg = llm_handler.load_gemini_config()
+        return cfg.get("model") or llm_handler.DEFAULT_GEMINI_MODEL
+    else:
+        return st.session_state.get("selected_model") or llm_handler.resolve_model()
+
+
 def load_game(char_name: str, client: Optional[Any] = None) -> bool:
     """Load character and world state from disk, restoring complete narrative history."""
     try:
@@ -227,6 +241,7 @@ def load_game(char_name: str, client: Optional[Any] = None) -> bool:
                             player_state=player,
                             world_state=world,
                             lore_entries=major_entries,
+                            model=get_current_active_model(),
                             client=client,
                         )
                     recap_narrative = res.get("narrative", "")
@@ -685,8 +700,7 @@ def show_character_dialog():
                 is_pending = c_app.get("camp_dialogue_pending", True)
                 if is_pending:
                     if st.button(f"💬 พูดคุย", key=f"dlg_talk_{cid}", use_container_width=True):
-                        chosen_m = st.session_state.get("selected_model")
-                        mm = llm_handler.resolve_model(chosen_m)
+                        mm = get_current_active_model()
                         dlg = state_manager.generate_camp_dialogue(cid, mm, player, world)
                         if dlg:
                             st.session_state["active_camp_dialogue"] = dlg
@@ -1184,11 +1198,21 @@ def render_sidebar():
     # ── AI Engine & Model Settings ───────────────────────────────────────────
     active_engine = llm_handler.get_active_engine()
     gemini_key = llm_handler.get_gemini_api_key() or ""
+    groq_key = llm_handler.get_groq_api_key() or ""
     installed_models = llm_handler.get_installed_models()
 
     with st.sidebar.expander("🤖 Dungeon Master AI (Engine & Models)", expanded=False):
-        engine_opts = ["⚡ Google Gemini (Cloud API • Free tier ตามโควตาบัญชี)", "🏠 Local Ollama (ในเครื่อง/ออฟไลน์)"]
-        default_engine_idx = 0 if active_engine == "gemini" and gemini_key else 1
+        engine_opts = [
+            "🚀 Groq Cloud",
+            "⚡ Google Gemini",
+            "🏠 Local Ollama",
+        ]
+        if active_engine == "groq" and groq_key:
+            default_engine_idx = 0
+        elif active_engine == "gemini" and gemini_key:
+            default_engine_idx = 1
+        else:
+            default_engine_idx = 2
 
         chosen_engine_label = st.radio(
             "เลือก Engine AI:",
@@ -1196,9 +1220,108 @@ def render_sidebar():
             index=default_engine_idx,
             key="sb_engine_radio"
         )
+        is_groq = "Groq" in chosen_engine_label
         is_gemini = "Gemini" in chosen_engine_label
 
-        if is_gemini:
+        target_engine = "groq" if is_groq else ("gemini" if is_gemini else "ollama")
+        if target_engine != active_engine:
+            if target_engine == "groq" and groq_key:
+                llm_handler.save_groq_config(engine="groq")
+                llm_handler.save_gemini_config(api_key=gemini_key, engine="groq")
+                active_engine = "groq"
+                st.toast("⚡ สลับมาใช้ Groq Cloud เรียบร้อย")
+                st.rerun()
+            elif target_engine == "gemini" and gemini_key:
+                llm_handler.save_gemini_config(api_key=gemini_key, engine="gemini")
+                llm_handler.save_groq_config(engine="gemini")
+                active_engine = "gemini"
+                st.toast("⚡ สลับมาใช้ Google Gemini เรียบร้อย")
+                st.rerun()
+            elif target_engine == "ollama":
+                llm_handler.save_groq_config(engine="ollama")
+                llm_handler.save_gemini_config(api_key=gemini_key, engine="ollama")
+                active_engine = "ollama"
+                st.toast("🏠 สลับมาใช้ Local Ollama เรียบร้อย")
+                st.rerun()
+
+        if is_groq:
+            st.markdown("##### 🚀 Groq Cloud (LPU Ultra-Fast)")
+            st.caption("เร็ว 1-2 วินาที • โควตาฟรี 14,400 ครั้ง/วัน จาก Groq Cloud • หากเน็ตหลุดจะสลับไปใช้ Ollama อัตโนมัติ")
+
+            grq_input = st.text_input(
+                "Groq API Key:",
+                value=groq_key,
+                type="password",
+                placeholder="gsk_...",
+                key="sb_groq_key_input",
+                help="รับ API Key ฟรีได้ที่ https://console.groq.com/keys"
+            )
+
+            groq_model_opts = llm_handler.get_groq_available_models(api_key=grq_input or groq_key)
+            recommended_models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+            for rm in reversed(recommended_models):
+                if rm in groq_model_opts:
+                    groq_model_opts.remove(rm)
+                    groq_model_opts.insert(0, rm)
+            if "Other (กำหนดเอง)" not in groq_model_opts:
+                groq_model_opts.append("Other (กำหนดเอง)")
+
+            cur_grq_cfg = llm_handler.load_groq_config()
+            cur_grq_model = cur_grq_cfg.get("model", llm_handler.DEFAULT_GROQ_MODEL)
+            if cur_grq_model not in groq_model_opts:
+                groq_model_opts.insert(0, cur_grq_model)
+
+            grq_idx = groq_model_opts.index(cur_grq_model) if cur_grq_model in groq_model_opts else 0
+            chosen_grq_model = st.selectbox(
+                "รุ่นโมเดล Groq:",
+                options=groq_model_opts,
+                index=grq_idx,
+                key="sb_groq_model_selector",
+                help="เลือกโมเดลที่ต้องการใช้งาน เช่น qwen/qwen3.8-27b"
+            )
+            if chosen_grq_model == "Other (กำหนดเอง)":
+                custom_grq_name = st.text_input(
+                    "ป้อนชื่อรุ่นโมเดล:",
+                    value=cur_grq_model if cur_grq_model not in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"] else "",
+                    placeholder="e.g. llama-3.3-70b-versatile",
+                    key="sb_groq_custom_model_input"
+                )
+                if custom_grq_name.strip():
+                    chosen_grq_model = custom_grq_name.strip()
+
+            if chosen_grq_model != cur_grq_model and chosen_grq_model != "Other (กำหนดเอง)":
+                llm_handler.save_groq_config(model=chosen_grq_model)
+                st.toast(f"เปลี่ยนโมเดล Groq เป็น: {chosen_grq_model}")
+
+            c_save_g, c_test_g = st.columns(2)
+            with c_save_g:
+                if st.button("💾 บันทึก Key", use_container_width=True, key="btn_save_groq_key"):
+                    if not grq_input.strip():
+                        st.error("กรุณาระบุ Groq API Key")
+                    else:
+                        saved_ok = llm_handler.save_groq_config(api_key=grq_input, model=chosen_grq_model, engine="groq")
+                        if saved_ok:
+                            st.toast("บันทึก Groq API Key และเปิดใช้งานสำเร็จ!")
+                            st.rerun()
+                        else:
+                            st.error("บันทึกไม่สำเร็จ")
+            with c_test_g:
+                if st.button("🔌 ทดสอบ", use_container_width=True, key="btn_test_groq"):
+                    if not grq_input.strip():
+                        st.error("กรุณาระบุ Groq API Key")
+                    else:
+                        with st.spinner("กำลังทดสอบการเชื่อมต่อ Groq..."):
+                            ok_conn, msg_conn = llm_handler.test_groq_connection(grq_input, model=chosen_grq_model)
+                        if ok_conn:
+                            st.success(f"🟢 {msg_conn}")
+                        else:
+                            st.error(f"🔴 {msg_conn}")
+
+            if groq_key:
+                st.markdown("🟢 **สถานะ:** พร้อมใช้งาน (Groq LPU)")
+            st.markdown("[👉 คลิกที่นี่เพื่อรับ Groq API Key ฟรี](https://console.groq.com/keys)")
+
+        elif is_gemini:
             st.markdown("##### ⚡ Google Gemini Flash")
             st.caption("มี free tier จาก Google AI Studio (โควตาขึ้นกับบัญชี ดูได้ที่ aistudio.google.com/rate-limit) • ถ้าโควตาหมดหรือเน็ตหลุด ระบบจะสลับไปใช้ Ollama อัตโนมัติ")
 
@@ -1310,8 +1433,11 @@ def render_sidebar():
 
         else:
             # Local Ollama Mode
-            if active_engine == "gemini" and st.button("สลับมาใช้ Ollama", key="btn_switch_ollama"):
-                llm_handler.save_gemini_config(api_key=gemini_key, engine="ollama")
+            if active_engine in ("gemini", "groq") and st.button("สลับมาใช้ Ollama", key="btn_switch_ollama"):
+                if active_engine == "gemini":
+                    llm_handler.save_gemini_config(api_key=gemini_key, engine="ollama")
+                elif active_engine == "groq":
+                    llm_handler.save_groq_config(api_key=groq_key, engine="ollama")
                 st.rerun()
 
             if installed_models:
@@ -1926,7 +2052,7 @@ def render_playing_view():
 
                 # 3. EXACTLY ONE narrative LLM call for the entire round
                 hist = st.session_state.get("history_buffer", [])
-                chosen_m = st.session_state.get("selected_model")
+                active_model = get_current_active_model()
                 with st.spinner("⚔️ DM กำลังบรรยายผลการต่อสู้..."):
                     narrative_res = llm_handler.generate_narrative_response(
                         user_input="",
@@ -1934,7 +2060,7 @@ def render_playing_view():
                         world_state=world,
                         history=hist,
                         round_result=narration_block,
-                        model=chosen_m if chosen_m else llm_handler.DEFAULT_MODEL,
+                        model=active_model,
                     )
 
                 narration_text = narrative_res.get("narrative", "")
@@ -2173,6 +2299,170 @@ def render_playing_view():
             tab_act, tab_env, tab_town = st.tabs(["⚔️ แอ็กชัน & พูดคุย", "🔍 สำรวจฉาก & วัตถุ", "🏛️ สถานที่ & ร้านค้า"])
 
             with tab_act:
+                # ── Baldur's Gate 3 Style Interactive Skill Check Card ────────
+                pending_bg3 = st.session_state.get("pending_bg3_check")
+                if pending_bg3:
+                    bg3_action = pending_bg3["action"]
+                    bg3_spec = pending_bg3["spec"]
+                    bg3_stat = bg3_spec["stat"]
+                    bg3_skill = bg3_spec["skill_name"]
+                    bg3_thai = bg3_spec["skill_thai"]
+                    bg3_dc = bg3_spec["dc"]
+                    bg3_diff = bg3_spec["difficulty"]
+                    bg3_mod = bg3_spec["modifier"]
+                    bg3_prof = bg3_spec["proficiency"]
+                    bg3_is_prof = bg3_spec["is_proficient"]
+                    bg3_tot_mod = bg3_spec["total_modifier"]
+
+                    st.markdown(
+                        f"""
+                        <div style="background: linear-gradient(135deg, rgba(26, 20, 38, 0.95) 0%, rgba(15, 12, 24, 0.98) 100%); 
+                                    border: 2px solid #b8860b; border-radius: 12px; padding: 18px; margin-bottom: 20px;
+                                    box-shadow: 0 4px 20px rgba(184, 134, 11, 0.25);">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                                <span style="font-size: 1.15em; font-weight: 700; color: #ffd700; letter-spacing: 0.05em;">
+                                    🎲 BALDUR'S GATE 3 — ABILITY CHECK
+                                </span>
+                                <span style="background: rgba(184, 134, 11, 0.2); border: 1px solid #b8860b; color: #fde047; padding: 2px 10px; border-radius: 20px; font-size: 0.85em;">
+                                    DC {bg3_dc} ({bg3_diff.capitalize()})
+                                </span>
+                            </div>
+                            <div style="font-size: 1.05em; color: #f1f5f9; margin-bottom: 12px;">
+                                🎯 <b>การกระทำ:</b> <i>"{bg3_action}"</i>
+                            </div>
+                            <div style="background: rgba(255, 255, 255, 0.04); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: flex; justify-content: space-around; text-align: center;">
+                                <div>
+                                    <div style="font-size: 0.8em; color: #94a3b8;">ทักษะ / สแตท</div>
+                                    <div style="font-size: 1.1em; font-weight: 600; color: #38bdf8;">{bg3_stat} ({bg3_skill})</div>
+                                    <div style="font-size: 0.75em; color: #cbd5e1;">{bg3_thai}</div>
+                                </div>
+                                <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 14px;">
+                                    <div style="font-size: 0.8em; color: #94a3b8;">สแตทโมดิฟายเออร์</div>
+                                    <div style="font-size: 1.1em; font-weight: 600; color: #f1f5f9;">{'+' if bg3_mod >= 0 else ''}{bg3_mod}</div>
+                                </div>
+                                <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 14px;">
+                                    <div style="font-size: 0.8em; color: #94a3b8;">ความชำนาญ (Proficiency)</div>
+                                    <div style="font-size: 1.1em; font-weight: 600; color: {'#4ade80' if bg3_is_prof else '#64748b'};">
+                                        {'+' + str(bg3_prof) if bg3_is_prof else 'ไม่มี'}
+                                    </div>
+                                </div>
+                                <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 14px;">
+                                    <div style="font-size: 0.8em; color: #94a3b8;">โบนัสรวม</div>
+                                    <div style="font-size: 1.2em; font-weight: 700; color: #fbbf24;">{'+' if bg3_tot_mod >= 0 else ''}{bg3_tot_mod}</div>
+                                </div>
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                    insp_cnt = state_manager.get_inspiration(player)
+                    use_insp = st.checkbox(
+                        f"✨ ใช้แต้ม Inspiration (ทอยเต๋า 2 ลูกเลือกแต้มสูงสุด — มี {insp_cnt} แต้ม)",
+                        value=False,
+                        disabled=(insp_cnt <= 0),
+                        key="bg3_chk_use_insp",
+                    )
+
+                    c_roll, c_cancel = st.columns([3, 1])
+                    with c_roll:
+                        roll_clicked = st.button("🎲 ทอยเต๋า d20 (Roll Check)", type="primary", use_container_width=True, key="btn_bg3_roll")
+                    with c_cancel:
+                        cancel_clicked = st.button("❌ ข้าม / ทำอย่างอื่น", use_container_width=True, key="btn_bg3_cancel")
+
+                    if cancel_clicked:
+                        st.session_state.pop("pending_bg3_check", None)
+                        st.rerun()
+
+                    if roll_clicked:
+                        chk_res = state_manager.resolve_check(
+                            stat=bg3_stat,
+                            difficulty=bg3_diff,
+                            state=player,
+                            proficient=bg3_is_prof,
+                            skill=bg3_spec["skill"],
+                            use_inspiration=use_insp,
+                        )
+
+                        raw_die = chk_res["roll"]
+                        tot_val = chk_res["total"]
+                        dc_val = chk_res["dc"]
+                        is_succ = chk_res["success"]
+                        is_crit = chk_res.get("critical", False)
+                        is_fumble = chk_res.get("fumble", False)
+
+                        if is_crit:
+                            badge = "🌟 CRITICAL SUCCESS (Nat 20)!"
+                            st.balloons()
+                        elif is_fumble:
+                            badge = "💀 CRITICAL FAILURE (Nat 1)!"
+                        elif is_succ:
+                            badge = "✅ SUCCESS (สำเร็จ)!"
+                        else:
+                            badge = "❌ FAILURE (ล้มเหลว)!"
+
+                        insp_note = " (ใช้แต้ม Inspiration ✨)" if chk_res.get("inspiration_spent") else ""
+                        roll_summary_msg = (
+                            f"🎲 **[BG3 Check] {bg3_stat} ({bg3_skill}) vs DC {dc_val}**\n\n"
+                            f"ทอยเต๋า d20 ได้ `[{raw_die}]` + โบนัส `+{bg3_tot_mod}` = **`{tot_val}`** vs **DC `{dc_val}`** → **{badge}**{insp_note}"
+                        )
+
+                        st.session_state["narrative_log"].append({"role": "user", "content": bg3_action})
+                        st.session_state["narrative_log"].append({"role": "assistant", "content": roll_summary_msg})
+
+                        roll_inj = (
+                            f"[System: Roll Result — {bg3_stat} ({bg3_skill}) Check vs DC {dc_val}]\n"
+                            f"Player attempted action: '{bg3_action}'\n"
+                            f"Roll outcome: Rolled {raw_die} + {bg3_tot_mod} = {tot_val} vs DC {dc_val} -> {badge}.\n"
+                            f"MANDATORY: The check was a {'SUCCESS' if is_succ else 'FAILURE'}. "
+                            f"You MUST narrate the consequence reflecting this {'successful' if is_succ else 'failed'} attempt in rich Thai prose (3-4 paragraphs)."
+                        )
+
+                        hist = st.session_state.get("history_buffer", [])
+                        active_model = get_current_active_model()
+                        with st.spinner("🎲 DM กำลังสรุปผลการทอยและเล่าเรื่องต่อ..."):
+                            res = llm_handler.generate_narrative_response(
+                                user_input=bg3_action,
+                                player_state=player,
+                                world_state=world,
+                                history=hist,
+                                model=active_model,
+                                roll_result=roll_inj,
+                                single_pass=True,
+                            )
+                            narrative_text = res.get("narrative", "")
+                            if res.get("suggestions"):
+                                st.session_state["action_suggestions"] = res["suggestions"]
+
+                            if res.get("single_pass_updates") is not None:
+                                ext_res = res["single_pass_updates"]
+                            else:
+                                ext_res = {}
+
+                            if ext_res:
+                                if "state_updates" in ext_res and ext_res["state_updates"]:
+                                    state_manager.apply_state_updates(ext_res["state_updates"], player, world)
+                                if "quest_updates" in ext_res and ext_res["quest_updates"]:
+                                    state_manager.apply_quest_updates(ext_res["quest_updates"], world)
+                                if "combat_start" in ext_res and ext_res["combat_start"]:
+                                    c_enemies = ext_res["combat_start"].get("enemies", [])
+                                    if c_enemies:
+                                        combat_manager.start_combat(c_enemies, player, world)
+                                        st.session_state["narrative_log"].append({
+                                            "role": "assistant",
+                                            "content": f"⚔️ Combat initiated against **{', '.join(e.replace('_', ' ').title() for e in c_enemies)}**!"
+                                        })
+
+                            st.session_state["narrative_log"].append({"role": "assistant", "content": narrative_text})
+                            st.session_state["history_buffer"].append({"role": "user", "content": bg3_action})
+                            st.session_state["history_buffer"].append({"role": "assistant", "content": narrative_text})
+
+                        st.session_state.pop("pending_bg3_check", None)
+                        auto_save()
+                        st.rerun()
+
+                    st.stop()
+
                 # Contextual Action Suggestions (Sub-phase 14.1 / Module D)
                 suggestions = st.session_state.get("action_suggestions") or list(llm_handler.DEFAULT_ACTION_SUGGESTIONS)
                 if suggestions == llm_handler.DEFAULT_ACTION_SUGGESTIONS:
@@ -2203,12 +2493,20 @@ def render_playing_view():
 
                 if action_to_process:
                     st.session_state.pop("pending_inspiration_reroll", None)
+                    # Baldur's Gate 3 skill check intercept
+                    check_spec = check_manager.detect_action_skill_check(action_to_process, player)
+                    if check_spec:
+                        st.session_state["pending_bg3_check"] = {
+                            "action": action_to_process,
+                            "spec": check_spec,
+                        }
+                        st.rerun()
+
                     st.session_state["narrative_log"].append({"role": "user", "content": action_to_process})
 
                     # 1. Narrative Call
                     hist = st.session_state.get("history_buffer", [])
-                    chosen_m = st.session_state.get("selected_model")
-                    active_model = chosen_m if chosen_m else llm_handler.DEFAULT_MODEL
+                    active_model = get_current_active_model()
                     with st.spinner("📖 DM กำลังเล่าเรื่องราวต่อ..."):
                         res = llm_handler.generate_narrative_response(
                             user_input=action_to_process,
@@ -2216,19 +2514,32 @@ def render_playing_view():
                             world_state=world,
                             history=hist,
                             model=active_model,
+                            single_pass=True,
                         )
                         narrative_text = res.get("narrative", "")
                         if res.get("suggestions"):
                             st.session_state["action_suggestions"] = res["suggestions"]
 
-                        # 2. Extraction Call
-                        ext_res = llm_handler.extract_state_updates(
-                            narrative_text=narrative_text,
-                            user_input=action_to_process,
-                            world_state=world,
-                            player_state=player,
-                            model=active_model,
-                        )
+                        # 2. Extraction: Single-Pass skips 2nd LLM call entirely!
+                        if res.get("single_pass_updates") is not None:
+                            ext_res = res["single_pass_updates"]
+                        elif llm_handler.is_passive_exploration_turn(action_to_process, narrative_text):
+                            logger.info("Single-pass JSON omitted on passive exploration turn; safely skipped 2nd LLM call.")
+                            ext_res = {}
+                        else:
+                            # Active mechanical turn fallback: use lightweight model on Ollama if available to avoid freeze
+                            ext_model = active_model
+                            if llm_handler.get_active_engine() == "ollama":
+                                installed_m = llm_handler.get_installed_models()
+                                if any("qwen2.5:3b" in str(m) for m in installed_m):
+                                    ext_model = "qwen2.5:3b"
+                            ext_res = llm_handler.extract_state_updates(
+                                narrative_text=narrative_text,
+                                user_input=action_to_process,
+                                world_state=world,
+                                player_state=player,
+                                model=ext_model,
+                            )
 
                     # 3. Apply state updates and events if present
                     if ext_res:

@@ -53,6 +53,17 @@ KNOWN_SHUTDOWN_MODELS = {
 }
 GEMINI_COOLDOWN_SECONDS = 600  # 10 minutes cooldown on HTTP 429 / RESOURCE_EXHAUSTED
 
+# ── Cloud Engine: Groq LPU (Ultra-Fast Free Tier) ──────────────────────────
+GROQ_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "data", "groq_config.json")
+DEFAULT_GROQ_MODEL = "qwen/qwen3.8-27b"
+GROQ_AVAILABLE_MODELS = [
+    "qwen/qwen3.8-27b",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+]
+
 # Module-level state for Gemini quota cooldown and session error tracking
 _gemini_cooldown_until: float = 0.0
 _gemini_session_disabled: bool = False
@@ -256,11 +267,91 @@ def get_gemini_api_key() -> Optional[str]:
     return None
 
 
+def load_groq_config() -> Dict[str, Any]:
+    """Load Groq API configuration from data/groq_config.json."""
+    if os.path.exists(GROQ_CONFIG_PATH):
+        try:
+            with open(GROQ_CONFIG_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            return {}
+    return {}
+
+
+def get_groq_available_models(api_key: Optional[str] = None) -> List[str]:
+    """Retrieve list of active text models from Groq API or return default list."""
+    import requests
+    key = api_key or get_groq_api_key()
+    if key:
+        try:
+            resp = requests.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=5,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                models = [
+                    m["id"] for m in data.get("data", [])
+                    if isinstance(m, dict) and "id" in m and not m["id"].startswith("whisper")
+                ]
+                if models:
+                    return sorted(models)
+        except Exception:
+            pass
+    return list(GROQ_AVAILABLE_MODELS)
+
+
+
+def save_groq_config(
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    engine: Optional[str] = None,
+    **kwargs: Any,
+) -> bool:
+    """Save Groq API configuration locally in data/groq_config.json."""
+    try:
+        os.makedirs(os.path.dirname(GROQ_CONFIG_PATH), exist_ok=True)
+        existing = load_groq_config()
+        if api_key is not None:
+            existing["api_key"] = api_key.strip()
+        if model is not None:
+            existing["model"] = model.strip()
+        if engine is not None:
+            existing["engine"] = engine.strip()
+        for k, v in kwargs.items():
+            existing[k] = v
+        with open(GROQ_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(existing, f, indent=2)
+        return True
+    except Exception as ex:
+        logger.error(f"Failed to save Groq config: {ex}")
+        return False
+
+
+def get_groq_api_key() -> Optional[str]:
+    """Retrieve Groq API Key from environment or local config file."""
+    env_k = os.environ.get("GROQ_API_KEY")
+    if env_k and env_k.strip():
+        return env_k.strip()
+    cfg = load_groq_config()
+    cfg_k = cfg.get("api_key")
+    if cfg_k and str(cfg_k).strip():
+        return str(cfg_k).strip()
+    return None
+
+
 def get_active_engine() -> str:
     """
-    Return active LLM engine: 'gemini' or 'ollama'.
-    Falls back to 'ollama' if cooldown is active or Gemini is disabled for the session.
+    Return active LLM engine: 'groq', 'gemini' or 'ollama'.
+    Falls back to 'ollama' if cloud engines are disabled or missing keys.
     """
+    groq_cfg = load_groq_config()
+    if groq_cfg.get("engine") == "groq" and get_groq_api_key():
+        return "groq"
+
     global _gemini_cooldown_until, _gemini_session_disabled
     now = time.time()
     if _gemini_session_disabled or now < _gemini_cooldown_until:
@@ -269,10 +360,90 @@ def get_active_engine() -> str:
     env_e = os.environ.get("LLM_ENGINE")
     if env_e:
         return env_e.lower().strip()
+
     cfg = load_gemini_config()
     if cfg.get("engine") == "gemini" and get_gemini_api_key():
         return "gemini"
     return "ollama"
+
+
+def call_groq_api(
+    messages: List[Dict[str, str]],
+    model: Optional[str] = None,
+    temperature: float = 0.7,
+    response_json: bool = False,
+    api_key: Optional[str] = None,
+) -> Tuple[Optional[str], Dict[str, Any]]:
+    """
+    Call Groq Cloud REST API directly using requests.
+    Zero heavy SDK dependencies, works across all Python versions.
+    """
+    import requests
+    key = api_key or get_groq_api_key()
+    if not key:
+        return None, {"error": "Missing Groq API Key", "elapsed_seconds": 0.0}
+    cfg = load_groq_config()
+    chosen_model = model or cfg.get("model") or DEFAULT_GROQ_MODEL
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    payload: Dict[str, Any] = {
+        "model": chosen_model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": 4096,
+    }
+    if response_json:
+        payload["response_format"] = {"type": "json_object"}
+    start_t = time.time()
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=25)
+        elapsed = time.time() - start_t
+        if resp.status_code != 200:
+            err_body = resp.text[:300]
+            logger.warning(f"Groq API returned HTTP {resp.status_code}: {err_body}")
+            return None, {"error": f"HTTP {resp.status_code}: {err_body}", "elapsed_seconds": elapsed}
+        data = resp.json()
+        choices = data.get("choices", [])
+        if not choices:
+            return "", {"elapsed_seconds": elapsed}
+        text = choices[0].get("message", {}).get("content", "")
+        usage = data.get("usage", {})
+        metrics = {
+            "eval_count": usage.get("completion_tokens", 0),
+            "prompt_eval_count": usage.get("prompt_tokens", 0),
+            "eval_duration": 0,
+            "total_duration": 0,
+            "elapsed_seconds": elapsed,
+            "engine": "groq",
+            "model": chosen_model,
+        }
+        return text, metrics
+    except Exception as ex:
+        elapsed = time.time() - start_t
+        logger.warning(f"Groq API call exception: {ex}")
+        return None, {"error": str(ex), "elapsed_seconds": elapsed}
+
+
+def test_groq_connection(api_key: str, model: Optional[str] = None) -> Tuple[bool, str]:
+    """Test Groq API connectivity with a simple ping prompt."""
+    if not api_key or not api_key.strip():
+        return False, "Groq API Key ว่างเปล่า"
+    chosen_model = model or DEFAULT_GROQ_MODEL
+    msgs = [{"role": "user", "content": "Reply with 'OK' only."}]
+    txt, metrics = call_groq_api(messages=msgs, model=chosen_model, api_key=api_key.strip())
+    if txt is not None:
+        elapsed = metrics.get("elapsed_seconds", 0)
+        return True, f"เชื่อมต่อ Groq สำเร็จใน {elapsed:.2f}s! ({chosen_model})"
+    err = metrics.get("error", "Unknown error")
+    if "404" in err or "model_not_found" in err:
+        available = get_groq_available_models(api_key=api_key.strip())
+        if available:
+            return False, f"ไม่พบโมเดล '{chosen_model}' ในบัญชีนี้ โมเดลที่ใช้ได้คือ: {', '.join(available[:4])}"
+    return False, f"เชื่อมต่อไม่สำเร็จ: {err}"
+
 
 
 def call_gemini_api(
@@ -668,7 +839,7 @@ def build_system_prompt_tiers(
         f"DM Role & Narration Guidelines (MANDATORY):\n"
         f"1. You are the Dungeon Master (DM) narrating an epic fantasy adventure entirely in Thai (ภาษาไทย).\n"
         f"2. Always write rich, immersive, multi-paragraph responses (2-3 detailed paragraphs). Describe sensory details (sights, sounds, smells, lighting, weather), NPC personalities/dialogue, and local lore.\n"
-        f"3. NEVER reply with only 1 short sentence or dry summary (e.g. 'ที่นี่มีโรงเตี๊ยมอยู่ครับ'). Make the world feel alive and atmospheric.\n"
+        f"3. NEVER reply with only 1 short sentence or dry summary. Always maintain deep, atmospheric storytelling with rich environmental descriptions and active NPC roleplay.\n"
         f"4. In non-combat exploration scenes, always conclude your narration by presenting clear points of interest, sensory clues, or leading questions to guide the player on where they can go or what they can interact with next. Never leave the player stranded without directions."
     )
 
@@ -931,6 +1102,128 @@ def extract_and_strip_suggestions(raw_text: str) -> Tuple[str, List[str]]:
     return clean_narrative, cleaned_suggestions
 
 
+SINGLE_PASS_DIRECTIVE = (
+    "\n\n[Action Suggestions & State Updates Directive / คำสั่งระบบปิดท้าย]\n"
+    "In exploration scenes (out of combat), guide the player by concluding with clear points of interest or questions about their next move.\n"
+    "คำสั่งสำคัญ: หลังจากบรรยายเนื้อเรื่องภาษาไทย 3-4 ย่อหน้าอย่างละเอียดเสร็จแล้ว ในบรรทัดล่างสุดให้ปิดท้ายคำตอบด้วยบล็อก JSON เสมอ (output exactly one trailing JSON block at the very end):\n"
+    "```json\n"
+    "{\n"
+    '  "suggestions": ["<action 1 in Thai>", "<action 2 in Thai>", "<action 3 in Thai>"],\n'
+    '  "state_updates": {\n'
+    '    "hp_change": null,\n'
+    '    "add_item_id": null,\n'
+    '    "remove_item_id": null,\n'
+    '    "gold_change": null,\n'
+    '    "move_to_location_id": null\n'
+    '  },\n'
+    '  "requires_roll": null,\n'
+    '  "combat_start": null\n'
+    "}\n"
+    "```\n"
+    "Rules:\n"
+    "- suggestions: exactly 3 short actions (under 8 words each, in Thai). If an action involves a risk, challenge, or skill check (e.g. tracking, sneaking, inspecting clues, climbing, persuading), prefix it with the skill check in brackets like Baldur's Gate 3 (e.g. '[Survival] แกะรอยมอนสเตอร์', '[Perception] สำรวจหาของซ่อน', '[Stealth] ย่องผ่านยาม', '[Persuasion] เจรจาขอต่อรอง').\n"
+    "- If gold was earned or spent, set gold_change to integer (e.g. 5, -2) otherwise null.\n"
+    "- If player moved to another room, set move_to_location_id otherwise null.\n"
+    "- If action requires an ability check, set requires_roll to {\"stat\": \"STR\"|\"DEX\"|\"CON\"|\"INT\"|\"WIS\"|\"CHA\", \"difficulty\": \"easy\"|\"medium\"|\"hard\"} otherwise null.\n"
+    "- If combat started, set combat_start to {\"enemies\": [\"enemy_id\"]} otherwise null.\n"
+    "- Output ONLY the JSON block at the end. Do not add any prose after it."
+)
+
+
+def extract_and_strip_single_pass(
+    raw_text: str,
+    world_state: Optional[Dict[str, Any]] = None,
+    player_state: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, List[str], Optional[Dict[str, Any]]]:
+    """
+    Extract single-pass trailing JSON block, strip all JSON from narrative,
+    and validate extracted state updates.
+    """
+    suggestions: List[str] = []
+    state_updates_res: Optional[Dict[str, Any]] = None
+
+    fence_pattern = r"```(?:json)?\s*(\{[\s\S]*?\})\s*```"
+    matches = list(re.finditer(fence_pattern, raw_text, flags=re.DOTALL))
+
+    json_candidate = None
+    if matches:
+        json_candidate = matches[-1].group(1).strip()
+    else:
+        raw_pattern = r"(\{[\s\r\n]*\"(?:suggestions|state_updates)\"[\s\S]*\})\s*$"
+        m_raw = re.search(raw_pattern, raw_text, flags=re.DOTALL)
+        if m_raw:
+            json_candidate = m_raw.group(1).strip()
+
+    if json_candidate:
+        try:
+            sanitized = re.sub(r",\s*([\]}])", r"\1", json_candidate)
+            data = json.loads(sanitized)
+            if isinstance(data, dict):
+                if "suggestions" in data and isinstance(data["suggestions"], list):
+                    for item in data["suggestions"]:
+                        s = str(item).strip()
+                        if s:
+                            suggestions.append(s)
+                try:
+                    state_updates_res = validation.validate_extraction_output(
+                        data, world_state=world_state, player_state=player_state
+                    )
+                except Exception as val_err:
+                    logger.debug(f"Single-pass validation failed: {val_err}")
+                    state_updates_res = {}
+        except Exception as parse_err:
+            logger.debug(f"Single-pass json parse failed: {parse_err}")
+
+    cleaned_suggestions: List[str] = []
+    for s in suggestions:
+        if len(cleaned_suggestions) < 3 and s not in cleaned_suggestions:
+            cleaned_suggestions.append(s)
+    for default_s in DEFAULT_ACTION_SUGGESTIONS:
+        if len(cleaned_suggestions) >= 3:
+            break
+        if default_s not in cleaned_suggestions:
+            cleaned_suggestions.append(default_s)
+    while len(cleaned_suggestions) < 3:
+        cleaned_suggestions.append(DEFAULT_ACTION_SUGGESTIONS[len(cleaned_suggestions)])
+
+    clean_narrative = raw_text
+    clean_narrative = re.sub(r"```json\s*[\s\S]*?```", "", clean_narrative, flags=re.DOTALL).strip()
+    clean_narrative = re.sub(r"```\s*\{[\s\S]*?\}\s*```", "", clean_narrative, flags=re.DOTALL).strip()
+    clean_narrative = re.sub(r"\{[\s\r\n]*\"(?:suggestions|state_updates)\"[\s\S]*$", "", clean_narrative, flags=re.DOTALL | re.IGNORECASE).strip()
+    clean_narrative = re.sub(r"```(?:json)?\s*$", "", clean_narrative, flags=re.DOTALL).strip()
+
+    return clean_narrative, cleaned_suggestions, state_updates_res
+
+
+def is_passive_exploration_turn(user_input: str, narrative_text: str = "") -> bool:
+    """
+    Determine if a turn is a purely narrative/dialogue/observational interaction
+    that has no mechanical impact on HP, inventory, gold, quests, or combat.
+    Allows single-pass fallback to safely skip the slow 2nd LLM call.
+    """
+    if not user_input:
+        return True
+
+    text = (str(user_input) + " " + (str(narrative_text[:300]) if narrative_text else "")).lower()
+
+    # Active keywords indicating mechanical impact
+    active_triggers = [
+        # Combat
+        "โจมตี", "ฟัน", "ยิง", "สู้", "ฆ่า", "ร่ายมนต์", "แทง", "ต่อสู้", "attack", "fight", "cast", "strike", "shoot", "kill",
+        # Economy & Inventory
+        "ซื้อ", "ขาย", "จ่าย", "เช่า", "ขโมย", "ล้วงกระเป๋า", "เก็บ", "หยิบ", "เปิดหีบ", "ค้น", "buy", "sell", "pay", "steal", "loot", "take",
+        # Consumable / Recovery
+        "กิน", "ดื่ม", "ใช้ยา", "พักผ่อน", "นอนพัก", "drink", "eat", "potion", "rest", "sleep",
+        # Navigation between locations
+        "เดินทางไป", "มุ่งหน้าสู่", "ออกจาก", "travel to", "go to", "leave", "enter dungeon", "ลงดันเจี้ยน"
+    ]
+    for trigger in active_triggers:
+        if trigger in text:
+            return False
+    return True
+
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # NARRATIVE CALL (Spec Section 12a / Part 11a)
 # ════════════════════════════════════════════════════════════════════════════════
@@ -945,6 +1238,7 @@ def generate_narrative_response(
     roll_result: Optional[str] = None,
     round_result: Optional[str] = None,
     include_suggestions: bool = True,
+    single_pass: bool = False,
     model: str = DEFAULT_MODEL,
     num_ctx: int = DEFAULT_NUM_CTX,
     client: Optional[Any] = None,
@@ -964,12 +1258,13 @@ def generate_narrative_response(
       roll_result: system roll injection block (e.g. '[System: Roll Result] ...').
       round_result: system combat round narration block (e.g. '[System: Round Result] ...').
       include_suggestions: whether to request action suggestions (default True).
+      single_pass: whether to request both suggestions and state updates in a single LLM call.
       model: Ollama model name (default llama3).
       num_ctx: explicit context window size.
       client: optional mock/custom Ollama client for unit tests.
 
     Returns:
-      Dict with 'narrative', 'metrics', 'token_costs', 'dropped_tiers', 'suggestions'.
+      Dict with 'narrative', 'metrics', 'token_costs', 'dropped_tiers', 'suggestions', 'single_pass_updates'.
     """
     system_prompt, tier_costs, dropped_logs = assemble_system_prompt(
         player_state=player_state,
@@ -989,7 +1284,9 @@ def generate_narrative_response(
         content_parts.append(user_input.strip())
 
     user_content = "\n\n".join(content_parts) if content_parts else "The scene continues."
-    if include_suggestions:
+    if single_pass:
+        user_content += SINGLE_PASS_DIRECTIVE
+    elif include_suggestions:
         user_content += SUGGESTIONS_DIRECTIVE
 
     # Build Ollama message payload: system prompt + 6-turn history window + current user turn
@@ -1014,6 +1311,38 @@ def generate_narrative_response(
                 "total_duration": response.get("total_duration", 0),
                 "elapsed_seconds": time.time() - start_t,
             }
+        elif get_active_engine() == "groq" and get_groq_api_key():
+            groq_messages = [{"role": "system", "content": system_prompt}]
+            for h in format_llm_history(history, max_turns=12):
+                groq_messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
+            groq_messages.append({"role": "user", "content": user_content})
+
+            groq_cfg = load_groq_config()
+            groq_available = get_groq_available_models()
+            if model and model in groq_available:
+                groq_m = model
+            else:
+                groq_m = groq_cfg.get("model") or DEFAULT_GROQ_MODEL
+            g_text, g_metrics = call_groq_api(
+                messages=groq_messages,
+                model=groq_m,
+                temperature=0.7,
+            )
+            if g_text is not None:
+                raw_text = g_text
+                metrics = g_metrics
+            else:
+                logger.warning(f"Groq API call failed ({g_metrics.get('error')}). Falling back to local Ollama...")
+                import ollama  # type: ignore
+                response = ollama.chat(model=effective_model, messages=messages, options=options)
+                raw_text = response.get("message", {}).get("content", "")
+                metrics = {
+                    "eval_count": response.get("eval_count", 0),
+                    "prompt_eval_count": response.get("prompt_eval_count", 0),
+                    "eval_duration": response.get("eval_duration", 0),
+                    "total_duration": response.get("total_duration", 0),
+                    "elapsed_seconds": time.time() - start_t,
+                }
         elif get_active_engine() == "gemini" and get_gemini_api_key():
             gemini_contents = []
             for h in format_llm_history(history, max_turns=12):
@@ -1054,7 +1383,13 @@ def generate_narrative_response(
             }
 
         elapsed = time.time() - start_t
-        clean_narrative, suggestions = extract_and_strip_suggestions(raw_text)
+        if single_pass:
+            clean_narrative, suggestions, single_pass_updates = extract_and_strip_single_pass(
+                raw_text, world_state=world_state, player_state=player_state
+            )
+        else:
+            clean_narrative, suggestions = extract_and_strip_suggestions(raw_text)
+            single_pass_updates = None
 
         logger.info(
             f"Narrative response complete in {elapsed:.2f}s "
@@ -1068,6 +1403,7 @@ def generate_narrative_response(
             "token_costs": tier_costs,
             "dropped_tiers": dropped_logs,
             "suggestions": suggestions,
+            "single_pass_updates": single_pass_updates,
         }
 
     except Exception as e:
@@ -1181,6 +1517,33 @@ def extract_state_updates(
                     "engine": "client",
                 }
                 content = resp.get("message", {}).get("content", "")
+            elif not force_ollama and get_active_engine() == "groq" and get_groq_api_key():
+                groq_cfg = load_groq_config()
+                groq_available = get_groq_available_models()
+                if model and model in groq_available:
+                    groq_m = model
+                else:
+                    groq_m = groq_cfg.get("model") or DEFAULT_GROQ_MODEL
+                g_text, g_metrics = call_groq_api(
+                    messages=msgs,
+                    model=groq_m,
+                    temperature=0.1,
+                    response_json=True,
+                )
+                m = g_metrics or {}
+                if g_text is not None:
+                    content = g_text
+                else:
+                    import ollama  # type: ignore
+                    resp = ollama.chat(model=effective_model, messages=msgs, format="json", options=options)
+                    m = {
+                        "eval_count": resp.get("eval_count", 0),
+                        "prompt_eval_count": resp.get("prompt_eval_count", 0),
+                        "eval_duration": resp.get("eval_duration", 0),
+                        "total_duration": resp.get("total_duration", 0),
+                        "engine": "ollama",
+                    }
+                    content = resp.get("message", {}).get("content", "")
             elif not force_ollama and get_active_engine() == "gemini" and get_gemini_api_key():
                 g_prompt = msgs[-1].get("content", "")
                 g_text, g_metrics = call_gemini_api(

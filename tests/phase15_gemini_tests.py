@@ -31,15 +31,26 @@ class TestPhase15GeminiHardening(unittest.TestCase):
         self.test_config_path = os.path.join(os.path.dirname(__file__), "test_gemini_config.json")
         self.orig_config_path = llm_handler.GEMINI_CONFIG_PATH
         llm_handler.GEMINI_CONFIG_PATH = self.test_config_path
+        self.test_groq_path = os.path.join(os.path.dirname(__file__), "test_groq_config.json")
+        self.orig_groq_path = llm_handler.GROQ_CONFIG_PATH
+        llm_handler.GROQ_CONFIG_PATH = self.test_groq_path
         if os.path.exists(self.test_config_path):
             os.remove(self.test_config_path)
+        if os.path.exists(self.test_groq_path):
+            os.remove(self.test_groq_path)
 
     def tearDown(self):
         llm_handler.reset_gemini_state()
         llm_handler.GEMINI_CONFIG_PATH = self.orig_config_path
+        llm_handler.GROQ_CONFIG_PATH = self.orig_groq_path
         if os.path.exists(self.test_config_path):
             try:
                 os.remove(self.test_config_path)
+            except Exception:
+                pass
+        if os.path.exists(self.test_groq_path):
+            try:
+                os.remove(self.test_groq_path)
             except Exception:
                 pass
 
