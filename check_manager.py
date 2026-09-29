@@ -157,12 +157,14 @@ def detect_action_skill_check(
             info = SKILL_MAP.get(skill_id, {"stat": "WIS", "name": skill_id.title(), "thai": skill_id})
             return _build_check_spec(skill_id, info, "medium", cleaned_action, player_state)
 
-    # 2. Check exclusion patterns (casual dialogue, pure movement, shopping)
-    # But only if no specific skill keywords are present
-    has_skill_keyword = False
+    # 2. Check exclusion patterns (casual dialogue, pure movement, shopping, resting)
+    for ex_pat in EXCLUSION_RULES:
+        if re.search(ex_pat, raw_text, re.IGNORECASE):
+            return None
+
+    # 3. Keyword inference loop for natural language actions
     for pat, skill_id, diff in KEYWORD_RULES:
         if re.search(pat, raw_text, re.IGNORECASE):
-            has_skill_keyword = True
             info = SKILL_MAP.get(skill_id, {"stat": "WIS", "name": skill_id.title(), "thai": skill_id})
             return _build_check_spec(skill_id, info, diff, raw_text, player_state)
 

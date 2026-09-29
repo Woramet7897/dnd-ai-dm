@@ -67,6 +67,25 @@ class TestCheckManager(unittest.TestCase):
             res = check_manager.detect_action_skill_check(a, self.player)
             self.assertIsNone(res, f"Action '{a}' should not require a check.")
 
+    def test_exclusion_rules_block_casual_exploration(self):
+        """Verify that casual exploration/walking phrases containing search words are excluded."""
+        casual_actions = [
+            "เดินสำรวจรอบเมืองเล่นๆ",
+            "เดินไปมองหาทางออกจากห้อง",
+            "มุ่งหน้าไปสอดส่องรอบค่าย เผื่อเจออะไร",
+        ]
+        for a in casual_actions:
+            res = check_manager.detect_action_skill_check(a, self.player)
+            self.assertIsNone(res, f"Action '{a}' should be excluded from skill checks.")
+
+    def test_bracket_tag_not_blocked_by_exclusion(self):
+        """Explicit bracketed tags like [Perception] must bypass exclusion rules and trigger checks."""
+        action = "[Perception] มองหาทางออกจากห้อง"
+        res = check_manager.detect_action_skill_check(action, self.player)
+        self.assertIsNotNone(res)
+        self.assertEqual(res["skill"], "perception")
+        self.assertEqual(res["stat"], "WIS")
+
 
 if __name__ == "__main__":
     unittest.main()

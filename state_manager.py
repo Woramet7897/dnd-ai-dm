@@ -1671,6 +1671,19 @@ def _get_spell_catalog() -> Dict[str, Any]:
     return _spell_catalog
 
 
+def get_spell_catalog(world_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Return merged spell catalog containing static spells from spell_catalog.json
+    and dynamic spells from world_state['generated_spells'] if present.
+    """
+    catalog = dict(_get_spell_catalog())
+    if world_state and isinstance(world_state, dict):
+        gen_spells = world_state.get("generated_spells", {})
+        if isinstance(gen_spells, dict):
+            catalog.update(gen_spells)
+    return catalog
+
+
 def resolve_spell(
     spell_id: str,
     world_state: Optional[Dict[str, Any]] = None,

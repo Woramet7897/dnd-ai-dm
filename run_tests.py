@@ -43,6 +43,7 @@ ORDERED_TEST_FILES = [
     "test_dynamic_npcs.py",
     "test_dynamic_events.py",
     "test_dynamic_spells.py",
+    "test_check_manager.py",
 ]
 
 

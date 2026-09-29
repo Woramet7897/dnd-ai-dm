@@ -1053,6 +1053,27 @@ class TestAppIntegrations(unittest.TestCase):
         self.assertIn("boots_of_elvenkind", items)
         self.assertIn("ring_of_protection", items)
 
+    def test_get_display_spell_catalog_includes_generated_spells(self):
+        """Verify dynamic generated spells (e.g. heal) are merged into display spell catalog."""
+        custom_spell_id = "ancient_healing_light"
+        self.world["generated_spells"] = {
+            custom_spell_id: {
+                "name": "Ancient Healing Light",
+                "level": 1,
+                "type": "heal",
+                "effect": {"heal": "2d8+3"},
+                "description": "A radiant ancient light that heals wounds.",
+            }
+        }
+        res_learn = state_manager.learn_spell(custom_spell_id, self.cleric, world_state=self.world)
+        self.assertEqual(res_learn["status"], "learned")
+        self.assertIn(custom_spell_id, self.cleric.get("known_spells", []))
+
+        display_catalog = app.get_display_spell_catalog(self.world)
+        self.assertIn(custom_spell_id, display_catalog)
+        self.assertEqual(display_catalog[custom_spell_id]["type"], "heal")
+        self.assertEqual(display_catalog[custom_spell_id]["name"], "Ancient Healing Light")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -198,6 +198,11 @@ def get_current_active_model() -> str:
         return st.session_state.get("selected_model") or llm_handler.resolve_model()
 
 
+def get_display_spell_catalog(world: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Return merged spell catalog including static spells and world_state generated_spells."""
+    return state_manager.get_spell_catalog(world)
+
+
 def load_game(char_name: str, client: Optional[Any] = None) -> bool:
     """Load character and world state from disk, restoring complete narrative history."""
     try:
@@ -939,7 +944,8 @@ def show_spells_dialog():
 
     if known_spells:
         st.markdown("##### 📖 รายการเวทมนตร์ที่เรียนรู้ (Known Spells)")
-        sp_cat = state_manager._get_spell_catalog()
+        world_for_spells = st.session_state.get("world_state")
+        sp_cat = get_display_spell_catalog(world_for_spells)
         for sp_id in known_spells:
             sp_data = sp_cat.get(sp_id, {})
             sp_name = sp_data.get("name", sp_id.replace("_", " ").title())
@@ -1882,7 +1888,7 @@ def render_playing_view():
             action_type = "⚔️ Weapon Attack"
 
             known_spells = player.get("known_spells", [])
-            sp_catalog = state_manager._get_spell_catalog()
+            sp_catalog = get_display_spell_catalog(world)
             w_avail = player.get("weapon_actions_available", True) and player_c.get("weapon_actions_available", True)
 
             if player_alive and (living_enemies or known_spells):
@@ -2697,7 +2703,7 @@ def render_playing_view():
                     with cols_actions[c_idx]:
                         c_idx += 1
                         with st.popover("✨ Cast Spell"):
-                            sp_cat = state_manager._get_spell_catalog()
+                            sp_cat = get_display_spell_catalog(world)
                             def _fmt_ooc_sp(sid):
                                 sinfo = sp_cat.get(sid, {})
                                 slvl = sinfo.get("level", 0)
