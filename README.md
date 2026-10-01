@@ -17,6 +17,7 @@ An offline, rule-enforced, narrative-rich D&D AI Dungeon Master powered by local
 ├── llm_handler.py             # Tiered prompt construction & Ollama interaction
 ├── memory_manager.py          # ChromaDB episodic RAG memory manager
 ├── paths.py                   # Central directory & file path definitions
+├── rules.py                   # Pure D&D rules, catalogs, & math base layer
 ├── state_manager.py           # Character/world persistence, inventory, & XP
 ├── validation.py              # Whitelist sanitization of LLM extraction output
 ├── data/

@@ -34,27 +34,25 @@ if not logger.handlers:
 # ─── Schema version this module understands ──────────────────────────────────
 SUPPORTED_SCHEMA_VERSION = 4
 
-# ─── Difficulty enum → DC mapping (spec Section 8a / PART 5a) ────────────────
-# The LLM NEVER emits a raw DC. It only emits a difficulty enum string.
-# Python owns the mapping — this is the single authoritative table.
-DIFFICULTY_TO_DC: Dict[str, int] = {
-    "easy":      10,
-    "medium":    13,
-    "hard":      16,
-    "very_hard": 19,
-}
-
-# ─── Skill → governing ability stat (5e standard) ────────────────────────────
-SKILL_TO_STAT: Dict[str, str] = {
-    "Acrobatics": "DEX", "Animal Handling": "WIS", "Arcana": "INT",
-    "Athletics": "STR", "Deception": "CHA", "History": "INT",
-    "Insight": "WIS", "Intimidation": "CHA", "Investigation": "INT",
-    "Medicine": "WIS", "Nature": "INT", "Perception": "WIS",
-    "Performance": "CHA", "Persuasion": "CHA", "Religion": "INT",
-    "Sleight of Hand": "DEX", "Stealth": "DEX", "Survival": "WIS",
-}
-
 import paths
+import rules
+from rules import (
+    DIFFICULTY_TO_DC,
+    STAT_NAMES,
+    SKILL_TO_STAT,
+    CONCENTRATION_DC_FLOOR,
+    _get_item_catalog,
+    _inventory_item_info,
+    _get_shop_catalog,
+    _get_spell_catalog,
+    get_spell_catalog,
+    resolve_item,
+    resolve_spell,
+    get_modifier,
+    is_proficient,
+    _roll_d20,
+    _roll_dice,
+)
 
 # ─── Save directories (per spec Section 3 / 5a) ──────────────────────────────
 SAVES_DIR        = paths.SAVES_DIR
@@ -62,59 +60,14 @@ WORLD_SAVES_DIR  = paths.WORLD_SAVES_DIR
 BACKUP_DIR       = paths.BACKUP_DIR
 MAX_BACKUPS      = 3
 
-# ─── Concentration check DC floor (spec Section 8 / PART 5a) ─────────────────
-CONCENTRATION_DC_FLOOR = 10
-
-# ─── Item Catalog Loader (spec Section 7b) ────────────────────────────────────
+# ─── Catalog Loader & Legacy Aliases ──────────────────────────────────────────
 _CATALOG_DIR = paths.CATALOG_DIR
-_item_catalog: Optional[Dict[str, Any]] = None
-_shop_catalog: Optional[Dict[str, Any]] = None
-
-def _get_item_catalog() -> Dict[str, Any]:
-    global _item_catalog
-    if _item_catalog is None:
-        try:
-            path = os.path.join(_CATALOG_DIR, "item_catalog.json")
-            with open(path, "r", encoding="utf-8") as f:
-                _item_catalog = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to load item_catalog.json: {e}")
-            _item_catalog = {}
-    return _item_catalog
 
 
-def _inventory_item_info(inv_item: Dict[str, Any], catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    Get full item info for an inventory entry.
-    Checks static item catalog first.
-    If not found in catalog, falls back to inv_item.get("definition", {}).
-    If inv_item is already an info dict (or doesn't have 'item_id'), falls back gracefully.
-    """
-    if not isinstance(inv_item, dict):
-        return {}
-    item_id = inv_item.get("item_id")
-    if catalog is None:
-        catalog = _get_item_catalog()
-    if item_id and item_id in catalog:
-        return catalog[item_id]
-    if "definition" in inv_item and isinstance(inv_item["definition"], dict):
-        return inv_item["definition"]
-    if item_id:
-        return catalog.get(item_id, {})
-    return inv_item
-
-
-def _get_shop_catalog() -> Dict[str, Any]:
-    global _shop_catalog
-    if _shop_catalog is None:
-        try:
-            path = os.path.join(_CATALOG_DIR, "shop_catalog.json")
-            with open(path, "r", encoding="utf-8") as f:
-                _shop_catalog = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to load shop_catalog.json: {e}")
-            _shop_catalog = {}
-    return _shop_catalog
+def __getattr__(name: str) -> Any:
+    if name in ("_item_catalog", "_spell_catalog", "_shop_catalog"):
+        return getattr(rules, name)
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -743,59 +696,6 @@ def save_world(character_name: str, world: Dict[str, Any]):
     _atomic_write(_world_save_path(character_name), world)
 
 
-# ════════════════════════════════════════════════════════════════════════════════
-# CORE MATH
-# ════════════════════════════════════════════════════════════════════════════════
-
-def get_modifier(stat_value: int) -> int:
-    """D&D 5e ability modifier: floor((stat - 10) / 2)."""
-    return math.floor((stat_value - 10) / 2)
-
-
-def is_proficient(skill_or_save: str, state: Dict[str, Any]) -> bool:
-    """
-    Return True if the character is proficient in the given skill or saving throw.
-    Checks both proficient_skills and proficient_saves lists in the character state.
-    """
-    skills = state.get("proficient_skills", [])
-    saves  = state.get("proficient_saves", [])
-    target = str(skill_or_save).strip().lower()
-    return (
-        any(target == str(s).strip().lower() for s in skills)
-        or any(target == str(s).strip().lower() for s in saves)
-    )
-
-
-def _roll_d20() -> int:
-    """Roll 1d20. Separate function so tests can monkeypatch it."""
-    return random.randint(1, 20)
-
-
-def _roll_dice(dice_string: str) -> int:
-    """
-    Parse and roll a dice expression like '2d6', '1d8+3', '1d4+2'.
-    Returns total as int.
-    """
-    dice_string = dice_string.strip().lower()
-    bonus = 0
-    if "+" in dice_string:
-        parts = dice_string.split("+", 1)
-        dice_string = parts[0].strip()
-        bonus = int(parts[1].strip())
-    elif "-" in dice_string:
-        parts = dice_string.split("-", 1)
-        dice_string = parts[0].strip()
-        bonus = -int(parts[1].strip())
-
-    if "d" in dice_string:
-        num, die = dice_string.split("d")
-        num = int(num) if num else 1
-        die = int(die)
-        total = sum(random.randint(1, die) for _ in range(num))
-    else:
-        total = int(dice_string)
-
-    return total + bonus
 
 
 # ─── Inspiration Points Constants & System (Module B §1 / Phase 12.1) ─────────
@@ -1689,52 +1589,6 @@ def sell_item(
     logger.debug(f"sell_item: sold '{item_id}' to '{shop_id}' for {gain_info['text']}. Funds now: {format_currency(character_state)}.")
     return True, f"Sold {item_info.get('name', item_id)} for {gain_info['text']}."
 
-_spell_catalog: Optional[Dict[str, Any]] = None
-
-def _get_spell_catalog() -> Dict[str, Any]:
-    global _spell_catalog
-    if _spell_catalog is None:
-        try:
-            path = os.path.join(_CATALOG_DIR, "spell_catalog.json")
-            with open(path, "r", encoding="utf-8") as f:
-                _spell_catalog = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError) as e:
-            logger.error(f"Failed to load spell_catalog.json: {e}")
-            _spell_catalog = {}
-    return _spell_catalog
-
-
-def get_spell_catalog(world_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """
-    Return merged spell catalog containing static spells from spell_catalog.json
-    and dynamic spells from world_state['generated_spells'] if present.
-    """
-    catalog = dict(_get_spell_catalog())
-    if world_state and isinstance(world_state, dict):
-        gen_spells = world_state.get("generated_spells", {})
-        if isinstance(gen_spells, dict):
-            catalog.update(gen_spells)
-    return catalog
-
-
-def resolve_spell(
-    spell_id: str,
-    world_state: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
-    """
-    Single source of truth for resolving spell definitions.
-    Checks static spell_catalog.json first, falls back to world_state["generated_spells"].
-    """
-    catalog = _get_spell_catalog()
-    if spell_id in catalog:
-        return catalog[spell_id]
-
-    if world_state and isinstance(world_state, dict):
-        gen_spells = world_state.get("generated_spells", {})
-        if spell_id in gen_spells:
-            return gen_spells[spell_id]
-
-    return None
 
 
 def learn_spell(
@@ -2188,26 +2042,6 @@ def recruit_companion(companion_data: Dict[str, Any], world_state: Dict[str, Any
     logger.info(f"recruit_companion: '{companion_data.get('name')}' ({cid}) recruited into active party.")
     return {"status": "recruited", "companion": comp_entry}
 
-
-def resolve_item(
-    item_id: str,
-    world_state: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
-    """
-    Spec Section 7c / PART 4a-ii:
-    Single source of truth for resolving item definitions.
-    Checks static item_catalog.json first, falls back to world_state["generated_items"].
-    """
-    catalog = _get_item_catalog()
-    if item_id in catalog:
-        return catalog[item_id]
-
-    if world_state and isinstance(world_state, dict):
-        gen_items = world_state.get("generated_items", {})
-        if item_id in gen_items:
-            return gen_items[item_id]
-
-    return None
 
 
 import uuid

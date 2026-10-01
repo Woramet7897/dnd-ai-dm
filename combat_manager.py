@@ -23,6 +23,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import paths
+from rules import _get_item_catalog, get_modifier, _inventory_item_info
 
 # Catalog directory — central path configuration via paths.py.
 _CATALOG_DIR = paths.CATALOG_DIR
@@ -628,7 +629,6 @@ def _player_attacks(player_state: Dict[str, Any]) -> List[Dict[str, Any]]:
         + item's magic attack_bonus from catalog.
     - Unarmed Strike fallback uses proficiency_bonus + STR mod.
     """
-    from state_manager import _get_item_catalog, get_modifier, _inventory_item_info
     catalog = _get_item_catalog()
 
     stats = player_state.get("stats", {})
