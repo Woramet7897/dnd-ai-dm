@@ -10,7 +10,10 @@ Verifies:
 """
 
 import copy
+import json
 import math
+import os
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -271,6 +274,133 @@ class TestLingeringBugfixes(unittest.TestCase):
         self.assertIn("agree", res["options"])
         self.assertIn("Sitting by the fire", res["statement"])
 
+    def test_camp_dialogue_lore_in_prompt_and_response(self):
+        """Item [1]: Lore returned by memory_manager enters camp dialogue prompt and shapes response."""
+        mock_mem = MagicMock()
+        mock_mem.get_relevant_lore.return_value = [
+            {"text": "Defeated the slumbering wyrm in the deep cavern."}
+        ]
+        mock_client = MagicMock()
+        mock_client.chat.return_value = {
+            "message": {
+                "content": json.dumps({
+                    "statement": "That slumbering wyrm in the cavern was a tough fight.",
+                    "topic": "Wyrm battle",
+                    "options": {
+                        "agree": "We handled it well.",
+                        "disagree": "It was reckless.",
+                        "neutral": "We survived, that's what matters.",
+                    },
+                })
+            }
+        }
+
+        # Camp context: location with camp / rest
+        camp_world = copy.deepcopy(self.world)
+        camp_world["current_location"] = "camp_site"
+
+        res = llm_handler.generate_camp_dialogue(
+            "comp_alive",
+            mock_mem,
+            self.player,
+            camp_world,
+            client=mock_client,
+        )
+
+        self.assertIsNotNone(res)
+        mock_mem.get_relevant_lore.assert_called_once()
+        query_arg = mock_mem.get_relevant_lore.call_args[0][0]
+        self.assertIn("comp_alive", query_arg)
+
+        # Verify prompt contained the exact lore text
+        sent_messages = mock_client.chat.call_args[1]["messages"]
+        prompt_content = sent_messages[0]["content"]
+        self.assertIn("Defeated the slumbering wyrm in the deep cavern.", prompt_content)
+
+        # Verify returned result reflects the lore
+        self.assertIn("slumbering wyrm", res["statement"])
+        self.assertEqual(res["topic"], "Wyrm battle")
+        self.assertEqual(res["options"]["agree"], "We handled it well.")
+
+    def test_switch_to_ollama_preserves_gemini_and_groq_models(self):
+        """Item [3]: Switching active engine to 'ollama' via set_active_engine preserves saved models."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_gemini = os.path.join(tmpdir, "gemini_config.json")
+            tmp_groq = os.path.join(tmpdir, "groq_config.json")
+
+            with open(tmp_gemini, "w", encoding="utf-8") as f:
+                json.dump({"api_key": "gemini_secret_123", "model": "gemini-3.5-flash-lite", "engine": "gemini"}, f)
+            with open(tmp_groq, "w", encoding="utf-8") as f:
+                json.dump({"api_key": "groq_secret_456", "model": "llama-3.3-70b-versatile", "engine": "groq"}, f)
+
+            with patch("llm_handler.GEMINI_CONFIG_PATH", tmp_gemini):
+                with patch("llm_handler.GROQ_CONFIG_PATH", tmp_groq):
+                    # Call set_active_engine("ollama") as done in app.py's "สลับมาใช้ Ollama" button
+                    llm_handler.set_active_engine("ollama")
+
+                    # Verify Gemini config model is intact
+                    with open(tmp_gemini, "r", encoding="utf-8") as f:
+                        gem_cfg = json.load(f)
+                    self.assertEqual(gem_cfg.get("model"), "gemini-3.5-flash-lite")
+                    self.assertEqual(gem_cfg.get("api_key"), "gemini_secret_123")
+                    self.assertEqual(gem_cfg.get("engine"), "ollama")
+
+                    # Verify Groq config model is intact
+                    with open(tmp_groq, "r", encoding="utf-8") as f:
+                        grq_cfg = json.load(f)
+                    self.assertEqual(grq_cfg.get("model"), "llama-3.3-70b-versatile")
+                    self.assertEqual(grq_cfg.get("api_key"), "groq_secret_456")
+                    self.assertEqual(grq_cfg.get("engine"), "ollama")
+
+    def test_dynamic_item_definition_persistence_and_recomputed_stats(self):
+        """Item [4]: Dynamic item definition persists across save_character -> load_character,
+        preserving recomputed AC and combat_manager._player_attacks identical before and after save/load."""
+        # Equip dynamic sword and dynamic shield to player
+        state_manager.apply_state_updates({"add_item_id": "gen_sword_1"}, self.player, world_state=self.world)
+        state_manager.apply_state_updates({"add_item_id": "gen_shield_1"}, self.player, world_state=self.world)
+        ok1, _ = state_manager.equip_item("gen_sword_1", self.player, self.world)
+        ok2, _ = state_manager.equip_item("gen_shield_1", self.player, self.world)
+        self.assertTrue(ok1 and ok2)
+
+        # Record pre-save stats
+        pre_ac = self.player["ac"]
+        pre_attacks = combat_manager._player_attacks(self.player)
+
+        # Ensure schema_version is present for load_character validation
+        self.player["schema_version"] = state_manager.SUPPORTED_SCHEMA_VERSION
+
+        with tempfile.TemporaryDirectory() as tmp_saves:
+            with patch("state_manager.SAVES_DIR", tmp_saves):
+                with patch("state_manager.BACKUP_DIR", os.path.join(tmp_saves, "backups")):
+                    # Save character
+                    state_manager.save_character(self.player["name"], self.player)
+
+                    # Load character from disk
+                    loaded_player = state_manager.load_character(self.player["name"])
+
+                    # 1. Definition must survive in inventory items
+                    sword_entry = next((i for i in loaded_player["inventory"] if i["item_id"] == "gen_sword_1"), None)
+                    shield_entry = next((i for i in loaded_player["inventory"] if i["item_id"] == "gen_shield_1"), None)
+                    self.assertIsNotNone(sword_entry)
+                    self.assertIsNotNone(shield_entry)
+                    self.assertIn("definition", sword_entry)
+                    self.assertIn("definition", shield_entry)
+                    self.assertEqual(sword_entry["definition"]["name"], "Flame Rapier")
+                    self.assertEqual(shield_entry["definition"]["name"], "Aegis of Dawn")
+
+                    # 2. Recomputed AC must match exactly
+                    loaded_ac = state_manager._compute_ac(loaded_player)
+                    self.assertEqual(loaded_ac, pre_ac)
+                    self.assertEqual(loaded_player["ac"], pre_ac)
+
+                    # 3. Combat manager player attacks must match exactly
+                    loaded_attacks = combat_manager._player_attacks(loaded_player)
+                    self.assertEqual(loaded_attacks, pre_attacks)
+                    self.assertEqual(len(loaded_attacks), 1)
+                    self.assertEqual(loaded_attacks[0]["name"], "Flame Rapier")
+                    self.assertEqual(loaded_attacks[0]["damage"], "1d8+1")
+
 
 if __name__ == "__main__":
     unittest.main()
+

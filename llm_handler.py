@@ -609,6 +609,21 @@ def call_groq_api(
         return None, {"error": redacted_ex, "error_type": error_type, "elapsed_seconds": elapsed}
 
 
+def is_saved_groq_pair(api_key: Optional[str], model: Optional[str]) -> bool:
+    """
+    Check if the given (api_key, model) matches the currently configured / active Groq pair.
+    Uses get_groq_api_key() (which resolves env vars first, then saved config)
+    and load_groq_config()["model"] (falling back to DEFAULT_GROQ_MODEL).
+    """
+    cfg = load_groq_config()
+    configured_key = (get_groq_api_key() or "").strip()
+    configured_model = (cfg.get("model") or DEFAULT_GROQ_MODEL).strip()
+
+    test_k = (api_key or "").strip()
+    test_m = (model or DEFAULT_GROQ_MODEL).strip()
+    return (test_k == configured_key) and (test_m == configured_model)
+
+
 def test_groq_connection(api_key: str, model: Optional[str] = None) -> Tuple[bool, str]:
     """Test Groq API connectivity with a simple ping prompt."""
     if not api_key or not api_key.strip():
@@ -622,7 +637,8 @@ def test_groq_connection(api_key: str, model: Optional[str] = None) -> Tuple[boo
         bypass_state=True,
     )
     if txt is not None:
-        reset_groq_state()
+        if is_saved_groq_pair(api_key, chosen_model):
+            reset_groq_state()
         elapsed = metrics.get("elapsed_seconds", 0)
         return True, _redact(f"เชื่อมต่อ Groq สำเร็จใน {elapsed:.2f}s! ({chosen_model})", api_key)
     err = metrics.get("error", "Unknown error")

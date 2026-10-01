@@ -174,6 +174,70 @@ class TestGroqIntegration(unittest.TestCase):
                             except Exception:
                                 pass
 
+    def test_2_7_connection_test_unsaved_pair_does_not_reset_session_disabled(self):
+        """Testing an unsaved key/model pair succeeds in ping but does NOT reset session_disabled."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "OK"}}],
+            "usage": {"completion_tokens": 2, "prompt_tokens": 5},
+        }
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("llm_handler.load_groq_config", return_value={"api_key": "gsk_saved_key", "model": "llama-3.3-70b-versatile"}):
+                with patch("requests.post", return_value=mock_resp):
+                    llm_handler._groq_session_disabled = True
+                    llm_handler._groq_disabled_reason = "Test 401"
+
+                    # Case A: Different key
+                    ok, msg = llm_handler.test_groq_connection("gsk_unsaved_key", "llama-3.3-70b-versatile")
+                    self.assertTrue(ok)
+                    self.assertTrue(llm_handler.get_groq_status()["session_disabled"])
+
+                    # Case B: Same key, different model
+                    ok, msg = llm_handler.test_groq_connection("gsk_saved_key", "qwen/qwen3.8-27b")
+                    self.assertTrue(ok)
+                    self.assertTrue(llm_handler.get_groq_status()["session_disabled"])
+
+    def test_2_8_connection_test_saved_pair_resets_session_disabled(self):
+        """Testing the currently saved key/model pair succeeds in ping and DOES reset session_disabled."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "OK"}}],
+            "usage": {"completion_tokens": 2, "prompt_tokens": 5},
+        }
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("llm_handler.load_groq_config", return_value={"api_key": "gsk_saved_key", "model": "llama-3.3-70b-versatile"}):
+                with patch("requests.post", return_value=mock_resp):
+                    llm_handler._groq_session_disabled = True
+                    llm_handler._groq_disabled_reason = "Test 401"
+
+                    ok, msg = llm_handler.test_groq_connection("gsk_saved_key", "llama-3.3-70b-versatile")
+                    self.assertTrue(ok)
+                    self.assertFalse(llm_handler.get_groq_status()["session_disabled"])
+
+    def test_2_9_connection_test_env_key_resets_session_disabled(self):
+        """Testing with key from GROQ_API_KEY env var succeeds and DOES reset session_disabled."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "OK"}}],
+            "usage": {"completion_tokens": 2, "prompt_tokens": 5},
+        }
+
+        with patch.dict(os.environ, {"GROQ_API_KEY": "gsk_env_key"}):
+            with patch("llm_handler.load_groq_config", return_value={"model": "llama-3.3-70b-versatile"}):
+                with patch("requests.post", return_value=mock_resp):
+                    llm_handler._groq_session_disabled = True
+                    llm_handler._groq_disabled_reason = "Test 401"
+
+                    ok, msg = llm_handler.test_groq_connection("gsk_env_key", "llama-3.3-70b-versatile")
+                    self.assertTrue(ok)
+                    self.assertFalse(llm_handler.get_groq_status()["session_disabled"])
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -155,6 +155,32 @@ def init_session_state():
         st.session_state["action_suggestions"] = list(llm_handler.DEFAULT_ACTION_SUGGESTIONS)
     if "active_camp_dialogue" not in st.session_state:
         st.session_state["active_camp_dialogue"] = None
+    if "memory_manager" not in st.session_state:
+        st.session_state["memory_manager"] = None
+
+
+def get_session_memory_manager() -> Optional[Any]:
+    """Retrieve or initialize MemoryManager for current character in session state."""
+    char_name = st.session_state.get("current_char_name")
+    if not char_name:
+        ps = st.session_state.get("player_state")
+        if isinstance(ps, dict):
+            char_name = ps.get("name")
+    if not char_name:
+        return st.session_state.get("memory_manager")
+
+    mm = st.session_state.get("memory_manager")
+    if mm is not None and getattr(mm, "character_name", None) == char_name:
+        return mm
+
+    try:
+        mm = memory_manager.MemoryManager(char_name)
+        st.session_state["memory_manager"] = mm
+        return mm
+    except Exception as ex:
+        logger.warning(f"Failed to initialize MemoryManager for '{char_name}': {ex}")
+        st.session_state["memory_manager"] = None
+        return None
 
 
 def auto_save():
@@ -272,31 +298,32 @@ def load_game(char_name: str, client: Optional[Any] = None) -> bool:
         recap_key = f"recap_generated_{char_name}"
         if not st.session_state.get(recap_key):
             st.session_state[recap_key] = True
-            mm = memory_manager.MemoryManager(char_name)
-            major_ids = mm.get_all_major_lore_ids()
-            if len(major_ids) >= 2:
-                major_col = mm._get_major_collection()
-                docs_res = major_col.get(where={"character": {"$eq": char_name}}, include=["documents"])
-                docs = docs_res.get("documents", [])
-                if len(docs) >= 2:
-                    major_entries = [{"text": d, "type": "major"} for d in docs[-3:]]
-                    with st.spinner("📜 กำลังสรุปเรื่องราวที่ผ่านมา..."):
-                        res = llm_handler.generate_narrative_response(
-                            user_input="Please provide a concise 'Previously, in your story...' recap paragraph summarizing our major past chapters.",
-                            player_state=player,
-                            world_state=world,
-                            lore_entries=major_entries,
-                            model=get_current_active_model(),
-                            client=client,
-                            ollama_model=st.session_state.get("selected_model"),
-                        )
-                    recap_narrative = res.get("narrative", "")
-                    if res.get("suggestions"):
-                        st.session_state["action_suggestions"] = res["suggestions"]
-                    if recap_narrative:
-                        if not recap_narrative.startswith("Previously"):
-                            recap_narrative = f"Previously, in your story...\n{recap_narrative}"
-                        recap_text = f"\n\n📖 **Session Recap:**\n{recap_narrative}"
+            mm = get_session_memory_manager()
+            if mm is not None:
+                major_ids = mm.get_all_major_lore_ids()
+                if len(major_ids) >= 2:
+                    major_col = mm._get_major_collection()
+                    docs_res = major_col.get(where={"character": {"$eq": char_name}}, include=["documents"])
+                    docs = docs_res.get("documents", [])
+                    if len(docs) >= 2:
+                        major_entries = [{"text": d, "type": "major"} for d in docs[-3:]]
+                        with st.spinner("📜 กำลังสรุปเรื่องราวที่ผ่านมา..."):
+                            res = llm_handler.generate_narrative_response(
+                                user_input="Please provide a concise 'Previously, in your story...' recap paragraph summarizing our major past chapters.",
+                                player_state=player,
+                                world_state=world,
+                                lore_entries=major_entries,
+                                model=get_current_active_model(),
+                                client=client,
+                                ollama_model=st.session_state.get("selected_model"),
+                            )
+                        recap_narrative = res.get("narrative", "")
+                        if res.get("suggestions"):
+                            st.session_state["action_suggestions"] = res["suggestions"]
+                        if recap_narrative:
+                            if not recap_narrative.startswith("Previously"):
+                                recap_narrative = f"Previously, in your story...\n{recap_narrative}"
+                            recap_text = f"\n\n📖 **Session Recap:**\n{recap_narrative}"
 
         if not st.session_state["narrative_log"]:
             st.session_state["narrative_log"].append({
@@ -747,7 +774,7 @@ def show_character_dialog():
                 if is_pending:
                     if st.button(f"💬 พูดคุย", key=f"dlg_talk_{cid}", use_container_width=True):
                         mm = get_current_active_model()
-                        mem = st.session_state.get("memory_manager")
+                        mem = get_session_memory_manager()
                         dlg = state_manager.generate_camp_dialogue(
                             cid,
                             mem,
@@ -1367,6 +1394,8 @@ def render_sidebar():
                             ok_conn, msg_conn = llm_handler.test_groq_connection(grq_input, model=chosen_grq_model)
                         if ok_conn:
                             st.success(f"🟢 {msg_conn}")
+                            if not llm_handler.is_saved_groq_pair(grq_input, chosen_grq_model):
+                                st.info("ค่าที่ทดสอบนี้ยังไม่ได้ถูกบันทึก เกมยังใช้ Key/โมเดลเดิมอยู่ — กด '💾 บันทึก Key' เพื่อใช้ค่านี้จริง")
                         else:
                             st.error(f"🔴 {msg_conn}")
 
@@ -1495,10 +1524,7 @@ def render_sidebar():
         else:
             # Local Ollama Mode
             if active_engine in ("gemini", "groq") and st.button("สลับมาใช้ Ollama", key="btn_switch_ollama"):
-                if active_engine == "gemini":
-                    llm_handler.save_gemini_config(api_key=gemini_key, engine="ollama")
-                elif active_engine == "groq":
-                    llm_handler.save_groq_config(api_key=groq_key, engine="ollama")
+                llm_handler.set_active_engine("ollama")
                 st.rerun()
 
             if installed_models:

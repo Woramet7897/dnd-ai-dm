@@ -1130,8 +1130,39 @@ class TestAppIntegrations(unittest.TestCase):
             mock_ext.assert_not_called()
             self.assertEqual(result, mock_single_pass)
 
+    def test_get_session_memory_manager_caching_and_fallback(self):
+        """get_session_memory_manager caches instance in session_state and safely falls back to None on error."""
+        import streamlit as st
+        mock_state = {"current_char_name": "Valeros", "memory_manager": None}
+        with patch.object(st, "session_state", mock_state):
+            with patch("memory_manager.MemoryManager") as mock_mm_cls:
+                mock_instance = MagicMock()
+                mock_instance.character_name = "Valeros"
+                mock_mm_cls.return_value = mock_instance
+
+                # 1. First call initializes and caches
+                mm1 = app.get_session_memory_manager()
+                self.assertIs(mm1, mock_instance)
+                self.assertIs(mock_state["memory_manager"], mock_instance)
+                mock_mm_cls.assert_called_once_with("Valeros")
+
+                # 2. Second call returns cached without re-instantiating
+                mock_mm_cls.reset_mock()
+                mm2 = app.get_session_memory_manager()
+                self.assertIs(mm2, mock_instance)
+                mock_mm_cls.assert_not_called()
+
+            # 3. Exception in MemoryManager safely returns None
+            mock_state["memory_manager"] = None
+            mock_state["current_char_name"] = "OtherChar"
+            with patch("memory_manager.MemoryManager", side_effect=RuntimeError("ChromaDB unavailable")):
+                mm3 = app.get_session_memory_manager()
+                self.assertIsNone(mm3)
+                self.assertIsNone(mock_state["memory_manager"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
