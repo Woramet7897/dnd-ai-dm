@@ -42,8 +42,10 @@ DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "llama3")
 DEFAULT_NUM_CTX = 4096
 MAX_PROMPT_RATIO = 0.70  # 70% of num_ctx for system prompt + history budget
 
+import paths
+
 # ── Cloud Engine: Google Gemini Flash (Free Tier) ─────────────────────────────
-GEMINI_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "data", "gemini_config.json")
+GEMINI_CONFIG_PATH = os.path.join(paths.DATA_DIR, "gemini_config.json")
 DEFAULT_GEMINI_MODEL = "gemini-3.6-flash"
 KNOWN_SHUTDOWN_MODELS = {
     "gemini-2.0-flash",
@@ -54,7 +56,7 @@ KNOWN_SHUTDOWN_MODELS = {
 GEMINI_COOLDOWN_SECONDS = 600  # 10 minutes cooldown on HTTP 429 / RESOURCE_EXHAUSTED
 
 # ── Cloud Engine: Groq LPU (Ultra-Fast Free Tier) ──────────────────────────
-GROQ_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "data", "groq_config.json")
+GROQ_CONFIG_PATH = os.path.join(paths.DATA_DIR, "groq_config.json")
 DEFAULT_GROQ_MODEL = "qwen/qwen3.8-27b"
 GROQ_AVAILABLE_MODELS = [
     "qwen/qwen3.8-27b",

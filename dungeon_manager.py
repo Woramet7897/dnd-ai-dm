@@ -21,9 +21,10 @@ if not logger.handlers:
     _h.setFormatter(logging.Formatter("[DUNGEON] %(levelname)s: %(message)s"))
     logger.addHandler(_h)
 
+import paths
+
 # ─── Catalog path ─────────────────────────────────────────────────────────────
-_DIR = os.path.dirname(os.path.abspath(__file__))
-_DUNGEON_DATA_PATH = os.path.join(_DIR, "dungeon_data.json")
+_DUNGEON_DATA_PATH = os.path.join(paths.CATALOG_DIR, "dungeon_data.json")
 
 # ─── Required fields for a valid room definition ─────────────────────────────
 _REQUIRED_ROOM_FIELDS = {"id", "name", "type", "description", "exits", "is_safe"}

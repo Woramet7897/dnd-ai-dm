@@ -29,11 +29,13 @@ HIT_DIE_AVERAGE: Dict[str, int] = {
     "cleric": 5,    # 1d8  average = 4.5 -> floor+1 = 5
 }
 
+import paths
+
 # ─── Catalog path helpers ─────────────────────────────────────────────────────
-_CATALOG_DIR = os.path.dirname(os.path.abspath(__file__))
+_CATALOG_DIR = paths.CATALOG_DIR
 
 def _load_catalog(filename: str) -> dict:
-    path = os.path.join(_CATALOG_DIR, filename)
+    path = filename if os.path.isabs(filename) else os.path.join(_CATALOG_DIR, filename)
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 

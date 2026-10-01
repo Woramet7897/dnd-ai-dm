@@ -19,9 +19,10 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional
 
-# Catalog directory — resolved relative to this file so loading succeeds
-# regardless of the cwd when the process was launched (spec bug-fix, Phase 4).
-_CATALOG_DIR = os.path.dirname(os.path.abspath(__file__))
+import paths
+
+# Catalog directory — central path configuration via paths.py.
+_CATALOG_DIR = paths.CATALOG_DIR
 
 # dungeon_manager imported lazily below to avoid circular imports at module load
 _dungeon_manager = None

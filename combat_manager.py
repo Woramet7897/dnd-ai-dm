@@ -22,9 +22,10 @@ import random
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-# Catalog directory — resolved relative to this file so loading succeeds
-# regardless of the cwd when the process was launched (spec bug-fix, Phase 4).
-_CATALOG_DIR = os.path.dirname(os.path.abspath(__file__))
+import paths
+
+# Catalog directory — central path configuration via paths.py.
+_CATALOG_DIR = paths.CATALOG_DIR
 
 # ── Logger ────────────────────────────────────────────────────────────────────
 logger = logging.getLogger("combat_manager")

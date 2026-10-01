@@ -902,12 +902,12 @@ finally:
     os.chdir(original_cwd)
     print(f"  Restored cwd to: {os.getcwd()}")
 
-# Confirm _CATALOG_DIR points to the project dir (parent of tests directory)
-project_dir = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-check("Bug 2: combat_manager._CATALOG_DIR == project dir",
-      _cm_fresh._CATALOG_DIR == project_dir)
-check("Bug 2: validation._CATALOG_DIR == project dir",
-      _val_fresh._CATALOG_DIR == project_dir)
+# Confirm _CATALOG_DIR points to the catalog dir (paths.CATALOG_DIR)
+import paths
+check("Bug 2: combat_manager._CATALOG_DIR == catalog dir",
+      _cm_fresh._CATALOG_DIR == paths.CATALOG_DIR)
+check("Bug 2: validation._CATALOG_DIR == catalog dir",
+      _val_fresh._CATALOG_DIR == paths.CATALOG_DIR)
 print()
 
 

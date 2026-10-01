@@ -54,17 +54,19 @@ SKILL_TO_STAT: Dict[str, str] = {
     "Sleight of Hand": "DEX", "Stealth": "DEX", "Survival": "WIS",
 }
 
+import paths
+
 # ─── Save directories (per spec Section 3 / 5a) ──────────────────────────────
-SAVES_DIR        = "saves"
-WORLD_SAVES_DIR  = "world_saves"
-BACKUP_DIR       = "save_backups"
+SAVES_DIR        = paths.SAVES_DIR
+WORLD_SAVES_DIR  = paths.WORLD_SAVES_DIR
+BACKUP_DIR       = paths.BACKUP_DIR
 MAX_BACKUPS      = 3
 
 # ─── Concentration check DC floor (spec Section 8 / PART 5a) ─────────────────
 CONCENTRATION_DC_FLOOR = 10
 
 # ─── Item Catalog Loader (spec Section 7b) ────────────────────────────────────
-_CATALOG_DIR = os.path.dirname(os.path.abspath(__file__))
+_CATALOG_DIR = paths.CATALOG_DIR
 _item_catalog: Optional[Dict[str, Any]] = None
 _shop_catalog: Optional[Dict[str, Any]] = None
 

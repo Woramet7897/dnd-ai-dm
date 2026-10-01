@@ -7,7 +7,7 @@ Its only job is to say **what order to build in** and **how to resume cleanly if
 ---
 
 ## RULE 0 — Read this before doing anything else, every single session
-1. Check if `PROGRESS.md` exists in the project root.
+1. Check if `PROGRESS.md` exists in `docs/` (or project root).
    - **If it doesn't exist:** this is session 1. Create it now using the template in "PROGRESS.md template"
      below, then start Phase 0.
    - **If it exists:** read it. It tells you exactly which phase is done, which is in-progress, and what the

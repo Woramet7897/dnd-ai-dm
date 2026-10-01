@@ -16,10 +16,12 @@ An offline, rule-enforced, narrative-rich D&D AI Dungeon Master powered by local
 ├── dungeon_manager.py         # Room navigation, dungeon graph, & exploration
 ├── llm_handler.py             # Tiered prompt construction & Ollama interaction
 ├── memory_manager.py          # ChromaDB episodic RAG memory manager
+├── paths.py                   # Central directory & file path definitions
 ├── state_manager.py           # Character/world persistence, inventory, & XP
 ├── validation.py              # Whitelist sanitization of LLM extraction output
-├── *_catalog.json             # Static D&D catalogs (items, monsters, spells, shops)
-├── docs/                      # Specification documents & design guides
+├── data/
+│   └── catalogs/              # Static D&D catalogs (items, monsters, spells, shops)
+├── docs/                      # Specification documents, roadmaps, & design guides
 └── saves/                     # Player and world save files
 ```
 
