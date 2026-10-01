@@ -44,6 +44,8 @@ ORDERED_TEST_FILES = [
     "test_dynamic_events.py",
     "test_dynamic_spells.py",
     "test_check_manager.py",
+    "test_groq_integration.py",
+    "test_lingering_bugfixes.py",
 ]
 
 

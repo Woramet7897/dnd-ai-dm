@@ -86,39 +86,39 @@ TAG_ALIASES: Dict[str, str] = {
 # Regex keywords matching actions that should trigger a check
 KEYWORD_RULES = [
     # Survival (WIS)
-    (r"(?:แกะรอย|ตามรอย|ร่องรอย|สะกดรอย|ล่าสัตว์|หาน้ำ|หาอาหาร|เอาชีวิตรอด|track|survival)", "survival", "medium"),
+    (r"(?:แกะรอย|ตามรอย|ร่องรอย|สะกดรอย|ล่าสัตว์|หาน้ำ|หาอาหาร|เอาชีวิตรอด|\btrack\b|\bsurvival\b)", "survival", "medium"),
     # Perception (WIS)
-    (r"(?:มองหา|สอดส่อง|ฟังเสียง|ตรวจตรา|สำรวจรอบ|perception|listen closely)", "perception", "medium"),
+    (r"(?:มองหา|สอดส่อง|ฟังเสียง|ตรวจตรา|สำรวจรอบ|\bperception\b|\blisten closely\b)", "perception", "medium"),
     # Investigation (INT)
-    (r"(?:สืบหา|สืบสวน|ค้นหาเบาะแส|ค้นหาของซ่อน|ตรวจค้นห้อง|ชันสูตร|ตรวจสอบอย่างละเอียด|investigat)", "investigation", "medium"),
+    (r"(?:สืบหา|สืบสวน|ค้นหาเบาะแส|ค้นหาของซ่อน|ตรวจค้นห้อง|ชันสูตร|ตรวจสอบอย่างละเอียด|\binvestigat\w*\b)", "investigation", "medium"),
     # Stealth (DEX)
-    (r"(?:ย่อง|แอบ|ซ่อนตัว|ลอบเข้า|หลบสายตา|ล่องหน|stealth|sneak|hide)", "stealth", "medium"),
+    (r"(?:ย่อง|แอบ|ซ่อนตัว|ลอบเข้า|หลบสายตา|ล่องหน|\bstealth\b|\bsneak\b|\bhide\b)", "stealth", "medium"),
     # Sleight of Hand (DEX)
-    (r"(?:สะเดาะกลอน|ปลดล็อค|ล้วงกระเป๋า|ขโมย|สับเปลี่ยน|pick lock|sleight of hand|pocket)", "sleight_of_hand", "medium"),
+    (r"(?:สะเดาะกลอน|ปลดล็อค|ล้วงกระเป๋า|ขโมย|สับเปลี่ยน|\bpick lock\b|\bsleight of hand\b|\bpocket\b)", "sleight_of_hand", "medium"),
     # Athletics (STR)
-    (r"(?:ปีน|กระโดดข้าม|ว่ายน้ำทวน|พังประตู|งัดประตู|ผลักหิน|ยกรถ|athletics|climb|jump across|force open)", "athletics", "medium"),
+    (r"(?:ปีน|กระโดดข้าม|ว่ายน้ำทวน|พังประตู|งัดประตู|ผลักหิน|ยกรถ|\bathletics\b|\bclimb\b|\bjump across\b|\bforce open\b)", "athletics", "medium"),
     # Acrobatics (DEX)
-    (r"(?:ทรงตัว|ตีลังกา|หลบกับดัก|acrobatic|balance)", "acrobatics", "medium"),
+    (r"(?:ทรงตัว|ตีลังกา|หลบกับดัก|\bacrobatic\b|\bacrobatics\b|\bbalance\b)", "acrobatics", "medium"),
     # Arcana (INT)
-    (r"(?:ตรวจจับเวท|อ่านรูน|พลังเวท|วงแหวนเวท|ศิลาเวท|คัมภีร์เวท|arcana|detect magic)", "arcana", "medium"),
+    (r"(?:ตรวจจับเวท|อ่านรูน|พลังเวท|วงแหวนเวท|ศิลาเวท|คัมภีร์เวท|\barcana\b|\bdetect magic\b)", "arcana", "medium"),
     # History (INT)
-    (r"(?:ประวัติศาสตร์|ตราประจำตระกูล|อักษรโบราณ|ตำนานเก่าแก่|history)", "history", "medium"),
+    (r"(?:ประวัติศาสตร์|ตราประจำตระกูล|อักษรโบราณ|ตำนานเก่าแก่|\bhistory\b)", "history", "medium"),
     # Nature (INT)
-    (r"(?:พืชสมุนไพร|พิษพืช|nature|herbs)", "nature", "medium"),
+    (r"(?:พืชสมุนไพร|พิษพืช|\bnature\b|\bherbs\b)", "nature", "medium"),
     # Religion (INT)
-    (r"(?:แท่นบูชา|บทสวด|สัญลักษณ์เทพ|รูปปั้นบูชา|religion|altar)", "religion", "medium"),
+    (r"(?:แท่นบูชา|บทสวด|สัญลักษณ์เทพ|รูปปั้นบูชา|\breligion\b|\baltar\b)", "religion", "medium"),
     # Insight (WIS)
-    (r"(?:จับโกหก|อ่านสีหน้า|สังเกตท่าที|หยั่งรู้|insight)", "insight", "medium"),
+    (r"(?:จับโกหก|อ่านสีหน้า|สังเกตท่าที|หยั่งรู้|\binsight\b)", "insight", "medium"),
     # Medicine (WIS)
-    (r"(?:รักษาแผล|ปฐมพยาบาล|ดูอาการบาดเจ็บ|ตรวจพิษ|medicine|first aid)", "medicine", "medium"),
+    (r"(?:รักษาแผล|ปฐมพยาบาล|ดูอาการบาดเจ็บ|ตรวจพิษ|\bmedicine\b|\bfirst aid\b)", "medicine", "medium"),
     # Animal Handling (WIS)
-    (r"(?:ปลอบสัตว์|ลูบหัวสัตว์|ทำให้ม้าสงบ|animal handling)", "animal_handling", "medium"),
+    (r"(?:ปลอบสัตว์|ลูบหัวสัตว์|ทำให้ม้าสงบ|\banimal handling\b)", "animal_handling", "medium"),
     # Persuasion (CHA)
-    (r"(?:เกลี้ยกล่อม|เจรจา|ขอร้อง|โน้มน้าวใจ|ขอความเห็นใจ|ต่อรองราคา|persua)", "persuasion", "medium"),
+    (r"(?:เกลี้ยกล่อม|เจรจา|ขอร้อง|โน้มน้าวใจ|ขอความเห็นใจ|ต่อรองราคา|\bpersua\w*\b)", "persuasion", "medium"),
     # Deception (CHA)
-    (r"(?:โกหก|ตบตา|หลอกว่า|เสแสร้ง|แกล้งทำเป็น|ปลอมตัว|deceiv|lie)", "deception", "medium"),
+    (r"(?:โกหก|ตบตา|หลอกว่า|เสแสร้ง|แกล้งทำเป็น|ปลอมตัว|\bdeceiv\w*\b|\blie\b)", "deception", "medium"),
     # Intimidation (CHA)
-    (r"(?:ข่มขู่|คุกคาม|ตะคอกใส่|ชักดาบขู่|บีบบังคับ|intimidat|threaten)", "intimidation", "medium"),
+    (r"(?:ข่มขู่|คุกคาม|ตะคอกใส่|ชักดาบขู่|บีบบังคับ|\bintimidat\w*\b|\bthreaten\b)", "intimidation", "medium"),
 ]
 
 # Exclusion regex for purely informational or everyday actions
@@ -157,14 +157,21 @@ def detect_action_skill_check(
             info = SKILL_MAP.get(skill_id, {"stat": "WIS", "name": skill_id.title(), "thai": skill_id})
             return _build_check_spec(skill_id, info, "medium", cleaned_action, player_state)
 
-    # 2. Check exclusion patterns (casual dialogue, pure movement, shopping, resting)
+    # 2. Check prioritized covert / active intent keywords first (stealth)
+    # Even if preceded by casual movement like "เดินไปแอบฟังที่ประตู" or rest like "พักอยู่หลังหินแล้วแอบดูยาม"
+    stealth_pat = r"(?:ย่อง|แอบ|ซ่อนตัว|ลอบเข้า|หลบสายตา|ล่องหน|\bstealth\b|\bsneak\b|\bhide\b)"
+    if re.search(stealth_pat, raw_text, re.IGNORECASE):
+        info = SKILL_MAP.get("stealth", {"stat": "DEX", "name": "Stealth", "thai": "ย่องเบา/ซ่อนตัว"})
+        return _build_check_spec("stealth", info, "medium", raw_text, player_state)
+
+    # 3. Check exclusion patterns (casual dialogue, pure movement, shopping, resting)
     for ex_pat in EXCLUSION_RULES:
         if re.search(ex_pat, raw_text, re.IGNORECASE):
             return None
 
-    # 3. Keyword inference loop for natural language actions
+    # 4. Keyword inference loop for all other natural language actions
     for pat, skill_id, diff in KEYWORD_RULES:
-        if re.search(pat, raw_text, re.IGNORECASE):
+        if skill_id != "stealth" and re.search(pat, raw_text, re.IGNORECASE):
             info = SKILL_MAP.get(skill_id, {"stat": "WIS", "name": skill_id.title(), "thai": skill_id})
             return _build_check_spec(skill_id, info, diff, raw_text, player_state)
 

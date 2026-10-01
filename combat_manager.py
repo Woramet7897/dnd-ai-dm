@@ -562,7 +562,14 @@ def start_combat(
 
     # ── Build companion combatants ────────────────────────────────────────────
     companions: List[Dict[str, Any]] = []
-    for comp in (companion_states or []):
+    target_comps = companion_states
+    if target_comps is None:
+        target_comps = [
+            c for c in (world_state.get("party", {}).get("companions", []) if isinstance(world_state, dict) else [])
+            if isinstance(c, dict) and c.get("hp", {}).get("current", 0) > 0
+        ]
+
+    for comp in target_comps:
         comp.setdefault("side", "player")
         comp.setdefault("active_conditions", [])
         comp.setdefault("initiative", None)
@@ -620,7 +627,7 @@ def _player_attacks(player_state: Dict[str, Any]) -> List[Dict[str, Any]]:
         + item's magic attack_bonus from catalog.
     - Unarmed Strike fallback uses proficiency_bonus + STR mod.
     """
-    from state_manager import _get_item_catalog, get_modifier
+    from state_manager import _get_item_catalog, get_modifier, _inventory_item_info
     catalog = _get_item_catalog()
 
     stats = player_state.get("stats", {})
@@ -632,7 +639,7 @@ def _player_attacks(player_state: Dict[str, Any]) -> List[Dict[str, Any]]:
     for item in player_state.get("inventory", []):
         if isinstance(item, dict) and item.get("equipped") is True:
             item_id = item.get("item_id")
-            info = catalog.get(item_id, {})
+            info = _inventory_item_info(item, catalog)
             if info.get("type") == "weapon":
                 effects = info.get("effects", {})
                 is_finesse = info.get("finesse", False)

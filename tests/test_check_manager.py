@@ -86,6 +86,26 @@ class TestCheckManager(unittest.TestCase):
         self.assertEqual(res["skill"], "perception")
         self.assertEqual(res["stat"], "WIS")
 
+    def test_stealth_not_swallowed_by_movement_or_rest_exclusions(self):
+        """Intentional covert stealth actions must trigger stealth checks even if preceded by walking or resting."""
+        action1 = "เดินไปแอบฟังที่ประตู"
+        res1 = check_manager.detect_action_skill_check(action1, self.player)
+        self.assertIsNotNone(res1, f"Action '{action1}' should trigger stealth check")
+        self.assertEqual(res1["skill"], "stealth")
+        self.assertEqual(res1["stat"], "DEX")
+
+        action2 = "พักอยู่หลังหินแล้วแอบดูยาม"
+        res2 = check_manager.detect_action_skill_check(action2, self.player)
+        self.assertIsNotNone(res2, f"Action '{action2}' should trigger stealth check")
+        self.assertEqual(res2["skill"], "stealth")
+        self.assertEqual(res2["stat"], "DEX")
+
+    def test_english_word_boundaries_prevent_false_positives(self):
+        """English words containing substring of keywords (e.g. lie in believe/client) must not match."""
+        action = "I believe the client is honest"
+        res = check_manager.detect_action_skill_check(action, self.player)
+        self.assertIsNone(res, "Action 'I believe the client is honest' should not match deception check")
+
 
 if __name__ == "__main__":
     unittest.main()

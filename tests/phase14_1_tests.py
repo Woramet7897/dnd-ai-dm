@@ -258,6 +258,21 @@ class TestPhase14_1ContextualSuggestions(unittest.TestCase):
         self.assertEqual(st.session_state["action_suggestions"], llm_handler.DEFAULT_ACTION_SUGGESTIONS)
         self.assertEqual(len(st.session_state["action_suggestions"]), 3)
 
+    def test_is_passive_exploration_turn_word_boundaries(self):
+        """English keywords must use word boundaries (\b) so substrings like forest, beneath, skill are not matched."""
+        self.assertTrue(llm_handler.is_passive_exploration_turn("I ask about the forest"))
+        self.assertTrue(llm_handler.is_passive_exploration_turn("He stood beneath the ancient statue"))
+        self.assertTrue(llm_handler.is_passive_exploration_turn("A showcase of skill and archery"))
+
+    def test_is_passive_exploration_turn_active_triggers(self):
+        """Active triggers in Thai and English must return False (active turn)."""
+        self.assertFalse(llm_handler.is_passive_exploration_turn("ฉันรับภารกิจจากเจ้าของโรงเตี๊ยม"))
+        self.assertFalse(llm_handler.is_passive_exploration_turn("ตกลงรับข้อเสนอของพ่อค้า"))
+        self.assertFalse(llm_handler.is_passive_exploration_turn("ฉันเรียนรู้คาถาจากม้วนคัมภีร์"))
+        self.assertFalse(llm_handler.is_passive_exploration_turn("ขอให้เธอเข้าร่วมทีมกับฉัน"))
+        self.assertFalse(llm_handler.is_passive_exploration_turn("I accept the quest"))
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -70,17 +70,34 @@ _gemini_session_disabled: bool = False
 _gemini_disabled_reason: Optional[str] = None
 _gemini_last_error_type: Optional[str] = None
 
+# Module-level state for Groq quota cooldown, session error tracking, and model list caching
+_groq_cooldown_until: float = 0.0
+_groq_session_disabled: bool = False
+_groq_disabled_reason: Optional[str] = None
+_groq_last_error_type: Optional[str] = None
+_groq_models_cache: Dict[str, Any] = {"models": [], "expires_at": 0.0, "key": None}
+
 
 def _redact(text: Any, key: Optional[str] = None) -> str:
-    """Redact API key and any URL query parameter containing a key from text."""
+    """Redact Gemini and Groq API keys and URL query parameters containing keys."""
     if text is None:
         return ""
     s = str(text)
-    active_key = key or get_gemini_api_key()
-    if active_key and str(active_key).strip():
-        s = s.replace(str(active_key).strip(), "[REDACTED_API_KEY]")
-    # Redact URL query parameter patterns like ?key=... or &key=...
+    keys_to_redact = set()
+    if key and str(key).strip():
+        keys_to_redact.add(str(key).strip())
+    gem_key = get_gemini_api_key()
+    if gem_key and str(gem_key).strip():
+        keys_to_redact.add(str(gem_key).strip())
+    groq_key = get_groq_api_key()
+    if groq_key and str(groq_key).strip():
+        keys_to_redact.add(str(groq_key).strip())
+
+    for k in keys_to_redact:
+        s = s.replace(k, "[REDACTED_API_KEY]")
+
     s = re.sub(r"([?&]key=)[^&\s'\"]+", r"\1[REDACTED_API_KEY]", s)
+    s = re.sub(r"(Bearer\s+)[^&\s'\"]+", r"\1[REDACTED_API_KEY]", s)
     return s
 
 
@@ -280,10 +297,83 @@ def load_groq_config() -> Dict[str, Any]:
     return {}
 
 
+def reset_groq_state() -> None:
+    """Reset Groq runtime cooldown and session disabled state (for testing and UI reset)."""
+    global _groq_cooldown_until, _groq_session_disabled, _groq_disabled_reason, _groq_last_error_type
+    _groq_cooldown_until = 0.0
+    _groq_session_disabled = False
+    _groq_disabled_reason = None
+    _groq_last_error_type = None
+
+
+def get_groq_status() -> Dict[str, Any]:
+    """
+    Expose current Groq status for UI and monitoring.
+    Returns dict with keys: engine, cooldown_until, cooldown_seconds_remaining,
+    session_disabled, disabled_reason, last_error_type.
+    """
+    now = time.time()
+    in_cooldown = now < _groq_cooldown_until
+    return {
+        "engine": get_active_engine(),
+        "cooldown_until": _groq_cooldown_until if in_cooldown else None,
+        "cooldown_seconds_remaining": int(_groq_cooldown_until - now) if in_cooldown else 0,
+        "session_disabled": _groq_session_disabled,
+        "disabled_reason": _groq_disabled_reason,
+        "last_error_type": _groq_last_error_type,
+    }
+
+
+def set_active_engine(engine: str) -> None:
+    """
+    Safely switch active engine by updating ONLY the 'engine' field in config files.
+    Preserves api_key, model, and metadata. Does not write environment keys to disk,
+    and does not reset cooldown state.
+    """
+    clean_eng = str(engine).lower().strip()
+
+    # Update groq_config.json
+    try:
+        grq_data: Dict[str, Any] = {}
+        if os.path.exists(GROQ_CONFIG_PATH):
+            with open(GROQ_CONFIG_PATH, "r", encoding="utf-8") as f:
+                parsed = json.load(f)
+                if isinstance(parsed, dict):
+                    grq_data = parsed
+        grq_data["engine"] = clean_eng
+        os.makedirs(os.path.dirname(GROQ_CONFIG_PATH), exist_ok=True)
+        with open(GROQ_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(grq_data, f, indent=2)
+    except Exception as ex:
+        logger.error(f"set_active_engine: failed to update Groq config: {ex}")
+
+    # Update gemini_config.json
+    try:
+        gem_data: Dict[str, Any] = {}
+        if os.path.exists(GEMINI_CONFIG_PATH):
+            with open(GEMINI_CONFIG_PATH, "r", encoding="utf-8") as f:
+                parsed = json.load(f)
+                if isinstance(parsed, dict):
+                    gem_data = parsed
+        gem_data["engine"] = clean_eng
+        os.makedirs(os.path.dirname(GEMINI_CONFIG_PATH), exist_ok=True)
+        with open(GEMINI_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(gem_data, f, indent=2)
+    except Exception as ex:
+        logger.error(f"set_active_engine: failed to update Gemini config: {ex}")
+
+
 def get_groq_available_models(api_key: Optional[str] = None) -> List[str]:
-    """Retrieve list of active text models from Groq API or return default list."""
-    import requests
+    """Retrieve list of active text models from Groq API or return default list (cached for 10 min)."""
+    global _groq_models_cache
+    now = time.time()
     key = api_key or get_groq_api_key()
+
+    if _groq_models_cache.get("models") and now < _groq_models_cache.get("expires_at", 0.0):
+        if not key or _groq_models_cache.get("key") == key:
+            return list(_groq_models_cache["models"])
+
+    import requests
     if key:
         try:
             resp = requests.get(
@@ -298,11 +388,19 @@ def get_groq_available_models(api_key: Optional[str] = None) -> List[str]:
                     if isinstance(m, dict) and "id" in m and not m["id"].startswith("whisper")
                 ]
                 if models:
-                    return sorted(models)
-        except Exception:
-            pass
-    return list(GROQ_AVAILABLE_MODELS)
+                    sorted_models = sorted(models)
+                    _groq_models_cache = {
+                        "models": sorted_models,
+                        "expires_at": now + 600,
+                        "key": key,
+                    }
+                    return sorted_models
+            else:
+                logger.warning(_redact(f"Failed to fetch Groq models (HTTP {resp.status_code}): {resp.text[:200]}", key))
+        except Exception as ex:
+            logger.debug(_redact(f"get_groq_available_models failed: {ex}", key))
 
+    return list(GROQ_AVAILABLE_MODELS)
 
 
 def save_groq_config(
@@ -346,24 +444,36 @@ def get_groq_api_key() -> Optional[str]:
 def get_active_engine() -> str:
     """
     Return active LLM engine: 'groq', 'gemini' or 'ollama'.
-    Falls back to 'ollama' if cloud engines are disabled or missing keys.
+    Priority:
+    1. LLM_ENGINE environment variable (highest override, but falls back to ollama if disabled/cooldown).
+    2. Groq (if configured, key available, and not cooldown/disabled).
+    3. Gemini (if configured, key available, and not cooldown/disabled).
+    4. Ollama (default fallback).
     """
-    groq_cfg = load_groq_config()
-    if groq_cfg.get("engine") == "groq" and get_groq_api_key():
-        return "groq"
-
-    global _gemini_cooldown_until, _gemini_session_disabled
     now = time.time()
-    if _gemini_session_disabled or now < _gemini_cooldown_until:
-        return "ollama"
-
     env_e = os.environ.get("LLM_ENGINE")
     if env_e:
-        return env_e.lower().strip()
+        engine = env_e.lower().strip()
+        if engine == "groq":
+            if not _groq_session_disabled and now >= _groq_cooldown_until:
+                return "groq"
+            return "ollama"
+        elif engine == "gemini":
+            if not _gemini_session_disabled and now >= _gemini_cooldown_until:
+                return "gemini"
+            return "ollama"
+        return engine
+
+    groq_cfg = load_groq_config()
+    if groq_cfg.get("engine") == "groq" and get_groq_api_key():
+        if not _groq_session_disabled and now >= _groq_cooldown_until:
+            return "groq"
 
     cfg = load_gemini_config()
     if cfg.get("engine") == "gemini" and get_gemini_api_key():
-        return "gemini"
+        if not _gemini_session_disabled and now >= _gemini_cooldown_until:
+            return "gemini"
+
     return "ollama"
 
 
@@ -373,15 +483,36 @@ def call_groq_api(
     temperature: float = 0.7,
     response_json: bool = False,
     api_key: Optional[str] = None,
+    bypass_state: bool = False,
 ) -> Tuple[Optional[str], Dict[str, Any]]:
     """
     Call Groq Cloud REST API directly using requests.
     Zero heavy SDK dependencies, works across all Python versions.
+    Includes rate limit cooldown (429) and session disabling (401/403/404).
     """
+    global _groq_cooldown_until, _groq_session_disabled, _groq_disabled_reason, _groq_last_error_type
+    now = time.time()
+
+    if not bypass_state:
+        if _groq_session_disabled:
+            return None, {
+                "error": f"Groq disabled for this session: {_groq_disabled_reason or 'Error'}",
+                "error_type": "disabled",
+                "elapsed_seconds": 0.0,
+            }
+        if now < _groq_cooldown_until:
+            remaining = int(_groq_cooldown_until - now)
+            return None, {
+                "error": f"Groq quota cooldown active ({remaining}s remaining)",
+                "error_type": "cooldown",
+                "elapsed_seconds": 0.0,
+            }
+
     import requests
     key = api_key or get_groq_api_key()
     if not key:
-        return None, {"error": "Missing Groq API Key", "elapsed_seconds": 0.0}
+        return None, {"error": "Missing Groq API Key", "error_type": "auth", "elapsed_seconds": 0.0}
+
     cfg = load_groq_config()
     chosen_model = model or cfg.get("model") or DEFAULT_GROQ_MODEL
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -397,14 +528,56 @@ def call_groq_api(
     }
     if response_json:
         payload["response_format"] = {"type": "json_object"}
+
     start_t = time.time()
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=25)
         elapsed = time.time() - start_t
         if resp.status_code != 200:
-            err_body = resp.text[:300]
-            logger.warning(f"Groq API returned HTTP {resp.status_code}: {err_body}")
-            return None, {"error": f"HTTP {resp.status_code}: {err_body}", "elapsed_seconds": elapsed}
+            resp_text = resp.text or ""
+            resp_text = _redact(resp_text, key)
+            truncated_body = resp_text[:300] + "..." if len(resp_text) > 300 else resp_text
+            err_msg = _redact(f"HTTP {resp.status_code}: {truncated_body}", key)
+
+            if resp.status_code == 429:
+                error_type = "quota"
+            elif resp.status_code in (401, 403):
+                error_type = "auth"
+            elif resp.status_code == 404 or "model_not_found" in resp_text:
+                error_type = "not_found"
+            elif resp.status_code >= 500:
+                error_type = "server_error"
+            else:
+                error_type = "other"
+
+            if bypass_state:
+                logger.warning(_redact(f"Groq connection test failed ({error_type}, HTTP {resp.status_code}): {truncated_body}", key))
+            else:
+                if error_type == "quota":
+                    retry_header = resp.headers.get("retry-after") or resp.headers.get("Retry-After")
+                    try:
+                        cooldown_secs = int(retry_header) if retry_header else 60
+                    except (ValueError, TypeError):
+                        cooldown_secs = 60
+                    _groq_cooldown_until = time.time() + cooldown_secs
+                    _groq_last_error_type = "quota"
+                    logger.warning(_redact(f"Groq rate limit exceeded (HTTP 429). Cooldown activated for {cooldown_secs}s. Falling back to Ollama.", key))
+                elif error_type == "auth":
+                    _groq_session_disabled = True
+                    _groq_disabled_reason = "Authentication failed (Invalid Groq API key)"
+                    _groq_last_error_type = "auth"
+                    logger.error(_redact(f"Groq authentication failed (HTTP {resp.status_code}): {truncated_body}. Groq disabled for this session.", key))
+                elif error_type == "not_found":
+                    _groq_session_disabled = True
+                    _groq_disabled_reason = f"Model '{chosen_model}' not found (HTTP 404)"
+                    _groq_last_error_type = "not_found"
+                    logger.error(_redact(f"Groq model '{chosen_model}' not found (HTTP 404). Groq disabled for this session.", key))
+                else:
+                    _groq_last_error_type = error_type
+                    logger.error(_redact(f"Groq API returned error: {err_msg}", key))
+
+            return None, {"error": _redact(err_msg, key), "error_type": error_type, "elapsed_seconds": elapsed}
+
         data = resp.json()
         choices = data.get("choices", [])
         if not choices:
@@ -423,8 +596,17 @@ def call_groq_api(
         return text, metrics
     except Exception as ex:
         elapsed = time.time() - start_t
-        logger.warning(f"Groq API call exception: {ex}")
-        return None, {"error": str(ex), "elapsed_seconds": elapsed}
+        redacted_ex = _redact(str(ex), key)
+        if isinstance(ex, requests.exceptions.Timeout):
+            error_type = "timeout"
+            logger.warning(_redact(f"Groq API call timed out after {elapsed:.2f}s. Falling back to Ollama.", key))
+        elif isinstance(ex, requests.exceptions.RequestException):
+            error_type = "network"
+            logger.error(_redact(f"Groq API network error after {elapsed:.2f}s: {redacted_ex}. Falling back to Ollama.", key))
+        else:
+            error_type = "other"
+            logger.error(_redact(f"Groq API call failed after {elapsed:.2f}s: {redacted_ex}", key))
+        return None, {"error": redacted_ex, "error_type": error_type, "elapsed_seconds": elapsed}
 
 
 def test_groq_connection(api_key: str, model: Optional[str] = None) -> Tuple[bool, str]:
@@ -433,16 +615,22 @@ def test_groq_connection(api_key: str, model: Optional[str] = None) -> Tuple[boo
         return False, "Groq API Key ว่างเปล่า"
     chosen_model = model or DEFAULT_GROQ_MODEL
     msgs = [{"role": "user", "content": "Reply with 'OK' only."}]
-    txt, metrics = call_groq_api(messages=msgs, model=chosen_model, api_key=api_key.strip())
+    txt, metrics = call_groq_api(
+        messages=msgs,
+        model=chosen_model,
+        api_key=api_key.strip(),
+        bypass_state=True,
+    )
     if txt is not None:
+        reset_groq_state()
         elapsed = metrics.get("elapsed_seconds", 0)
-        return True, f"เชื่อมต่อ Groq สำเร็จใน {elapsed:.2f}s! ({chosen_model})"
+        return True, _redact(f"เชื่อมต่อ Groq สำเร็จใน {elapsed:.2f}s! ({chosen_model})", api_key)
     err = metrics.get("error", "Unknown error")
     if "404" in err or "model_not_found" in err:
         available = get_groq_available_models(api_key=api_key.strip())
         if available:
-            return False, f"ไม่พบโมเดล '{chosen_model}' ในบัญชีนี้ โมเดลที่ใช้ได้คือ: {', '.join(available[:4])}"
-    return False, f"เชื่อมต่อไม่สำเร็จ: {err}"
+            return False, _redact(f"ไม่พบโมเดล '{chosen_model}' ในบัญชีนี้ โมเดลที่ใช้ได้คือ: {', '.join(available[:4])}", api_key)
+    return False, _redact(f"เชื่อมต่อไม่สำเร็จ: {err}", api_key)
 
 
 
@@ -1206,20 +1394,38 @@ def is_passive_exploration_turn(user_input: str, narrative_text: str = "") -> bo
 
     text = (str(user_input) + " " + (str(narrative_text[:300]) if narrative_text else "")).lower()
 
-    # Active keywords indicating mechanical impact
-    active_triggers = [
+    # Thai active triggers (direct substring matching)
+    thai_active_triggers = [
         # Combat
-        "โจมตี", "ฟัน", "ยิง", "สู้", "ฆ่า", "ร่ายมนต์", "แทง", "ต่อสู้", "attack", "fight", "cast", "strike", "shoot", "kill",
+        "โจมตี", "ฟัน", "ยิง", "สู้", "ฆ่า", "ร่ายมนต์", "แทง", "ต่อสู้",
         # Economy & Inventory
-        "ซื้อ", "ขาย", "จ่าย", "เช่า", "ขโมย", "ล้วงกระเป๋า", "เก็บ", "หยิบ", "เปิดหีบ", "ค้น", "buy", "sell", "pay", "steal", "loot", "take",
+        "ซื้อ", "ขาย", "จ่าย", "เช่า", "ขโมย", "ล้วงกระเป๋า", "เก็บ", "หยิบ", "เปิดหีบ", "ค้น", "มอบ", "ให้", "แลก", "ปล้น",
+        # Quests & Agreements
+        "รับ", "ตกลง", "ภารกิจ", "เควส",
+        # Spells & Scrolls
+        "เรียนรู้", "คาถา", "ม้วนคัมภีร์",
+        # Companions & Recruitment
+        "เข้าร่วม", "จ้าง",
         # Consumable / Recovery
-        "กิน", "ดื่ม", "ใช้ยา", "พักผ่อน", "นอนพัก", "drink", "eat", "potion", "rest", "sleep",
-        # Navigation between locations
-        "เดินทางไป", "มุ่งหน้าสู่", "ออกจาก", "travel to", "go to", "leave", "enter dungeon", "ลงดันเจี้ยน"
+        "กิน", "ดื่ม", "ใช้ยา", "พักผ่อน", "นอนพัก",
+        # Navigation
+        "เดินทางไป", "มุ่งหน้าสู่", "ออกจาก", "ลงดันเจี้ยน",
     ]
-    for trigger in active_triggers:
+    for trigger in thai_active_triggers:
         if trigger in text:
             return False
+
+    # English active keywords (require word boundary \b to prevent matching e.g. forest->rest, beneath->eat, skill->kill)
+    en_pattern = (
+        r"\b(?:attack|fight|cast|strike|shoot|kill|"
+        r"buy|sell|pay|steal|loot|take|give|trade|"
+        r"drink|eat|potion|rest|sleep|"
+        r"accept|quest|learn|join|recruit|hire|"
+        r"travel to|go to|leave|enter dungeon)\b"
+    )
+    if re.search(en_pattern, text):
+        return False
+
     return True
 
 
@@ -1242,29 +1448,12 @@ def generate_narrative_response(
     model: str = DEFAULT_MODEL,
     num_ctx: int = DEFAULT_NUM_CTX,
     client: Optional[Any] = None,
+    ollama_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Generate narrative response from Ollama.
+    Generate narrative response from Ollama or Cloud engines (Groq/Gemini).
     Streams/returns plain text narrative with NO JSON leakage.
     Appends trailing action suggestions block instruction and extracts suggestions.
-
-    Args:
-      user_input: action text typed by the player.
-      player_state: current character save dict.
-      world_state: current world save dict.
-      history: conversation history list.
-      lore_entries: RAG lore results from memory_manager.
-      companions_present: active companions in current room.
-      roll_result: system roll injection block (e.g. '[System: Roll Result] ...').
-      round_result: system combat round narration block (e.g. '[System: Round Result] ...').
-      include_suggestions: whether to request action suggestions (default True).
-      single_pass: whether to request both suggestions and state updates in a single LLM call.
-      model: Ollama model name (default llama3).
-      num_ctx: explicit context window size.
-      client: optional mock/custom Ollama client for unit tests.
-
-    Returns:
-      Dict with 'narrative', 'metrics', 'token_costs', 'dropped_tiers', 'suggestions', 'single_pass_updates'.
     """
     system_prompt, tier_costs, dropped_logs = assemble_system_prompt(
         player_state=player_state,
@@ -1297,7 +1486,8 @@ def generate_narrative_response(
     options = {"num_ctx": num_ctx, "temperature": 0.7}
 
     effective_model = resolve_model(model, client=client)
-    logger.debug(f"Calling Ollama narrative model='{effective_model}', num_ctx={num_ctx}, msg_count={len(messages)}.")
+    effective_fallback_model = resolve_model(ollama_model, client=client) if ollama_model else resolve_model(None, client=client)
+    logger.debug(f"Calling LLM narrative model='{effective_model}', num_ctx={num_ctx}, msg_count={len(messages)}.")
     start_t = time.time()
 
     try:
@@ -1318,8 +1508,8 @@ def generate_narrative_response(
             groq_messages.append({"role": "user", "content": user_content})
 
             groq_cfg = load_groq_config()
-            groq_available = get_groq_available_models()
-            if model and model in groq_available:
+            cached_models = _groq_models_cache.get("models", [])
+            if model and (model in cached_models or model in GROQ_AVAILABLE_MODELS):
                 groq_m = model
             else:
                 groq_m = groq_cfg.get("model") or DEFAULT_GROQ_MODEL
@@ -1332,9 +1522,9 @@ def generate_narrative_response(
                 raw_text = g_text
                 metrics = g_metrics
             else:
-                logger.warning(f"Groq API call failed ({g_metrics.get('error')}). Falling back to local Ollama...")
+                logger.warning(f"Groq API call failed ({g_metrics.get('error')}). Falling back to local Ollama ({effective_fallback_model})...")
                 import ollama  # type: ignore
-                response = ollama.chat(model=effective_model, messages=messages, options=options)
+                response = ollama.chat(model=effective_fallback_model, messages=messages, options=options)
                 raw_text = response.get("message", {}).get("content", "")
                 metrics = {
                     "eval_count": response.get("eval_count", 0),
@@ -1359,9 +1549,9 @@ def generate_narrative_response(
                 raw_text = g_text
                 metrics = g_metrics
             else:
-                logger.warning("Gemini API call failed or timed out. Falling back to local Ollama...")
+                logger.warning(f"Gemini API call failed or timed out. Falling back to local Ollama ({effective_fallback_model})...")
                 import ollama  # type: ignore
-                response = ollama.chat(model=effective_model, messages=messages, options=options)
+                response = ollama.chat(model=effective_fallback_model, messages=messages, options=options)
                 raw_text = response.get("message", {}).get("content", "")
                 metrics = {
                     "eval_count": response.get("eval_count", 0),
@@ -1372,7 +1562,8 @@ def generate_narrative_response(
                 }
         else:
             import ollama  # type: ignore
-            response = ollama.chat(model=effective_model, messages=messages, options=options)
+            ollama_target = effective_fallback_model if (ollama_model or effective_model in KNOWN_SHUTDOWN_MODELS or "gemini" in effective_model or "qwen/" in effective_model) else effective_model
+            response = ollama.chat(model=ollama_target, messages=messages, options=options)
             raw_text = response.get("message", {}).get("content", "")
             metrics = {
                 "eval_count": response.get("eval_count", 0),
@@ -1473,6 +1664,7 @@ def extract_state_updates(
     model: str = DEFAULT_MODEL,
     num_ctx: int = DEFAULT_NUM_CTX,
     client: Optional[Any] = None,
+    ollama_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Perform extraction call to parse JSON state updates from narrative + player action.
@@ -1501,7 +1693,8 @@ def extract_state_updates(
     options = {"num_ctx": num_ctx, "temperature": 0.1}
 
     effective_model = resolve_model(model, client=client)
-    logger.debug(f"Calling Ollama extraction model='{effective_model}', num_ctx={num_ctx}.")
+    effective_fallback_model = resolve_model(ollama_model, client=client) if ollama_model else resolve_model(None, client=client)
+    logger.debug(f"Calling LLM extraction model='{effective_model}', num_ctx={num_ctx}.")
     start_t = time.time()
 
     def do_call(msgs: List[Dict[str, str]], force_ollama: bool = False) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
@@ -1519,8 +1712,8 @@ def extract_state_updates(
                 content = resp.get("message", {}).get("content", "")
             elif not force_ollama and get_active_engine() == "groq" and get_groq_api_key():
                 groq_cfg = load_groq_config()
-                groq_available = get_groq_available_models()
-                if model and model in groq_available:
+                cached_models = _groq_models_cache.get("models", [])
+                if model and (model in cached_models or model in GROQ_AVAILABLE_MODELS):
                     groq_m = model
                 else:
                     groq_m = groq_cfg.get("model") or DEFAULT_GROQ_MODEL
@@ -1535,7 +1728,7 @@ def extract_state_updates(
                     content = g_text
                 else:
                     import ollama  # type: ignore
-                    resp = ollama.chat(model=effective_model, messages=msgs, format="json", options=options)
+                    resp = ollama.chat(model=effective_fallback_model, messages=msgs, format="json", options=options)
                     m = {
                         "eval_count": resp.get("eval_count", 0),
                         "prompt_eval_count": resp.get("prompt_eval_count", 0),
@@ -1556,7 +1749,7 @@ def extract_state_updates(
                     content = g_text
                 else:
                     import ollama  # type: ignore
-                    resp = ollama.chat(model=effective_model, messages=msgs, format="json", options=options)
+                    resp = ollama.chat(model=effective_fallback_model, messages=msgs, format="json", options=options)
                     m = {
                         "eval_count": resp.get("eval_count", 0),
                         "prompt_eval_count": resp.get("prompt_eval_count", 0),
@@ -1567,7 +1760,8 @@ def extract_state_updates(
                     content = resp.get("message", {}).get("content", "")
             else:
                 import ollama  # type: ignore
-                resp = ollama.chat(model=effective_model, messages=msgs, format="json", options=options)
+                ollama_target = effective_fallback_model if (ollama_model or force_ollama or effective_model in KNOWN_SHUTDOWN_MODELS or "gemini" in effective_model or "qwen/" in effective_model) else effective_model
+                resp = ollama.chat(model=ollama_target, messages=msgs, format="json", options=options)
                 m = {
                     "eval_count": resp.get("eval_count", 0),
                     "prompt_eval_count": resp.get("prompt_eval_count", 0),
@@ -1590,13 +1784,6 @@ def extract_state_updates(
     raw_dict, metrics1 = do_call(messages)
 
     # Retry Policy (Spec 13b & Step 3 Hardening):
-    # Stop double-billing quota on retries.
-    # When Gemini is used, response_mime_type="application/json" guarantees structured JSON output
-    # directly from the Gemini API, making malformed JSON syntax exceedingly rare.
-    # If attempt 1 was served by Gemini and still failed to parse valid JSON, calling Gemini a second time
-    # would consume another cloud API request in the same turn (up to 3 calls: narrative + 2 extraction).
-    # To protect the user's daily Gemini free-tier quota from double-billing, we route the retry
-    # to local Ollama (force_ollama=True) or fall back to an empty update {} if Ollama is unreachable.
     if raw_dict is None:
         was_gemini = metrics1.get("engine") == "gemini"
         if was_gemini:
@@ -1623,8 +1810,12 @@ def extract_state_updates(
     )
 
     # Validate raw output through validation.py's validate_extraction_output()
-    cleaned = validation.validate_extraction_output(raw_dict, world_state=world_state, player_state=player_state)
-    return cleaned
+    try:
+        cleaned = validation.validate_extraction_output(raw_dict, world_state=world_state, player_state=player_state)
+        return cleaned
+    except Exception as ex:
+        logger.error(f"validate_extraction_output failed: {ex}")
+        return {}
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1639,6 +1830,8 @@ def generate_camp_dialogue(
     client: Optional[Any] = None,
     model: str = DEFAULT_MODEL,
     num_ctx: int = DEFAULT_NUM_CTX,
+    use_live_llm: Optional[bool] = None,
+    ollama_model: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Spec Module D §2 / Phase 14.2:
@@ -1647,6 +1840,8 @@ def generate_camp_dialogue(
       or mid-dungeon-crawl.
     - Retrieval: Pulls recent get_relevant_lore() results from memory_manager.
     - Prompting: Mock/real LLM prompt built from real get_relevant_lore() output.
+    - Multi-engine routing: routes to Groq, Gemini, or Ollama based on active engine.
+    - Defensive options parsing: guarantees agree, disagree, neutral options exist.
     - Returns companion reaction with 3 options: agree (+5), disagree (-5), neutral (0).
     """
     # 1. Context Gating: mid-combat or mid-dungeon-crawl must NEVER trigger camp dialogue
@@ -1716,7 +1911,7 @@ def generate_camp_dialogue(
         f'    "agree": "<player agreement response>",\n'
         f'    "disagree": "<player disagreement response>",\n'
         f'    "neutral": "<player neutral response>"\n'
-        f"  }}\n"
+        f'  }}\n'
         f"}}"
     )
 
@@ -1724,7 +1919,9 @@ def generate_camp_dialogue(
     options = {"temperature": 0.7, "num_ctx": num_ctx}
 
     effective_model = resolve_model(model, client=client)
+    effective_fallback_model = resolve_model(ollama_model, client=client) if ollama_model else resolve_model(None, client=client)
     parsed_json = None
+
     if client is not None:
         try:
             resp = client.chat(model=effective_model, messages=messages, format="json", options=options)
@@ -1738,25 +1935,96 @@ def generate_camp_dialogue(
                     parsed_json = json.loads(m.group(0))
             except Exception:
                 parsed_json = None
+    elif use_live_llm is False:
+        parsed_json = None
+    else:
+        engine = get_active_engine()
+        if engine == "groq" and get_groq_api_key():
+            groq_cfg = load_groq_config()
+            cached_models = _groq_models_cache.get("models", [])
+            if model and (model in cached_models or model in GROQ_AVAILABLE_MODELS):
+                groq_m = model
+            else:
+                groq_m = groq_cfg.get("model") or DEFAULT_GROQ_MODEL
+            g_text, g_metrics = call_groq_api(
+                messages,
+                model=groq_m,
+                temperature=0.7,
+                response_json=True,
+                api_key=get_groq_api_key(),
+            )
+            if g_text:
+                try:
+                    parsed_json = json.loads(g_text)
+                except Exception:
+                    m = re.search(r"\{[\s\S]*\}", g_text)
+                    if m:
+                        try:
+                            parsed_json = json.loads(m.group(0))
+                        except Exception:
+                            parsed_json = None
+            if parsed_json is None:
+                try:
+                    import ollama
+                    resp = ollama.chat(model=effective_fallback_model, messages=messages, format="json", options=options)
+                    content = resp.get("message", {}).get("content", "")
+                    parsed_json = json.loads(content)
+                except Exception as ex:
+                    logger.debug(f"generate_camp_dialogue: ollama fallback failed: {ex}")
+                    parsed_json = None
 
-    if parsed_json is None and client is None and os.environ.get("OLLAMA_HOST"):
-        try:
-            import ollama
-            resp = ollama.chat(model=effective_model, messages=messages, format="json", options=options)
-            content = resp.get("message", {}).get("content", "")
-            parsed_json = json.loads(content)
-        except Exception as ex:
-            logger.debug(f"generate_camp_dialogue: ollama call failed: {ex}")
-            parsed_json = None
+        elif engine == "gemini" and get_gemini_api_key():
+            cfg = load_gemini_config()
+            gemini_m = model if (model and "gemini" in model) else (cfg.get("model") or DEFAULT_GEMINI_MODEL)
+            gemini_messages = [{"role": "user", "parts": [{"text": camp_prompt}]}]
+            g_text, g_metrics = call_gemini_api(
+                gemini_messages,
+                model=gemini_m,
+                temperature=0.7,
+                response_mime_type="application/json",
+                api_key=get_gemini_api_key(),
+            )
+            if g_text:
+                try:
+                    parsed_json = json.loads(g_text)
+                except Exception:
+                    m = re.search(r"\{[\s\S]*\}", g_text)
+                    if m:
+                        try:
+                            parsed_json = json.loads(m.group(0))
+                        except Exception:
+                            parsed_json = None
+            if parsed_json is None:
+                try:
+                    import ollama
+                    resp = ollama.chat(model=effective_fallback_model, messages=messages, format="json", options=options)
+                    content = resp.get("message", {}).get("content", "")
+                    parsed_json = json.loads(content)
+                except Exception as ex:
+                    logger.debug(f"generate_camp_dialogue: ollama fallback failed: {ex}")
+                    parsed_json = None
+
+        else:
+            try:
+                import ollama
+                ollama_target = effective_fallback_model if (ollama_model or model in KNOWN_SHUTDOWN_MODELS or "gemini" in model or "qwen/" in model) else resolve_model(model)
+                resp = ollama.chat(model=ollama_target, messages=messages, format="json", options=options)
+                content = resp.get("message", {}).get("content", "")
+                parsed_json = json.loads(content)
+            except Exception as ex:
+                logger.debug(f"generate_camp_dialogue: ollama call failed: {ex}")
+                parsed_json = None
 
     # 4. Parse response or apply lore-grounded fallback
     if isinstance(parsed_json, dict) and "statement" in parsed_json:
-        statement = parsed_json.get("statement", f"Resting by the fire brings to mind: {lore_text}")
-        topic = parsed_json.get("topic") or (lore_text[:50] + "..." if len(lore_text) > 50 else lore_text)
-        opts = parsed_json.get("options", {})
-        agree_opt = opts.get("agree", "I agree with you. We made the right call.")
-        disagree_opt = opts.get("disagree", "I disagree. We should have approached that differently.")
-        neutral_opt = opts.get("neutral", "What's done is done. We must look forward.")
+        statement = str(parsed_json.get("statement", "")).strip() or f"Resting by the fire brings to mind: {lore_text}"
+        topic = str(parsed_json.get("topic", "")).strip() or (lore_text[:50] + "..." if len(lore_text) > 50 else lore_text)
+        opts = parsed_json.get("options")
+        if not isinstance(opts, dict):
+            opts = {}
+        agree_opt = str(opts.get("agree", "")).strip() or "I agree with you. We made the right call."
+        disagree_opt = str(opts.get("disagree", "")).strip() or "I disagree. We should have approached that differently."
+        neutral_opt = str(opts.get("neutral", "")).strip() or "What's done is done. We must look forward."
 
         return {
             "companion_id": companion_id,

@@ -13,6 +13,7 @@ Design principles (per spec Section 13b / PART 5b):
 
 import json
 import logging
+import math
 import os
 import re
 import uuid
@@ -63,15 +64,36 @@ PROMPT_INJECTION_PATTERNS: List[re.Pattern] = [
     re.compile(r"new\s+instructions?:?", re.IGNORECASE),
 ]
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Safely convert value to int, handling inf, nan, strings, None without throwing."""
+    if value is None or isinstance(value, bool):
+        return default
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            return default
+        try:
+            return int(value)
+        except (ValueError, OverflowError):
+            return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            f = float(value.strip())
+            if math.isnan(f) or math.isinf(f):
+                return default
+            return int(f)
+        except (ValueError, OverflowError):
+            return default
+    return default
+
+
 def sanitize_text(text: Any, max_len: int = 40, allow_newlines: bool = False) -> str:
     """
     Sanitize LLM-generated string:
     - Enforces string type
-    - Strips HTML tags
-    - Strips URLs (http://, https://)
-    - Strips markdown link syntax [text](url) -> text
-    - Neutralizes known prompt injection phrases
-    - Strips markdown formatting characters (*, _, #, `, ~, >, [, ])
+    - Repeatedly strips zero-width chars, HTML, URLs, markdown syntax,
+      and prompt injections until reaching a fixpoint
     - Strips control characters (and newlines unless allow_newlines=True)
     - Collapses multiple whitespace
     - Clamps to max_len
@@ -80,17 +102,26 @@ def sanitize_text(text: Any, max_len: int = 40, allow_newlines: bool = False) ->
         return ""
 
     s = text
-    # Remove HTML tags
-    s = re.sub(r"<[^>]+>", "", s)
-    # Remove URLs
-    s = re.sub(r"https?://\S+", "", s)
-    # Strip markdown link target syntax
-    s = re.sub(r"\[([^\]]+)\]\([^\)]*\)", r"\1", s)
-    # Neutralize prompt injection phrases
-    for pat in PROMPT_INJECTION_PATTERNS:
-        s = pat.sub("", s)
-    # Remove markdown formatting characters
-    s = re.sub(r"[*_#`~>\[\]\\]", "", s)
+    # Fixpoint loop: strip zero-width, HTML, URLs, inline markdown, and prompt injections
+    for _ in range(10):
+        prev = s
+        # Remove zero-width characters (\u200b, \u200c, \u200d, \ufeff)
+        s = re.sub(r"[\u200b\u200c\u200d\ufeff]", "", s)
+        # Remove HTML tags
+        s = re.sub(r"<[^>]+>", "", s)
+        # Remove URLs
+        s = re.sub(r"https?://\S+", "", s)
+        # Strip markdown link target syntax [text](url) -> text
+        s = re.sub(r"\[([^\]]+)\]\([^\)]*\)", r"\1", s)
+        # Remove inline markdown formatting characters (*, _, #, `, ~, >, \)
+        s = re.sub(r"[*_#`~>\\]", "", s)
+        # Neutralize prompt injection phrases (including [system ...])
+        for pat in PROMPT_INJECTION_PATTERNS:
+            s = pat.sub("", s)
+        # Remove remaining bracket characters
+        s = re.sub(r"[\[\]]", "", s)
+        if s == prev:
+            break
 
     # Strip control characters
     cleaned_chars = []
@@ -259,15 +290,15 @@ def validate_generated_monster(m_data: Any, player_level: int = 1) -> Optional[D
 
     # 7. XP Value
     raw_xp = m_data.get("xp_value", 50)
-    xp_val = int(raw_xp) if isinstance(raw_xp, (int, float)) else 50
+    xp_val = _safe_int(raw_xp, 50)
     if xp_val < 0 or xp_val > bounds["max_xp"]:
         xp_val = min(bounds["max_xp"], max(0, xp_val))
 
     # 8. Gold drop
     raw_gold = m_data.get("gold_drop", {})
     if isinstance(raw_gold, dict):
-        g_min = max(0, min(50, int(raw_gold.get("min", 0))))
-        g_max = max(g_min, min(50, int(raw_gold.get("max", g_min))))
+        g_min = max(0, min(50, _safe_int(raw_gold.get("min", 0), 0)))
+        g_max = max(g_min, min(50, _safe_int(raw_gold.get("max", g_min), g_min)))
     else:
         g_min, g_max = 0, 5
     clean_gold = {"min": g_min, "max": g_max}
@@ -534,8 +565,13 @@ def validate_generated_item(item_data: Any) -> Optional[Dict[str, Any]]:
                 clean_effects["saving_throw_bonus"] = int(st_b)
         elif itype in ("consumable", "food"):
             raw_heal = raw_effects.get("heal")
-            if raw_heal and calculate_average_dice_damage(str(raw_heal)) > 0:
-                clean_effects["heal"] = str(raw_heal).strip().lower()
+            if raw_heal:
+                heal_str = str(raw_heal).strip().lower()
+                avg_h = calculate_average_dice_damage(heal_str)
+                if 0.0 < avg_h <= 20.0:
+                    clean_effects["heal"] = heal_str
+                elif avg_h > 20.0:
+                    clean_effects["heal"] = "1d4+3"
             temp_hp = raw_effects.get("temp_hp")
             if isinstance(temp_hp, (int, float)) and 0 < int(temp_hp) <= 20:
                 clean_effects["temp_hp"] = int(temp_hp)
@@ -1060,6 +1096,18 @@ def validate_extraction_output(
     Returns:
         Cleaned dict ready for apply_state_updates().
     """
+    try:
+        return _validate_extraction_output_inner(raw, world_state=world_state, player_state=player_state)
+    except Exception as ex:
+        logger.error(f"validate_extraction_output failed: {ex}")
+        return {}
+
+
+def _validate_extraction_output_inner(
+    raw: Any,
+    world_state: Optional[Dict] = None,
+    player_state: Optional[Dict] = None,
+) -> Dict:
     if world_state is None:
         world_state = {}
 

@@ -203,6 +203,45 @@ def get_display_spell_catalog(world: Optional[Dict[str, Any]] = None) -> Dict[st
     return state_manager.get_spell_catalog(world)
 
 
+def resolve_turn_extraction(
+    action: str,
+    narrative_text: str,
+    res: Dict[str, Any],
+    player: Dict[str, Any],
+    world: Dict[str, Any],
+    active_model: str,
+    ollama_model: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Determine state updates for a turn.
+    - If is_passive_exploration_turn is True:
+        Uses single_pass_updates from narrative call (if present) to avoid slow 2nd call.
+    - If is_passive_exploration_turn is False (active turn):
+        Always calls full extract_state_updates and uses its result instead of single_pass_updates
+        to ensure quests, recruits, spells, items, and NPCs are fully extracted without double-apply.
+    """
+    if llm_handler.is_passive_exploration_turn(action, narrative_text):
+        if res.get("single_pass_updates") is not None:
+            return res["single_pass_updates"]
+        logger.info("Single-pass JSON omitted on passive exploration turn; safely skipped 2nd LLM call.")
+        return {}
+
+    # Active turn: call full extract_state_updates
+    ext_model = active_model
+    if llm_handler.get_active_engine() == "ollama":
+        installed_m = llm_handler.get_installed_models()
+        if any("qwen2.5:3b" in str(m) for m in installed_m):
+            ext_model = "qwen2.5:3b"
+    return llm_handler.extract_state_updates(
+        narrative_text=narrative_text,
+        user_input=action,
+        world_state=world,
+        player_state=player,
+        model=ext_model,
+        ollama_model=ollama_model,
+    )
+
+
 def load_game(char_name: str, client: Optional[Any] = None) -> bool:
     """Load character and world state from disk, restoring complete narrative history."""
     try:
@@ -212,6 +251,7 @@ def load_game(char_name: str, client: Optional[Any] = None) -> bool:
         st.session_state["player_state"] = player
         st.session_state["world_state"] = world
         st.session_state["current_char_name"] = char_name
+        st.session_state.pop("pending_bg3_check", None)
 
         saved_log = world.get("narrative_log")
         saved_suggs = world.get("action_suggestions")
@@ -248,6 +288,7 @@ def load_game(char_name: str, client: Optional[Any] = None) -> bool:
                             lore_entries=major_entries,
                             model=get_current_active_model(),
                             client=client,
+                            ollama_model=st.session_state.get("selected_model"),
                         )
                     recap_narrative = res.get("narrative", "")
                     if res.get("suggestions"):
@@ -706,7 +747,16 @@ def show_character_dialog():
                 if is_pending:
                     if st.button(f"💬 พูดคุย", key=f"dlg_talk_{cid}", use_container_width=True):
                         mm = get_current_active_model()
-                        dlg = state_manager.generate_camp_dialogue(cid, mm, player, world)
+                        mem = st.session_state.get("memory_manager")
+                        dlg = state_manager.generate_camp_dialogue(
+                            cid,
+                            mem,
+                            player,
+                            world,
+                            model=mm,
+                            use_live_llm=True,
+                            ollama_model=st.session_state.get("selected_model"),
+                        )
                         if dlg:
                             st.session_state["active_camp_dialogue"] = dlg
                             st.rerun()
@@ -1232,27 +1282,24 @@ def render_sidebar():
         target_engine = "groq" if is_groq else ("gemini" if is_gemini else "ollama")
         if target_engine != active_engine:
             if target_engine == "groq" and groq_key:
-                llm_handler.save_groq_config(engine="groq")
-                llm_handler.save_gemini_config(api_key=gemini_key, engine="groq")
+                llm_handler.set_active_engine("groq")
                 active_engine = "groq"
                 st.toast("⚡ สลับมาใช้ Groq Cloud เรียบร้อย")
                 st.rerun()
             elif target_engine == "gemini" and gemini_key:
-                llm_handler.save_gemini_config(api_key=gemini_key, engine="gemini")
-                llm_handler.save_groq_config(engine="gemini")
+                llm_handler.set_active_engine("gemini")
                 active_engine = "gemini"
                 st.toast("⚡ สลับมาใช้ Google Gemini เรียบร้อย")
                 st.rerun()
             elif target_engine == "ollama":
-                llm_handler.save_groq_config(engine="ollama")
-                llm_handler.save_gemini_config(api_key=gemini_key, engine="ollama")
+                llm_handler.set_active_engine("ollama")
                 active_engine = "ollama"
                 st.toast("🏠 สลับมาใช้ Local Ollama เรียบร้อย")
                 st.rerun()
 
         if is_groq:
             st.markdown("##### 🚀 Groq Cloud (LPU Ultra-Fast)")
-            st.caption("เร็ว 1-2 วินาที • โควตาฟรี 14,400 ครั้ง/วัน จาก Groq Cloud • หากเน็ตหลุดจะสลับไปใช้ Ollama อัตโนมัติ")
+            st.caption("เร็ว 1-2 วินาที • ตรวจสอบโควตาและสถานะการใช้งานได้ที่ console.groq.com • หากเน็ตหลุดจะสลับไปใช้ Ollama อัตโนมัติ")
 
             grq_input = st.text_input(
                 "Groq API Key:",
@@ -1323,9 +1370,17 @@ def render_sidebar():
                         else:
                             st.error(f"🔴 {msg_conn}")
 
-            if groq_key:
+            # Groq engine status display
+            grq_status = llm_handler.get_groq_status()
+            if grq_status.get("session_disabled"):
+                st.error(f"⚠️ **สถานะ:** ถูกระงับในเซสชันนี้ ({grq_status.get('disabled_reason', 'Error')})")
+            elif grq_status.get("cooldown_seconds_remaining", 0) > 0:
+                st.warning(f"⏳ **สถานะ:** พักคูลดาวน์โควต้า (HTTP 429) — เหลืออีก {grq_status['cooldown_seconds_remaining']} วินาที")
+            elif groq_key:
                 st.markdown("🟢 **สถานะ:** พร้อมใช้งาน (Groq LPU)")
-            st.markdown("[👉 คลิกที่นี่เพื่อรับ Groq API Key ฟรี](https://console.groq.com/keys)")
+            else:
+                st.markdown("🟡 **สถานะ:** รอใส่ API Key")
+            st.markdown("[👉 ตรวจสอบโควตาและรับ Groq API Key](https://console.groq.com/keys)")
 
         elif is_gemini:
             st.markdown("##### ⚡ Google Gemini Flash")
@@ -2067,6 +2122,7 @@ def render_playing_view():
                         history=hist,
                         round_result=narration_block,
                         model=active_model,
+                        ollama_model=st.session_state.get("selected_model"),
                     )
 
                 narration_text = narrative_res.get("narrative", "")
@@ -2344,17 +2400,17 @@ def render_playing_view():
                                 </div>
                                 <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 14px;">
                                     <div style="font-size: 0.8em; color: #94a3b8;">สแตทโมดิฟายเออร์</div>
-                                    <div style="font-size: 1.1em; font-weight: 600; color: #f1f5f9;">{'+' if bg3_mod >= 0 else ''}{bg3_mod}</div>
+                                    <div style="font-size: 1.1em; font-weight: 600; color: #f1f5f9;">{bg3_mod:+d}</div>
                                 </div>
                                 <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 14px;">
                                     <div style="font-size: 0.8em; color: #94a3b8;">ความชำนาญ (Proficiency)</div>
                                     <div style="font-size: 1.1em; font-weight: 600; color: {'#4ade80' if bg3_is_prof else '#64748b'};">
-                                        {'+' + str(bg3_prof) if bg3_is_prof else 'ไม่มี'}
+                                        {f"{bg3_prof:+d}" if bg3_is_prof else 'ไม่มี'}
                                     </div>
                                 </div>
                                 <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 14px;">
                                     <div style="font-size: 0.8em; color: #94a3b8;">โบนัสรวม</div>
-                                    <div style="font-size: 1.2em; font-weight: 700; color: #fbbf24;">{'+' if bg3_tot_mod >= 0 else ''}{bg3_tot_mod}</div>
+                                    <div style="font-size: 1.2em; font-weight: 700; color: #fbbf24;">{bg3_tot_mod:+d}</div>
                                 </div>
                             </div>
                         </div>
@@ -2393,6 +2449,10 @@ def render_playing_view():
                         raw_die = chk_res["roll"]
                         tot_val = chk_res["total"]
                         dc_val = chk_res["dc"]
+                        chk_mod = chk_res.get("modifier", 0)
+                        chk_prof = chk_res.get("proficiency", 0)
+                        chk_bonus = chk_res.get("bonus", 0)
+                        tot_bonus = chk_mod + chk_prof + chk_bonus
                         is_succ = chk_res["success"]
                         is_crit = chk_res.get("critical", False)
                         is_fumble = chk_res.get("fumble", False)
@@ -2410,7 +2470,7 @@ def render_playing_view():
                         insp_note = " (ใช้แต้ม Inspiration ✨)" if chk_res.get("inspiration_spent") else ""
                         roll_summary_msg = (
                             f"🎲 **[BG3 Check] {bg3_stat} ({bg3_skill}) vs DC {dc_val}**\n\n"
-                            f"ทอยเต๋า d20 ได้ `[{raw_die}]` + โบนัส `+{bg3_tot_mod}` = **`{tot_val}`** vs **DC `{dc_val}`** → **{badge}**{insp_note}"
+                            f"ทอยเต๋า d20 ได้ `[{raw_die}]` + โบนัส `{tot_bonus:+d}` = **`{tot_val}`** vs **DC `{dc_val}`** → **{badge}**{insp_note}"
                         )
 
                         st.session_state["narrative_log"].append({"role": "user", "content": bg3_action})
@@ -2419,7 +2479,7 @@ def render_playing_view():
                         roll_inj = (
                             f"[System: Roll Result — {bg3_stat} ({bg3_skill}) Check vs DC {dc_val}]\n"
                             f"Player attempted action: '{bg3_action}'\n"
-                            f"Roll outcome: Rolled {raw_die} + {bg3_tot_mod} = {tot_val} vs DC {dc_val} -> {badge}.\n"
+                            f"Roll outcome: Rolled {raw_die} + {tot_bonus:+d} = {tot_val} vs DC {dc_val} -> {badge}.\n"
                             f"MANDATORY: The check was a {'SUCCESS' if is_succ else 'FAILURE'}. "
                             f"You MUST narrate the consequence reflecting this {'successful' if is_succ else 'failed'} attempt in rich Thai prose (3-4 paragraphs)."
                         )
@@ -2435,15 +2495,21 @@ def render_playing_view():
                                 model=active_model,
                                 roll_result=roll_inj,
                                 single_pass=True,
+                                ollama_model=st.session_state.get("selected_model"),
                             )
                             narrative_text = res.get("narrative", "")
                             if res.get("suggestions"):
                                 st.session_state["action_suggestions"] = res["suggestions"]
 
-                            if res.get("single_pass_updates") is not None:
-                                ext_res = res["single_pass_updates"]
-                            else:
-                                ext_res = {}
+                            ext_res = resolve_turn_extraction(
+                                action=bg3_action,
+                                narrative_text=narrative_text,
+                                res=res,
+                                player=player,
+                                world=world,
+                                active_model=active_model,
+                                ollama_model=st.session_state.get("selected_model"),
+                            )
 
                             if ext_res:
                                 if "state_updates" in ext_res and ext_res["state_updates"]:
@@ -2521,31 +2587,22 @@ def render_playing_view():
                             history=hist,
                             model=active_model,
                             single_pass=True,
+                            ollama_model=st.session_state.get("selected_model"),
                         )
                         narrative_text = res.get("narrative", "")
                         if res.get("suggestions"):
                             st.session_state["action_suggestions"] = res["suggestions"]
 
-                        # 2. Extraction: Single-Pass skips 2nd LLM call entirely!
-                        if res.get("single_pass_updates") is not None:
-                            ext_res = res["single_pass_updates"]
-                        elif llm_handler.is_passive_exploration_turn(action_to_process, narrative_text):
-                            logger.info("Single-pass JSON omitted on passive exploration turn; safely skipped 2nd LLM call.")
-                            ext_res = {}
-                        else:
-                            # Active mechanical turn fallback: use lightweight model on Ollama if available to avoid freeze
-                            ext_model = active_model
-                            if llm_handler.get_active_engine() == "ollama":
-                                installed_m = llm_handler.get_installed_models()
-                                if any("qwen2.5:3b" in str(m) for m in installed_m):
-                                    ext_model = "qwen2.5:3b"
-                            ext_res = llm_handler.extract_state_updates(
-                                narrative_text=narrative_text,
-                                user_input=action_to_process,
-                                world_state=world,
-                                player_state=player,
-                                model=ext_model,
-                            )
+                        # 2. Extraction: resolve_turn_extraction uses single-pass for passive turns and full extraction for active turns
+                        ext_res = resolve_turn_extraction(
+                            action=action_to_process,
+                            narrative_text=narrative_text,
+                            res=res,
+                            player=player,
+                            world=world,
+                            active_model=active_model,
+                            ollama_model=st.session_state.get("selected_model"),
+                        )
 
                     # 3. Apply state updates and events if present
                     if ext_res:
@@ -2905,8 +2962,9 @@ def render_playing_view():
                                     item_cat = state_manager._get_item_catalog()
                                     for idx, s_item in non_equipped:
                                         s_iid = s_item.get("item_id")
-                                        s_qty = s_item.get("quantity", 1)
-                                        i_info = item_cat.get(s_iid, {})
+                                        i_info = state_manager._inventory_item_info(s_item, item_cat)
+                                        if not i_info and world:
+                                            i_info = world.get("generated_items", {}).get(s_iid, {})
                                         i_name = i_info.get("name", s_iid)
                                         gain_info = state_manager.get_item_sell_breakdown(i_info, s_data.get("buy_multiplier", 0.5))
                                         gain_text = gain_info["text"]

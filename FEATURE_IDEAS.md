@@ -99,6 +99,80 @@ Same code pattern, different catalog.
 
 ---
 
+## 7. Persuasion-based haggling in shops
+
+**Builds on:** `resolve_check(skill="Persuasion")` (already used elsewhere,
+e.g. the pending-inspiration-reroll flow) and `_get_shop_catalog()`
+(Phase — shop system).
+
+Shop prices are currently fixed; there is no negotiation path at all.
+Add a "ต่อรองราคา" (haggle) button before purchase that rolls a Persuasion
+check and maps margin-of-success to a small discount (or markup on a
+fumble, for flavor). No new data model — just a new call site for the
+existing check resolver, feeding its result into the existing price
+calculation at point of sale.
+
+---
+
+## 8. NPCs on a schedule, tied to `game_time`
+
+**Builds on:** `game_time: {day, period}` (already read into system prompt
+Tier 1 every turn) and each room's static `npcs` list in
+`dungeon_data.json`.
+
+NPCs are currently present in their room regardless of time of day. Add an
+optional `npcs_by_period` mapping (or a simple per-NPC `active_periods`
+field) so a shopkeeper isn't there at night, a guard's post changes at
+shift change, and a tavern only fills up in the evening. Reuses the same
+room/NPC schema and the game_time value that's already tracked — no new
+architecture, just a filter applied when a room's NPC list is resolved.
+
+---
+
+## 9. Companion personal quests, unlocked by approval
+
+**Builds on:** `companions_approval` (Phase 14.2, see item 1 in Part 1) and
+`add_quest()` / `quest_log["side"]`, whose collision-safe slug logic
+already exists in `state_manager.py`.
+
+Once a companion's approval crosses a threshold, fire a one-time personal
+side-quest into `quest_log["side"]` via the existing quest-add path (the
+single code path that's allowed to write quest_log — no bypass needed).
+Gives approval tracking a concrete payoff beyond a number going up, and
+reuses two systems that already work independently.
+
+---
+
+## 10. Room traps/hazards, using the existing condition system
+
+**Builds on:** `combat_manager.py`'s 9-condition set (prone, poisoned,
+stunned, restrained, frightened, exhausted, burning, dazed, slowed) and
+`apply_condition_to_state()`, currently only exercised inside combat.
+
+Add an optional static `trap` field to specific rooms (same shape of
+change as item 2's persistent-surface idea in Part 1) so walking into a
+room can require a Perception/Investigation check to notice it and a
+Dexterity check to avoid it, applying one of the existing conditions on a
+failure. No new condition logic needed — just a new entry point into code
+that already exists and is already tested for combat.
+
+---
+
+## 11. A real "rest menu" for short/long rest downtime
+
+**Builds on:** `_maybe_rest_ambush()` (already gates rest with an ambush
+roll) and `cook_meal()` (Phase 12.3).
+
+Resting is currently a single button: time passes, HP recovers, ambush
+check runs. Add a small menu of optional downtime activities during a
+rest — practice (small bonus next encounter), talk with a companion
+(nudges approval), cook a meal (calls the existing `cook_meal()`) — so the
+rest beat becomes a real choice point instead of a pass-through, while
+reusing systems that already work in isolation rather than inventing new
+ones.
+
+---
+
 ## Next step
 
 Pick one (or a few) of the above, and this reviewer will write:
@@ -106,3 +180,4 @@ Pick one (or a few) of the above, and this reviewer will write:
 2. A gated build prompt for the coding AI, in the same format used for
    Phase 11.1 onward — including explicit DoD tests and a note on any
    assumption that needs to be logged as a deviation in `PROGRESS.md`.
+

@@ -81,6 +81,27 @@ def _get_item_catalog() -> Dict[str, Any]:
     return _item_catalog
 
 
+def _inventory_item_info(inv_item: Dict[str, Any], catalog: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Get full item info for an inventory entry.
+    Checks static item catalog first.
+    If not found in catalog, falls back to inv_item.get("definition", {}).
+    If inv_item is already an info dict (or doesn't have 'item_id'), falls back gracefully.
+    """
+    if not isinstance(inv_item, dict):
+        return {}
+    item_id = inv_item.get("item_id")
+    if catalog is None:
+        catalog = _get_item_catalog()
+    if item_id and item_id in catalog:
+        return catalog[item_id]
+    if "definition" in inv_item and isinstance(inv_item["definition"], dict):
+        return inv_item["definition"]
+    if item_id:
+        return catalog.get(item_id, {})
+    return inv_item
+
+
 def _get_shop_catalog() -> Dict[str, Any]:
     global _shop_catalog
     if _shop_catalog is None:
@@ -244,7 +265,7 @@ def _compute_ac(character_state: Dict[str, Any]) -> int:
     for item in inventory:
         if isinstance(item, dict) and item.get("equipped") is True:
             item_id = item.get("item_id")
-            info = catalog.get(item_id, {})
+            info = _inventory_item_info(item, catalog)
             slot = info.get("slot")
             effects = info.get("effects", {})
 
@@ -309,7 +330,7 @@ def get_active_effects(character_state: Dict[str, Any]) -> Dict[str, Any]:
     for item in inventory:
         if isinstance(item, dict) and item.get("equipped") is True:
             item_id = item.get("item_id")
-            info = catalog.get(item_id, {})
+            info = _inventory_item_info(item, catalog)
             effects = dict(info.get("effects", {}))
             if "effects" in item and isinstance(item["effects"], dict):
                 effects.update(item["effects"])
@@ -383,7 +404,7 @@ def equip_item(
         return False, f"Item '{item_id}' not found in inventory."
 
     catalog = _get_item_catalog()
-    item_info = catalog.get(item_id)
+    item_info = _inventory_item_info(target_item, catalog)
     if not item_info and world_state:
         item_info = world_state.get("generated_items", {}).get(item_id)
     if not item_info:
@@ -398,7 +419,7 @@ def equip_item(
         for other_item in inventory:
             if isinstance(other_item, dict) and other_item is not target_item and other_item.get("equipped") is True:
                 other_id = other_item.get("item_id")
-                other_info = catalog.get(other_id, {})
+                other_info = _inventory_item_info(other_item, catalog)
                 if other_info.get("slot") == target_slot:
                     if other_item.get("cannot_unequip") is True:
                         return False, f"Cannot equip '{item_id}': slot '{target_slot}' is occupied by cursed item '{other_id}' which cannot be unequipped."
@@ -568,7 +589,7 @@ def use_consumable(item_id: str, character_state: Dict[str, Any]) -> Tuple[bool,
         return False, f"Item '{item_id}' not found in inventory.", {}
 
     catalog = _get_item_catalog()
-    item_info = catalog.get(item_id)
+    item_info = _inventory_item_info(target_item, catalog)
     if not item_info:
         return False, f"Item '{item_id}' not found in item catalog.", {}
 
@@ -1205,8 +1226,18 @@ def apply_state_updates(updates: Dict[str, Any], state: Dict[str, Any],
         existing = next((i for i in inventory if i.get("item_id") == item_id), None)
         if existing and existing.get("quantity") is not None:
             existing["quantity"] = existing.get("quantity", 1) + 1
+            if "definition" not in existing and world_state and "generated_items" in world_state:
+                gen_def = world_state["generated_items"].get(item_id)
+                if gen_def:
+                    existing["definition"] = copy.deepcopy(gen_def)
         elif not existing:
-            inventory.append({"item_id": item_id, "equipped": False, "quantity": 1})
+            item_entry: Dict[str, Any] = {"item_id": item_id, "equipped": False, "quantity": 1}
+            cat = _get_item_catalog()
+            if item_id not in cat and world_state and "generated_items" in world_state:
+                gen_def = world_state["generated_items"].get(item_id)
+                if gen_def:
+                    item_entry["definition"] = copy.deepcopy(gen_def)
+            inventory.append(item_entry)
 
     # ── Remove item ───────────────────────────────────────────────────────────
     if "remove_item_id" in updates:
@@ -1639,7 +1670,7 @@ def sell_item(
         return False, f"You don't have '{item_id}' to sell."
 
     catalog = _get_item_catalog()
-    item_info = catalog.get(item_id, {})
+    item_info = _inventory_item_info(target_item, catalog)
     buy_mult = shop.get("buy_multiplier", 0.5)
     gain_info = get_item_sell_breakdown(item_info, buy_mult)
 

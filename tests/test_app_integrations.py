@@ -1074,6 +1074,62 @@ class TestAppIntegrations(unittest.TestCase):
         self.assertEqual(display_catalog[custom_spell_id]["type"], "heal")
         self.assertEqual(display_catalog[custom_spell_id]["name"], "Ancient Healing Light")
 
+    def test_active_turn_calls_full_extract_state_updates_even_if_single_pass_given(self):
+        """Active turn (!is_passive) must ignore single_pass_updates and invoke extract_state_updates."""
+        active_action = "ฉันรับภารกิจจากเจ้าของโรงเตี๊ยม"
+        self.assertFalse(llm_handler.is_passive_exploration_turn(active_action))
+
+        mock_single_pass = {"state_updates": {"gold_change": 100}}
+        res = {
+            "narrative": "เจ้าของโรงเตี๊ยมพยักหน้าและมอบหมายงานให้คุณ",
+            "single_pass_updates": mock_single_pass,
+        }
+
+        full_extracted = {
+            "quest_updates": {"new_quest": {"id": "tavern_rat_hunt", "title": "Rat Hunt"}},
+            "state_updates": {"gold_change": 0},
+        }
+
+        with patch("llm_handler.extract_state_updates", return_value=full_extracted) as mock_ext:
+            result = app.resolve_turn_extraction(
+                action=active_action,
+                narrative_text=res["narrative"],
+                res=res,
+                player=self.fighter,
+                world=self.world,
+                active_model="test_model",
+                ollama_model="llama3",
+            )
+            # extract_state_updates must be called
+            mock_ext.assert_called_once()
+            # Result must be the full extraction, NOT single_pass_updates
+            self.assertEqual(result, full_extracted)
+            self.assertIn("quest_updates", result)
+
+    def test_passive_turn_uses_single_pass_updates_without_second_call(self):
+        """Passive turn (is_passive) uses single_pass_updates and does NOT call extract_state_updates."""
+        passive_action = "I ask about the forest"
+        self.assertTrue(llm_handler.is_passive_exploration_turn(passive_action))
+
+        mock_single_pass = {"state_updates": {"hp_change": None}}
+        res = {
+            "narrative": "The elder speaks of the dark woods beyond the ridge.",
+            "single_pass_updates": mock_single_pass,
+        }
+
+        with patch("llm_handler.extract_state_updates") as mock_ext:
+            result = app.resolve_turn_extraction(
+                action=passive_action,
+                narrative_text=res["narrative"],
+                res=res,
+                player=self.fighter,
+                world=self.world,
+                active_model="test_model",
+                ollama_model="llama3",
+            )
+            mock_ext.assert_not_called()
+            self.assertEqual(result, mock_single_pass)
+
 
 if __name__ == "__main__":
     unittest.main()
