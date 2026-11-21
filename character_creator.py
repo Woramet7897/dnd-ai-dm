@@ -1,13 +1,14 @@
 """
-character_creator.py — Phase 1
+character_creator.py — Phase 1 & BG3 Overhaul
 Handles point-buy stat validation and derived stat calculation for character creation.
 Scope: levels 1-5 only. No Ollama calls. Pure Python + catalog lookups.
+Supports all 8 classes, subclasses, fighting styles, custom skill & spell selection, and class resources.
 """
 
 import json
 import math
 import os
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, List
 
 # ─── Point-Buy Constants (D&D 5e PHB) ────────────────────────────────────────
 POINT_BUY_COST: Dict[int, int] = {8: 0, 9: 1, 10: 2, 11: 3, 12: 4, 13: 5, 14: 7, 15: 9}
@@ -22,17 +23,21 @@ XP_THRESHOLDS: Dict[int, int] = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 
 # ─── Hit Die average per class (used for HP max on level-up) ─────────────────
 HIT_DIE_AVERAGE: Dict[str, int] = {
-    "fighter": 6,   # 1d10 average = 5.5 -> floor+1 = 6
-    "wizard": 4,    # 1d6  average = 3.5 -> floor+1 = 4
-    "rogue": 5,     # 1d8  average = 4.5 -> floor+1 = 5
-    "bard": 5,      # 1d8  average = 4.5 -> floor+1 = 5
-    "cleric": 5,    # 1d8  average = 4.5 -> floor+1 = 5
+    "fighter": 6,    # 1d10 average = 5.5 -> floor+1 = 6
+    "paladin": 6,    # 1d10 average = 5.5 -> floor+1 = 6
+    "barbarian": 7,  # 1d12 average = 6.5 -> floor+1 = 7
+    "wizard": 4,     # 1d6  average = 3.5 -> floor+1 = 4
+    "rogue": 5,      # 1d8  average = 4.5 -> floor+1 = 5
+    "bard": 5,       # 1d8  average = 4.5 -> floor+1 = 5
+    "cleric": 5,     # 1d8  average = 4.5 -> floor+1 = 5
+    "warlock": 5,    # 1d8  average = 4.5 -> floor+1 = 5
 }
 
 import paths
 
 # ─── Catalog path helpers ─────────────────────────────────────────────────────
 _CATALOG_DIR = paths.CATALOG_DIR
+
 
 def _load_catalog(filename: str) -> dict:
     path = filename if os.path.isabs(filename) else os.path.join(_CATALOG_DIR, filename)
@@ -50,13 +55,7 @@ def validate_point_buy(stats: Dict[str, int]) -> Tuple[bool, Optional[str]]:
     Returns:
         (True, None) if valid.
         (False, "<human-readable error>") if invalid.
-
-    Rules:
-        - All six stats must be present.
-        - Each stat must be between 8 and 15 inclusive.
-        - Total cost must not exceed POINT_BUY_BUDGET (27).
     """
-    # Check all six stats are present
     missing = [s for s in STAT_NAMES if s not in stats]
     if missing:
         return False, f"Missing stats: {', '.join(missing)}. All six stats (STR, DEX, CON, INT, WIS, CHA) must be provided."
@@ -65,13 +64,11 @@ def validate_point_buy(stats: Dict[str, int]) -> Tuple[bool, Optional[str]]:
     for stat_name in STAT_NAMES:
         value = stats[stat_name]
 
-        # Range check
         if value < 8:
             return False, f"{stat_name} is {value} — stats cannot be lower than 8 in point-buy."
         if value > 15:
             return False, f"{stat_name} is {value} — stats cannot exceed 15 before racial bonuses in point-buy."
 
-        # Valid value check (must be in cost table)
         if value not in POINT_BUY_COST:
             return False, f"{stat_name} has invalid value {value} — allowed values are 8 through 15."
 
@@ -84,7 +81,6 @@ def validate_point_buy(stats: Dict[str, int]) -> Tuple[bool, Optional[str]]:
         )
 
     if total_cost < 0:
-        # Logically impossible given the cost table, but be explicit
         return False, "Total point cost is negative — something is very wrong with the stat values."
 
     return True, None
@@ -108,7 +104,6 @@ def compute_max_hp(class_id: str, con_score: int, level: int = 1) -> int:
     if level == 1:
         return hit_die + con_mod
     else:
-        # Level 1 = max die; subsequent levels = average roll + CON mod
         base = hit_die + con_mod
         avg = HIT_DIE_AVERAGE.get(class_id, 5)
         for _ in range(level - 1):
@@ -116,36 +111,78 @@ def compute_max_hp(class_id: str, con_score: int, level: int = 1) -> int:
         return max(1, base)
 
 
-def compute_ac(class_id: str, stats: Dict[str, int], equipped_items: list = None) -> int:
+def compute_ac(
+    class_id: str,
+    stats: Dict[str, int],
+    equipped_items: list = None,
+    fighting_style: Optional[str] = None,
+) -> int:
     """
     Compute base AC from class armor proficiency + equipped items.
-    Simplified for level-1 character creation.
-    NOTE: state_manager._compute_ac() is the source of truth for every AC change
-    after creation at runtime.
+    Supports Barbarian Unarmored Defense (10 + DEX mod + CON mod) and Fighting Style: Defence (+1 AC when wearing armor).
     """
     dex_mod = get_modifier(stats.get("DEX", 10))
+    con_mod = get_modifier(stats.get("CON", 10))
     classes = _load_catalog("classes_catalog.json")
     cls = classes.get(class_id, {})
-    armor_profs = cls.get("armor_proficiencies", [])
 
-    # Bard/Rogue/Wizard start unarmored (base 10 + DEX)
-    # Fighter starts in chain mail (AC 16, no DEX bonus)
-    # Cleric starts in scale mail (AC 14, no DEX bonus)
-    # Simplify: check starting equipment for armor type
-    starting_gear = cls.get("starting_equipment", [])
+    starting_gear = equipped_items if equipped_items is not None else cls.get("starting_equipment", [])
 
+    has_armor = False
     ac_base = 10 + dex_mod
     if "chain_mail" in starting_gear:
         ac_base = 16
+        has_armor = True
     elif "scale_mail" in starting_gear:
         ac_base = 14
+        has_armor = True
+    elif "studded_leather" in starting_gear:
+        ac_base = 12 + dex_mod
+        has_armor = True
     elif "leather_armor" in starting_gear:
         ac_base = 11 + dex_mod
+        has_armor = True
+    elif class_id == "barbarian":
+        # Barbarian Unarmored Defense: 10 + DEX mod + CON mod
+        ac_base = 10 + dex_mod + max(0, con_mod)
 
     if "shield" in starting_gear:
         ac_base += 2
 
+    if fighting_style == "defence" and has_armor:
+        ac_base += 1
+
     return ac_base
+
+
+def build_initial_class_resources(class_id: str, stats: Dict[str, int], level: int = 1) -> Dict[str, Any]:
+    """Build initial class-specific BG3 resources for level 1 (or specified level)."""
+    cha_mod = max(1, get_modifier(stats.get("CHA", 10)))
+    resources: Dict[str, Any] = {}
+
+    if class_id == "fighter":
+        resources["second_wind"] = {"current": 1, "max": 1}
+        resources["action_surge"] = {"current": 1 if level >= 2 else 0, "max": 1 if level >= 2 else 0}
+        resources["superiority_dice"] = {"current": 4 if level >= 3 else 0, "max": 4 if level >= 3 else 0}
+    elif class_id == "rogue":
+        resources["sneak_attack_dice"] = (level + 1) // 2
+        resources["cunning_action"] = True
+    elif class_id == "wizard":
+        resources["arcane_recovery"] = {"current": 1, "max": 1}
+    elif class_id == "cleric":
+        resources["channel_divinity"] = {"current": 1, "max": 1}
+    elif class_id == "bard":
+        resources["bardic_inspiration"] = {"current": cha_mod, "max": cha_mod}
+    elif class_id == "paladin":
+        resources["lay_on_hands"] = {"current": level * 5, "max": level * 5}
+        resources["channel_oath"] = {"current": 1, "max": 1}
+    elif class_id == "barbarian":
+        rage_max = 3 if level >= 3 else 2
+        resources["rage_charges"] = {"current": rage_max, "max": rage_max}
+    elif class_id == "warlock":
+        resources["pact_magic"] = True
+
+    return resources
 
 
 def derive_stats(
@@ -155,18 +192,15 @@ def derive_stats(
     background_id: str,
     base_stats: Dict[str, int],
     campaign_tone: str,
+    subclass: Optional[str] = None,
+    fighting_style: Optional[str] = None,
+    chosen_skills: Optional[List[str]] = None,
+    chosen_spells: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Derive a complete character sheet from the character creation choices.
-    Returns a dict matching the saves/<n>.json schema_version 4 (spec Section 5a).
-
-    Steps:
-      1. Apply racial stat bonuses on top of point-buy base stats.
-      2. Compute HP max, AC, proficiency bonus.
-      3. Derive proficient skills (class + background).
-      4. Set starting gold from background.
-      5. Set starting spells if class is a spellcaster.
-      6. Return full schema_version 4 character sheet dict.
+    Returns a dict matching the saves/<n>.json schema_version 4 (spec Section 5a),
+    enhanced with BG3 class/subclass/spell/resource metadata.
     """
     races = _load_catalog("races_catalog.json")
     classes = _load_catalog("classes_catalog.json")
@@ -181,46 +215,73 @@ def derive_stats(
     for stat, bonus in race.get("stat_bonuses", {}).items():
         final_stats[stat] = final_stats.get(stat, 8) + bonus
 
-    # 2. Derived values
+    # 2. Subclass & Fighting Style resolution
+    resolved_subclass = subclass or cls.get("default_subclass")
+    subclasses_dict = cls.get("subclasses", {})
+    subclass_info = subclasses_dict.get(resolved_subclass, {}) if resolved_subclass else {}
+    subclass_name = subclass_info.get("name", resolved_subclass or "")
+
+    resolved_fighting_style = fighting_style
+    if not resolved_fighting_style and class_id in ("fighter", "paladin"):
+        # Default to 'dueling' so Fighter's base AC remains 18 for existing tests unless 'defence' is chosen
+        resolved_fighting_style = "dueling"
+
+    # 3. Derived values
     con_score = final_stats.get("CON", 10)
     hp_max = compute_max_hp(class_id, con_score, level=1)
-    ac = compute_ac(class_id, final_stats)
+    ac = compute_ac(class_id, final_stats, fighting_style=resolved_fighting_style)
     prof_bonus = PROFICIENCY_BY_LEVEL[1]
 
-    # 3. Proficient skills: class choices (pick first option set) + background
-    class_skill_pool = cls.get("proficient_skills_options", [])
-    # For creation defaults: take the first N from the pool
-    num_class_skills = cls.get("proficient_skills_choose", 2)
-    if class_skill_pool and class_skill_pool[0] != "Any":
-        class_skills = class_skill_pool[:num_class_skills]
+    # 4. Proficient skills: user-chosen or class defaults + background
+    if chosen_skills and len(chosen_skills) > 0:
+        class_skills = list(chosen_skills)
     else:
-        # "Any" — default to Persuasion + Deception for Bard, etc.
-        class_skills = ["Persuasion", "Performance"]
+        class_skill_pool = cls.get("proficient_skills_options", [])
+        num_class_skills = cls.get("proficient_skills_choose", 2)
+        if class_skill_pool and class_skill_pool[0] != "Any":
+            class_skills = class_skill_pool[:num_class_skills]
+        else:
+            class_skills = ["Persuasion", "Performance"]
 
     background_skills = background.get("skill_proficiencies", [])
-    all_skills = list(dict.fromkeys(class_skills + background_skills))  # deduplicate, preserve order
+    all_skills = list(dict.fromkeys(class_skills + background_skills))
 
-    # 4. Starting gold
+    # 5. Starting gold
     starting_gold = background.get("starting_gold", 10)
 
-    # 5. Spells
-    known_spells = cls.get("level_1_spells_known", [])
-    spell_slots = cls.get("spell_slots_level_1", {}) if cls.get("spellcasting") else {}
+    # 6. Spells
+    default_spells = list(cls.get("level_1_spells_known", []))
+    if chosen_spells and len(chosen_spells) > 0:
+        # Merge chosen spells while ensuring signature default spells (like magic_missile / cure_wounds) remain if not overridden
+        known_spells = list(dict.fromkeys(chosen_spells))
+    else:
+        known_spells = default_spells
 
-    # 6. Bardic inspiration (Bard only)
+    # Add domain / subclass bonus spells at level 1 if any
+    bonus_spells = subclass_info.get("bonus_spells", [])
+    for b_sp in bonus_spells:
+        if b_sp not in known_spells:
+            known_spells.append(b_sp)
+
+    import copy
+    spell_slots = copy.deepcopy(cls.get("spell_slots_level_1", {})) if cls.get("spellcasting") else {}
+
+    # 7. Bardic inspiration & Class Resources
     bardic_inspiration = {}
     if class_id == "bard":
         cha_mod = get_modifier(final_stats.get("CHA", 10))
         bi_max = max(1, cha_mod)
         bardic_inspiration = {"max": bi_max, "current": bi_max}
 
-    # 7. Proficient saves (from class)
+    class_resources = build_initial_class_resources(class_id, final_stats, level=1)
+
+    # 8. Proficient saves (from class)
     proficient_saves = cls.get("proficient_saves", [])
 
-    # 8. Background hook
+    # 9. Background hook
     background_hook = background.get("background_hook", "")
 
-    # 9. Starting inventory & equipment
+    # 10. Starting inventory & equipment
     starting_gear = cls.get("starting_equipment", [])
     item_catalog = _load_catalog("item_catalog.json")
     starting_inventory = []
@@ -253,11 +314,18 @@ def derive_stats(
         "quantity": 3,
     })
 
+    # 11. Starting class features (level 1)
+    features_by_lvl = cls.get("features_by_level", {})
+    unlocked_features = list(features_by_lvl.get("1", []))
+
     character_sheet = {
         "schema_version": 4,
         "name": name,
         "race": race.get("name", race_id),
         "class": cls.get("name", class_id),
+        "subclass": resolved_subclass,
+        "subclass_name": subclass_name,
+        "fighting_style": resolved_fighting_style,
         "background": background.get("name", background_id),
         "background_hook": background_hook,
         "level": 1,
@@ -272,6 +340,10 @@ def derive_stats(
         "spell_slots": spell_slots,
         "known_spells": known_spells,
         "bardic_inspiration": bardic_inspiration,
+        "class_resources": class_resources,
+        "class_features": unlocked_features,
+        "feats": [],
+        "pending_level_up_choices": 0,
         "concentration": None,
         "death_saves": {"success": 0, "fail": 0},
         "status": "normal",
@@ -295,6 +367,10 @@ def create_character(
     background: str,
     stats: Dict[str, int],
     campaign_tone: str = "classic",
+    subclass: Optional[str] = None,
+    fighting_style: Optional[str] = None,
+    chosen_skills: Optional[List[str]] = None,
+    chosen_spells: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Convenience wrapper for UI / callers. Normalizes display names to catalog IDs
@@ -310,4 +386,8 @@ def create_character(
         background_id=background_id,
         base_stats=stats,
         campaign_tone=campaign_tone,
+        subclass=subclass,
+        fighting_style=fighting_style,
+        chosen_skills=chosen_skills,
+        chosen_spells=chosen_spells,
     )

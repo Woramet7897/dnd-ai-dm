@@ -10,8 +10,38 @@
     "weapon_proficiencies": ["simple", "martial"],
     "starting_equipment": ["chain_mail", "longsword", "shield", "handaxe"],
     "spellcasting": false,
-    "level_1_feature": "Second Wind — regain 1d10+level HP as a bonus action once per short rest.",
-    "level_5_feature_note": "Extra Attack — out of scope for v1, flagged per spec."
+    "default_subclass": "battle_master",
+    "subclasses": {
+      "battle_master": {
+        "name": "Battle Master",
+        "level_unlocked": 3,
+        "description": "จ้าวแห่งกลยุทธ์ที่ใช้ลูกเต๋า Superiority Dice (4d8) ในการควบคุมสมรภูมิ (Menacing Attack, Trip Attack, Precision Attack)"
+      },
+      "champion": {
+        "name": "Champion",
+        "level_unlocked": 3,
+        "description": "นักรบผู้ฝึกฝนร่างกายจนถึงขีดสุด โจมตีติด Critical Hit เมื่อทอยได้ 19 หรือ 20 (Improved Critical)"
+      },
+      "eldritch_knight": {
+        "name": "Eldritch Knight",
+        "level_unlocked": 3,
+        "description": "อัศวินมนตราที่ผสานเพลงดาบเข้ากับเวทมนตร์ป้องกันและทำลายล้าง (ปลดล็อก Fire Bolt & Shield)"
+      }
+    },
+    "fighting_styles": {
+      "defence": {"name": "Defence", "description": "+1 Armor Class เมื่อสวมใส่ชุดเกราะ"},
+      "dueling": {"name": "Dueling", "description": "+2 Damage เมื่อถืออาวุธมือเดียว"},
+      "great_weapon": {"name": "Great Weapon Fighting", "description": "+2 Damage เมื่อใช้อาวุธสองมือ"}
+    },
+    "features_by_level": {
+      "1": ["second_wind", "fighting_style"],
+      "2": ["action_surge"],
+      "3": ["martial_archetype"],
+      "4": ["ability_score_improvement"],
+      "5": ["extra_attack"]
+    },
+    "level_1_feature": "Second Wind — ฟื้นฟู 1d10 + เลเวล HP ด้วย Bonus Action (1 ครั้ง/Short Rest)",
+    "level_5_feature_note": "Extra Attack — โจมตีได้ 2 ครั้งต่อ 1 Action"
   },
   "wizard": {
     "name": "Wizard",
@@ -27,9 +57,35 @@
     "spellcasting": true,
     "spell_slots_level_1": {"1": {"max": 2, "current": 2}},
     "cantrips_known": 3,
-    "level_1_spells_known": ["magic_missile", "shield_spell", "detect_magic"],
-    "level_1_feature": "Arcane Recovery — regain spell slots during a short rest once per day.",
-    "level_5_feature_note": "Third-level spells available at level 5."
+    "default_cantrips": ["fire_bolt", "shocking_grasp", "ray_of_frost"],
+    "level_1_spells_known": ["magic_missile", "shield_spell", "detect_magic", "thunderwave", "fire_bolt", "shocking_grasp", "ray_of_frost"],
+    "default_subclass": "evocation",
+    "subclasses": {
+      "evocation": {
+        "name": "School of Evocation",
+        "level_unlocked": 2,
+        "description": "จอมเวทสายทำลายล้าง (Sculpt Spells: ร่ายเวทระเบิดหมู่โดยไม่สร้างความเสียหายให้พวกเดียวกัน + โบนัสดาเมจเวท)"
+      },
+      "abjuration": {
+        "name": "School of Abjuration",
+        "level_unlocked": 2,
+        "description": "จอมเวทสายเกราะป้องกัน (Arcane Ward: สร้างเกราะดูดซับความเสียหาย Temporary HP อัตโนมัติเมื่อร่ายเวท)"
+      },
+      "divination": {
+        "name": "School of Divination",
+        "level_unlocked": 2,
+        "description": "จอมเวทพยากรณ์ชะตา (Portent: มองเห็นอนาคต เพิ่มโอกาสโจมตีแม่นยำและบังคับศัตรูทอยพลาด)"
+      }
+    },
+    "features_by_level": {
+      "1": ["arcane_recovery"],
+      "2": ["arcane_tradition"],
+      "3": ["level_2_spells"],
+      "4": ["ability_score_improvement"],
+      "5": ["level_3_spells"]
+    },
+    "level_1_feature": "Arcane Recovery — ฟื้นฟู Spell Slot ด้วย Bonus Action (1 ครั้ง/Long Rest)",
+    "level_5_feature_note": "ปลดล็อกมหาเวทระดับ 3 เช่น Fireball, Counterspell, Haste"
   },
   "rogue": {
     "name": "Rogue",
@@ -42,8 +98,33 @@
     "weapon_proficiencies": ["simple", "hand_crossbows", "longswords", "rapiers", "shortswords"],
     "starting_equipment": ["rapier", "shortbow", "quiver", "leather_armor", "thieves_tools"],
     "spellcasting": false,
-    "level_1_feature": "Sneak Attack — once per turn, deal 1d6 extra damage when you have advantage or an ally is adjacent.",
-    "level_5_feature_note": "Uncanny Dodge at level 5."
+    "default_subclass": "thief",
+    "subclasses": {
+      "thief": {
+        "name": "Thief",
+        "level_unlocked": 3,
+        "description": "จอมโจรความเร็วสูง (Fast Hands: ได้รับ 2 Bonus Actions ต่อเทิร์น! ใช้ซ่อนตัว/กินยา/โจมตีเสริมได้คุ้มค่าที่สุด)"
+      },
+      "assassin": {
+        "name": "Assassin",
+        "level_unlocked": 3,
+        "description": "นักฆ่าเงามืด (Assassinate: ได้ Advantage ในเทิร์นแรกของการต่อสู้ และหากโจมตีจากสถานะซ่อนตัวจะติด Critical Hit!)"
+      },
+      "arcane_trickster": {
+        "name": "Arcane Trickster",
+        "level_unlocked": 3,
+        "description": "จอมโจรผู้ใช้มายาและเวทมนตร์ลวงตา (ได้รับสล็อตเวทมนตร์และคาถา Mage Hand, Shield, Invisibility)"
+      }
+    },
+    "features_by_level": {
+      "1": ["sneak_attack", "expertise"],
+      "2": ["cunning_action"],
+      "3": ["roguish_archetype", "sneak_attack_2d6"],
+      "4": ["ability_score_improvement"],
+      "5": ["uncanny_dodge", "sneak_attack_3d6"]
+    },
+    "level_1_feature": "Sneak Attack — สร้างความเสียหายพิเศษ +1d6 (เพิ่มเป็น 2d6 ที่ Lv.3, 3d6 ที่ Lv.5) เมื่อมี Advantage, ซ่อนตัว, หรือมีสหายร่วมรุม",
+    "level_5_feature_note": "Uncanny Dodge — ลดความเสียหายที่ได้รับลงครึ่งหนึ่ง"
   },
   "bard": {
     "name": "Bard",
@@ -52,16 +133,37 @@
     "casting_stat": "CHA",
     "proficient_saves": ["DEX", "CHA"],
     "proficient_skills_choose": 3,
-    "proficient_skills_options": ["Any"],
+    "proficient_skills_options": ["Acrobatics", "Animal Handling", "Arcana", "Athletics", "Deception", "History", "Insight", "Intimidation", "Investigation", "Medicine", "Nature", "Perception", "Performance", "Persuasion", "Religion", "Sleight of Hand", "Stealth", "Survival"],
     "armor_proficiencies": ["light"],
     "weapon_proficiencies": ["simple", "hand_crossbows", "longswords", "rapiers", "shortswords"],
     "starting_equipment": ["rapier", "leather_armor", "lute", "dagger"],
     "spellcasting": true,
     "spell_slots_level_1": {"1": {"max": 2, "current": 2}},
     "cantrips_known": 2,
-    "level_1_spells_known": ["healing_word", "vicious_mockery"],
-    "level_1_feature": "Bardic Inspiration — grant an ally a 1d6 bonus to an ability check/attack/save. CHA mod times per long rest.",
-    "level_5_feature_note": "Font of Inspiration, third-level spell slots."
+    "default_cantrips": ["vicious_mockery", "mage_hand"],
+    "level_1_spells_known": ["healing_word", "vicious_mockery", "cure_wounds", "thunderwave", "charm_person"],
+    "default_subclass": "college_of_swords",
+    "subclasses": {
+      "college_of_swords": {
+        "name": "College of Swords",
+        "level_unlocked": 3,
+        "description": "กวีเพลงดาบ (Defensive Flourish: ใช้แต้ม Bardic Inspiration ฟันศัตรูพร้อมเพิ่มดาเมจ +1d6 และรับ +4 AC!)"
+      },
+      "college_of_lore": {
+        "name": "College of Lore",
+        "level_unlocked": 3,
+        "description": "กวีผู้รอบรู้ (Cutting Words: ใช้เสียงเพลงรบกวนสมาธิศัตรู ลดความแม่นยำและลดพลังป้องกันของศัตรู)"
+      }
+    },
+    "features_by_level": {
+      "1": ["bardic_inspiration"],
+      "2": ["song_of_rest", "jack_of_all_trades"],
+      "3": ["bard_college"],
+      "4": ["ability_score_improvement"],
+      "5": ["font_of_inspiration", "extra_attack_swords"]
+    },
+    "level_1_feature": "Bardic Inspiration — ใช้ Bonus Action มอบโบนัสเต๋า +1d6 ให้ตนเองหรือสหายในการโจมตีและทอยเช็ค",
+    "level_5_feature_note": "Font of Inspiration — รีชาร์จแต้ม Bardic Inspiration ทุกครั้งที่พักสั้น (Short Rest)"
   },
   "cleric": {
     "name": "Cleric",
@@ -77,8 +179,146 @@
     "spellcasting": true,
     "spell_slots_level_1": {"1": {"max": 2, "current": 2}},
     "cantrips_known": 3,
-    "level_1_spells_known": ["healing_word", "cure_wounds", "sacred_flame"],
-    "level_1_feature": "Divine Domain — choose a domain at level 1 (deferred for v1 scope).",
-    "level_5_feature_note": "Destroy Undead feature, third-level spells."
+    "default_cantrips": ["sacred_flame", "light"],
+    "level_1_spells_known": ["healing_word", "cure_wounds", "sacred_flame", "guiding_bolt", "bless", "inflict_wounds"],
+    "default_subclass": "life_domain",
+    "subclasses": {
+      "life_domain": {
+        "name": "Life Domain",
+        "level_unlocked": 1,
+        "description": "นักบวชแห่งชีวิต (Disciple of Life: เวทฮีลทุกบทฟื้นเลือดเพิ่มขึ้น +3 HP และมีท่า Channel Divinity: Preserve Life ฮีลหมู่ทั้งปาร์ตี้)"
+      },
+      "light_domain": {
+        "name": "Light Domain",
+        "level_unlocked": 1,
+        "description": "นักบวชแห่งแสงและเพลิง (มีเวท Burning Hands / Fireball และท่า Channel Divinity: Radiance of the Dawn ระเบิดแสงศักดิ์สิทธิ์ใส่ศัตรูทุกตัว)"
+      },
+      "tempest_domain": {
+        "name": "Tempest Domain",
+        "level_unlocked": 1,
+        "description": "นักบวชแห่งสายฟ้าและพายุ (Destructive Wrath: ใช้ Channel Divinity รีดดาเมจสายฟ้า/เสียงกัมปนาทให้เต็มแม็กซ์!)"
+      }
+    },
+    "features_by_level": {
+      "1": ["divine_domain"],
+      "2": ["channel_divinity"],
+      "3": ["level_2_spells"],
+      "4": ["ability_score_improvement"],
+      "5": ["destroy_undead", "level_3_spells"]
+    },
+    "level_1_feature": "Divine Domain & Channel Divinity — พลังศักดิ์สิทธิ์แห่งทวยเทพ ฮีลหมู่หรือระเบิดแสงทำลายล้างศัตรู",
+    "level_5_feature_note": "ปลดล็อก Spirit Guardians และ Mass Healing Word"
+  },
+  "paladin": {
+    "name": "Paladin",
+    "hit_die": 10,
+    "primary_stat": "STR",
+    "casting_stat": "CHA",
+    "proficient_saves": ["WIS", "CHA"],
+    "proficient_skills_choose": 2,
+    "proficient_skills_options": ["Athletics", "Insight", "Intimidation", "Medicine", "Persuasion", "Religion"],
+    "armor_proficiencies": ["light", "medium", "heavy", "shields"],
+    "weapon_proficiencies": ["simple", "martial"],
+    "starting_equipment": ["chain_mail", "longsword", "shield", "holy_symbol"],
+    "spellcasting": true,
+    "spell_slots_level_1": {"1": {"max": 2, "current": 2}},
+    "cantrips_known": 0,
+    "level_1_spells_known": ["cure_wounds", "bless", "divine_favor", "thunderous_smite"],
+    "default_subclass": "oath_of_vengeance",
+    "subclasses": {
+      "oath_of_vengeance": {
+        "name": "Oath of Vengeance",
+        "level_unlocked": 1,
+        "description": "พาลาดินแห่งการล้างแค้น (Vow of Enmity: ใช้ Bonus Action ประกาศสัตย์สาบาน ได้รับ Advantage ในการโจมตีศัตรู 3 เทิร์น!)"
+      },
+      "oath_of_devotion": {
+        "name": "Oath of Devotion",
+        "level_unlocked": 1,
+        "description": "พาลาดินแห่งความศรัทธา (Sacred Weapon: อาบแสงศักดิ์สิทธิ์ลงบนอาวุธ เพิ่มโบนัสความแม่นยำตามค่า CHA)"
+      }
+    },
+    "features_by_level": {
+      "1": ["lay_on_hands", "sacred_oath"],
+      "2": ["divine_smite", "fighting_style"],
+      "3": ["divine_health"],
+      "4": ["ability_score_improvement"],
+      "5": ["extra_attack"]
+    },
+    "level_1_feature": "Lay on Hands & Divine Smite — ฮีลฉุกเฉินด้วยมือเปล่า และเผา Spell Slot ฟาดดาบระเบิดแสงศักดิ์สิทธิ์ (+2d8 Radiant)!",
+    "level_5_feature_note": "Extra Attack — โจมตีได้ 2 ครั้งต่อ 1 Action"
+  },
+  "barbarian": {
+    "name": "Barbarian",
+    "hit_die": 12,
+    "primary_stat": "STR",
+    "proficient_saves": ["STR", "CON"],
+    "proficient_skills_choose": 2,
+    "proficient_skills_options": ["Animal Handling", "Athletics", "Intimidation", "Nature", "Perception", "Survival"],
+    "armor_proficiencies": ["light", "medium", "shields"],
+    "weapon_proficiencies": ["simple", "martial"],
+    "starting_equipment": ["greataxe", "handaxe"],
+    "spellcasting": false,
+    "default_subclass": "berserker",
+    "subclasses": {
+      "berserker": {
+        "name": "Berserker",
+        "level_unlocked": 3,
+        "description": "นักรบคลั่ง (Frenzy: ขณะติดสถานะ Rage สามารถใช้ Bonus Action ฟาดโจมตีพิเศษ Frenzied Strike ได้อีก 1 ครั้งทุกเทิร์น!)"
+      },
+      "wildheart": {
+        "name": "Wildheart (Bear Heart)",
+        "level_unlocked": 3,
+        "description": "นักรบวิญญาณสัตว์ป่า (Bear Heart: ขณะอยู่ในโหมด Rage จะทนทานต่อความเสียหายทุกชนิดครึ่งหนึ่ง และฟื้นเลือดตัวเองได้)"
+      }
+    },
+    "features_by_level": {
+      "1": ["rage", "unarmored_defense"],
+      "2": ["reckless_attack"],
+      "3": ["primal_path"],
+      "4": ["ability_score_improvement"],
+      "5": ["extra_attack"]
+    },
+    "level_1_feature": "Rage & Reckless Attack — เข้าสู่โหมดคลั่งด้วย Bonus Action (+2 ดาเมจ, ลดดาเมจที่ได้รับลงครึ่งหนึ่ง) และเหวี่ยงขวานแบบได้ Advantage!",
+    "level_5_feature_note": "Extra Attack — โจมตีได้ 2 ครั้งต่อ 1 Action (รวม Frenzy เป็น 3 ครั้ง!)"
+  },
+  "warlock": {
+    "name": "Warlock",
+    "hit_die": 8,
+    "primary_stat": "CHA",
+    "casting_stat": "CHA",
+    "proficient_saves": ["WIS", "CHA"],
+    "proficient_skills_choose": 2,
+    "proficient_skills_options": ["Arcana", "Deception", "History", "Intimidation", "Investigation", "Nature", "Religion"],
+    "armor_proficiencies": ["light"],
+    "weapon_proficiencies": ["simple"],
+    "starting_equipment": ["leather_armor", "dagger", "quarterstaff", "component_pouch"],
+    "spellcasting": true,
+    "pact_magic": true,
+    "spell_slots_level_1": {"1": {"max": 2, "current": 2}},
+    "cantrips_known": 2,
+    "default_cantrips": ["eldritch_blast", "mage_hand"],
+    "level_1_spells_known": ["eldritch_blast", "hex", "hellish_rebuke", "armor_of_agathys", "arms_of_hadar"],
+    "default_subclass": "the_fiend",
+    "subclasses": {
+      "the_fiend": {
+        "name": "The Fiend",
+        "level_unlocked": 1,
+        "description": "พันธสัญญาจอมมาร (Dark One's Blessing: ทุกครั้งที่สังหารศัตรู จะได้รับเกราะเลือด Temporary HP = CHA mod + เลเวล ทันที!)"
+      },
+      "the_great_old_one": {
+        "name": "The Great Old One",
+        "level_unlocked": 1,
+        "description": "พันธสัญญาเทพบรรพกาล (Mortal Reminder: เมื่อโจมตีติด Critical Hit ศัตรูจะติดสถานะหวาดกลัว Frightened ทันที)"
+      }
+    },
+    "features_by_level": {
+      "1": ["otherworldly_patron", "pact_magic"],
+      "2": ["agonizing_blast"],
+      "3": ["pact_boon"],
+      "4": ["ability_score_improvement"],
+      "5": ["eldritch_blast_2_beams", "level_3_pact_slots"]
+    },
+    "level_1_feature": "Eldritch Blast & Pact Magic — ยิงลำแสงทมิฬที่บวกโบนัส CHA ดาเมจ (Agonizing Blast) และสล็อตเวทมนตร์รีชาร์จเต็มทุกครั้งที่กด Short Rest!",
+    "level_5_feature_note": "Eldritch Blast ยิง 2 ลำแสงพร้อมกัน และปลดล็อก Fireball / Hunger of Hadar"
   }
 }

@@ -81,6 +81,21 @@ TAG_ALIASES: Dict[str, str] = {
     "เจรจา": "persuasion",
     "เกลี้ยกล่อม": "persuasion",
     "โน้มน้าว": "persuasion",
+    # Class / Background Roleplay Dialogue Tags -> Mapped to signature D&D 5e social/knowledge skills
+    "bard": "performance",
+    "paladin": "persuasion",
+    "cleric": "religion",
+    "wizard": "arcana",
+    "warlock": "intimidation",
+    "barbarian": "intimidation",
+    "rogue": "deception",
+    "fighter": "athletics",
+    "criminal": "deception",
+    "noble": "persuasion",
+    "sage": "history",
+    "acolyte": "religion",
+    "soldier": "intimidation",
+    "folk hero": "persuasion",
 }
 
 # Regex keywords matching actions that should trigger a check

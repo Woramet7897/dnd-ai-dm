@@ -40,6 +40,35 @@
     "value_gold": 15,
     "description": "A standard steel longsword."
   },
+  "greataxe": {
+    "name": "Greataxe",
+    "type": "weapon",
+    "slot": "main_hand",
+    "two_handed": true,
+    "effects": {"attack_bonus": 0, "damage": "1d12", "damage_type": "slashing"},
+    "rarity": "common",
+    "value_gold": 30,
+    "description": "A massive two-handed battleaxe capable of cleaving foes in two."
+  },
+  "greatsword": {
+    "name": "Greatsword",
+    "type": "weapon",
+    "slot": "main_hand",
+    "two_handed": true,
+    "effects": {"attack_bonus": 0, "damage": "2d6", "damage_type": "slashing"},
+    "rarity": "common",
+    "value_gold": 50,
+    "description": "A heavy two-handed broadsword favored by front-line warriors."
+  },
+  "warhammer": {
+    "name": "Warhammer",
+    "type": "weapon",
+    "slot": "main_hand",
+    "effects": {"attack_bonus": 0, "damage": "1d8", "damage_type": "bludgeoning"},
+    "rarity": "common",
+    "value_gold": 15,
+    "description": "A heavy steel hammer designed to crush armor and bone."
+  },
   "rapier": {
     "name": "Rapier",
     "type": "weapon",
@@ -49,6 +78,16 @@
     "rarity": "common",
     "value_gold": 25,
     "description": "A slender, elegant thrusting sword favored by duelists."
+  },
+  "shortsword": {
+    "name": "Shortsword",
+    "type": "weapon",
+    "slot": "main_hand",
+    "finesse": true,
+    "effects": {"attack_bonus": 0, "damage": "1d6", "damage_type": "piercing"},
+    "rarity": "common",
+    "value_gold": 10,
+    "description": "A fast, balanced blade ideal for agile fighters."
   },
   "dagger": {
     "name": "Dagger",
@@ -81,6 +120,15 @@
     "price_sp": 100,
     "value_gold": 10,
     "description": "Supple, lightweight armor made from tanned hide."
+  },
+  "studded_leather": {
+    "name": "Studded Leather Armor",
+    "type": "wearable",
+    "slot": "chest",
+    "effects": {"ac_base": 12, "stat_mod": "DEX"},
+    "rarity": "uncommon",
+    "value_gold": 45,
+    "description": "Tough leather reinforced with close-set metal rivets."
   },
   "chain_mail": {
     "name": "Chain Mail",
@@ -360,4 +408,3 @@
     "description": "A finely forged longsword coated in gleaming silver to cut through supernatural hides."
   }
 }
-

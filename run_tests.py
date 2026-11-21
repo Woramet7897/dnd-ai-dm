@@ -46,6 +46,7 @@ ORDERED_TEST_FILES = [
     "test_check_manager.py",
     "test_groq_integration.py",
     "test_lingering_bugfixes.py",
+    "test_bg3_classes_and_spells.py",
 ]
 
 
