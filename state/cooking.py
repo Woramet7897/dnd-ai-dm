@@ -5,7 +5,6 @@ state/cooking.py â€” Food freshness spoilage and camp cooking system (Module B Â
 import logging
 from typing import Any, Dict, List, Optional, Union
 
-import state_manager
 from rules import _get_item_catalog, get_modifier, is_proficient
 from state.checks import check_inspiration_trigger
 from state.equipment import apply_condition_to_state, get_active_effects
@@ -92,6 +91,7 @@ def cook_meal(
         Failure: burns the ingredients.
     - Cooking with rotten_food: CON save DC 13 or Poisoned for 8 hours.
     """
+    import state_manager
     inventory = player_state.get("inventory", [])
     catalog = _get_item_catalog()
 

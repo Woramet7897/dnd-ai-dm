@@ -6,7 +6,6 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
-import validation
 from validators.entities import (
     validate_generated_event,
     validate_generated_item,
@@ -36,6 +35,7 @@ def validate_spell_id(spell_id: Any, world_state: Optional[Dict] = None) -> bool
         logger.debug(f"spell_id is not a string (got {type(spell_id).__name__}: {spell_id!r}) — invalid.")
         return False
 
+    import validation
     catalog = validation._get_spell_catalog()
     if spell_id in catalog:
         return True
@@ -138,6 +138,7 @@ def validate_item_id(item_id: Any, world_state: Optional[Dict] = None) -> bool:
         logger.debug(f"item_id is not a string (got {type(item_id).__name__}: {item_id!r}) — invalid.")
         return False
 
+    import validation
     catalog = validation._get_item_catalog()
     if item_id in catalog:
         return True
@@ -157,6 +158,7 @@ def validate_monster_ids(enemy_ids: Any, world_state: Optional[Dict] = None) -> 
         logger.debug(f"enemy_ids is not a list (got {type(enemy_ids).__name__}) — returning empty.")
         return []
 
+    import validation
     catalog = validation._get_monster_catalog()
     gen_monsters = world_state.get("generated_monsters", {}) if isinstance(world_state, dict) else {}
     valid = []
@@ -221,6 +223,7 @@ def validate_extraction_output(
 ) -> Dict:
     """Top-level entry point. Runs every sub-validator field by field on the raw extraction output."""
     try:
+        import validation
         return validation._validate_extraction_output_inner(raw, world_state=world_state, player_state=player_state)
     except Exception as ex:
         logger.error(f"validate_extraction_output failed: {ex}")
@@ -232,6 +235,7 @@ def _validate_extraction_output_inner(
     world_state: Optional[Dict] = None,
     player_state: Optional[Dict] = None,
 ) -> Dict:
+    import validation
     if world_state is None:
         world_state = {}
 

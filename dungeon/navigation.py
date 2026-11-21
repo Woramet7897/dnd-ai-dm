@@ -6,8 +6,6 @@ from collections import deque
 import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import dungeon_manager
-
 logger = logging.getLogger("dungeon_manager")
 
 _REQUIRED_ROOM_FIELDS = {"id", "name", "type", "description", "exits", "is_safe"}
@@ -21,6 +19,7 @@ STEPS_PER_PERIOD = 4
 
 def _all_known_room_ids(world_state: Dict[str, Any]) -> set:
     """Return the set of ALL known room IDs: static catalog + any LLM-registered rooms."""
+    import dungeon_manager
     ids = set(dungeon_manager._load_static_catalog().keys())
     ids.update(world_state.get("dynamic_rooms", {}).keys())
     return ids
@@ -28,6 +27,7 @@ def _all_known_room_ids(world_state: Dict[str, Any]) -> set:
 
 def _get_room(room_id: str, world_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Look up a room by ID. Checks dynamic_rooms first (LLM-registered), then static catalog."""
+    import dungeon_manager
     dynamic = world_state.get("dynamic_rooms", {})
     if room_id in dynamic:
         return dynamic[room_id]
@@ -115,6 +115,7 @@ def advance_time(
         nb = world_state.setdefault("notice_board", {})
         last_day = nb.get("last_refreshed_day", 0)
         if last_day == 0 or (current_day - last_day) >= 3:
+            import dungeon_manager
             dungeon_manager.refresh_notice_board(world_state, force=True)
             nb_refreshed = True
 
@@ -186,6 +187,7 @@ def move_player(
         import state_manager
         state_manager.handle_period_change(world_state, character_state)
 
+    import dungeon_manager
     dungeon_manager.check_and_trigger_world_event(world_state)
 
     logger.debug(f"move_player: moved to '{destination_id}' ({destination.get('name')})")

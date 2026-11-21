@@ -235,11 +235,19 @@ def show_character_dialog():
                     st.session_state["narrative_log"].append({"role": "user", "content": action_line})
                     hist = st.session_state.get("history_buffer", [])
                     active_m = get_current_active_model()
+                    mem = get_session_memory_manager()
+                    rel_lore = []
+                    if mem is not None:
+                        try:
+                            rel_lore = mem.get_relevant_lore(f"{d_cname} {free_chat.strip()}", n_results=3)
+                        except Exception:
+                            rel_lore = []
                     res_chat = llm_handler.generate_narrative_response(
                         user_input=action_line,
                         player_state=player,
                         world_state=world,
                         history=hist,
+                        lore_entries=rel_lore,
                         model=active_m,
                         single_pass=True,
                         ollama_model=st.session_state.get("selected_model"),
@@ -248,6 +256,11 @@ def show_character_dialog():
                     st.session_state["narrative_log"].append({"role": "assistant", "content": reply_txt})
                     st.session_state["history_buffer"].append({"role": "user", "content": action_line})
                     st.session_state["history_buffer"].append({"role": "assistant", "content": reply_txt})
+                    if mem is not None and reply_txt:
+                        try:
+                            mem.add_turn(f"[Campfire Chat with {d_cname}] Player: {free_chat.strip()} -> {d_cname}: {reply_txt[:280]}")
+                        except Exception:
+                            pass
                     state_manager.respond_to_camp_dialogue(d_cid, "agree", world, active_dlg)
                     st.session_state["active_camp_dialogue"] = None
                     auto_save()

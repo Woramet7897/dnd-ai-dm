@@ -7,18 +7,19 @@ import os
 import tempfile
 from typing import Any, Dict
 
-import state_manager
-
 
 def _save_path(character_name: str) -> str:
+    import state_manager
     return os.path.join(state_manager.SAVES_DIR, f"{character_name}.json")
 
 
 def _world_save_path(character_name: str) -> str:
+    import state_manager
     return os.path.join(state_manager.WORLD_SAVES_DIR, f"{character_name}_world.json")
 
 
 def _backup_dir(character_name: str) -> str:
+    import state_manager
     return os.path.join(state_manager.BACKUP_DIR, character_name)
 
 
@@ -27,6 +28,7 @@ def load_character(character_name: str) -> Dict[str, Any]:
     Load a character save. Raises ValueError on schema version mismatch
     rather than crashing obscurely (spec Section 5a).
     """
+    import state_manager
     path = _save_path(character_name)
     if not os.path.exists(path):
         raise FileNotFoundError(f"No save found for '{character_name}' at {path}")
@@ -44,6 +46,7 @@ def load_character(character_name: str) -> Dict[str, Any]:
 
 def load_world(character_name: str) -> Dict[str, Any]:
     """Load world state. Raises ValueError on schema version mismatch."""
+    import state_manager
     path = _world_save_path(character_name)
     if not os.path.exists(path):
         raise FileNotFoundError(f"No world save found for '{character_name}' at {path}")
@@ -77,6 +80,7 @@ def _atomic_write(path: str, data: Dict[str, Any]):
 
 def _rotate_backup(character_name: str, state: Dict[str, Any]):
     """Keep last MAX_BACKUPS autosaves in save_backups/<name>/ (spec Section 5d)."""
+    import state_manager
     max_backups = state_manager.MAX_BACKUPS
     backup_dir = _backup_dir(character_name)
     os.makedirs(backup_dir, exist_ok=True)

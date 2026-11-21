@@ -7,7 +7,6 @@ import logging
 import re as _re
 from typing import Any, Dict, Optional, Tuple
 
-import state_manager
 from rules import (
     CONCENTRATION_DC_FLOOR,
     DIFFICULTY_TO_DC,
@@ -135,6 +134,7 @@ def resolve_check(
     Resolve a D&D 5e ability check using the difficulty enum.
     Uses state_manager._roll_d20() and state_manager._roll_dice() so test patches apply cleanly.
     """
+    import state_manager
     if difficulty not in DIFFICULTY_TO_DC:
         raise ValueError(
             f"Unknown difficulty '{difficulty}'. Must be one of: {list(DIFFICULTY_TO_DC.keys())}"
@@ -209,6 +209,7 @@ def reroll_check(
     state: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Spend 1 inspiration point to reroll an ability check."""
+    import state_manager
     if not spend_inspiration(state):
         res = dict(previous_result)
         res["rerolled"] = False
@@ -247,6 +248,7 @@ def reroll_check(
 
 def resolve_death_save(state: Dict[str, Any]) -> Dict[str, Any]:
     """Roll a death saving throw for a downed character."""
+    import state_manager
     roll = state_manager._roll_d20()
     death_saves = state.setdefault("death_saves", {"success": 0, "fail": 0})
 
@@ -293,6 +295,7 @@ def resolve_death_save(state: Dict[str, Any]) -> Dict[str, Any]:
 
 def resolve_concentration_check(damage_taken: int, state: Dict[str, Any]) -> Dict[str, Any]:
     """Auto-triggered inside apply_state_updates() whenever hp_change < 0 and concentration is active."""
+    import state_manager
     dc_value = max(CONCENTRATION_DC_FLOOR, damage_taken // 2)
 
     stats = state.get("stats", {})
@@ -351,6 +354,7 @@ def apply_state_updates(
     world_state: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
     """Apply validated extraction-call updates to the character state (and optionally world state)."""
+    import state_manager
     concentration_result = None
 
     if "hp_change" in updates:
@@ -463,6 +467,7 @@ def apply_npc_relationship_change(
     )
     comp_name = npc_id
     if comp_match:
+        import state_manager
         cid = comp_match.get("id") or comp_match.get("name")
         comp_name = comp_match.get("name", cid)
         app_info = state_manager.get_companion_approval(world_state, cid)

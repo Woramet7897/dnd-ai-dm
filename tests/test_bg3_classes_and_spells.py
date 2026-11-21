@@ -476,6 +476,201 @@ class TestBG3ClassesAndSpells(unittest.TestCase):
         self.assertIn("Shadowheart (Approval: 60/100)", tiers[2])
         self.assertIn("PRIORITIZE EXPRESSIVE DIALOGUE & ROLEPLAY", tiers[1])
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # 11. COMBAT LOOT DROPS, ROOM AUTO-CLEAR, TACTICAL AI, & NATURAL THAI DIALOGUE CHECKS
+    # ══════════════════════════════════════════════════════════════════════════
+    def test_combat_gold_item_drops_room_clear_and_tactical_companion_heal(self):
+        import check_manager
+
+        fighter = character_creator.create_character("Valeros", "Human", "Fighter", "Soldier", self.base_stats)
+        initial_gp = fighter["currency"]["gp"]
+
+        # Add a Cleric companion to test Tactical Emergency Healing when player is <= 30% HP
+        cleric_comp = {
+            "id": "comp_cleric",
+            "name": "Kyra",
+            "role": "Cleric",
+            "side": "player",
+            "hp": {"current": 20, "max": 20},
+            "ac": 16,
+            "attacks": [{"name": "Mace", "attack_bonus": 4, "damage": "1d6+2", "damage_type": "bludgeoning"}],
+        }
+        cs = cm.start_combat(["goblin_boss"], fighter, self.world, companion_states=[cleric_comp])
+        player_c = cs["player_combatant"]
+        enemy = cs["enemies"][0]
+        enemy["loot_table"] = ["healing_potion"]
+
+        # 1. Injure player to 2 HP (<= 30% of 12 Max HP) -> Cleric companion should cast emergency Healing Word!
+        player_c["hp"]["current"] = 2
+        comp_turn_res = cm.resolve_companion_turn(cs["companions"][0], cs["enemies"], combat_state=cs)
+        self.assertEqual(comp_turn_res.get("attack_name"), "Healing Word")
+        self.assertGreater(comp_turn_res.get("healed", 0), 0)
+        self.assertGreater(player_c["hp"]["current"], 2)
+
+        # 2. Defeat the Goblin Boss -> verify gold_drop (15..45 GP), loot_table ('healing_potion'), and room marked cleared!
+        enemy["hp"]["current"] = 0
+        outcome = cm.check_combat_end(cs, self.world)
+        self.assertEqual(outcome, "player_victory")
+        self.assertGreaterEqual(cs.get("gold_looted", 0), 15)
+        self.assertEqual(fighter["currency"]["gp"], initial_gp + cs["gold_looted"])
+        self.assertIn("healing_potion", cs.get("items_looted", []))
+        self.assertTrue(any(i.get("item_id") == "healing_potion" for i in fighter["inventory"]))
+        self.assertIn("ruined_mill", self.world["cleared_rooms"])
+
+        # 3. Verify natural Thai dialogue phrases trigger BG3 skill checks even when starting with 'พูดคุย'
+        chk_persuade = check_manager.detect_action_skill_check("พูดคุยหว่านล้อมให้ทหารยามเปิดประตู", fighter)
+        self.assertIsNotNone(chk_persuade)
+        self.assertEqual(chk_persuade["skill"], "persuasion")
+
+        chk_insight = check_manager.detect_action_skill_check("สังเกตแววตาจับพิรุธของพ่อค้า", fighter)
+        self.assertIsNotNone(chk_insight)
+        self.assertEqual(chk_insight["skill"], "insight")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 12. CRIT DAMAGE MODIFIER SEPARATION ("NdX" vs "+M") & SUBMODULE STANDALONE IMPORTS
+    # ══════════════════════════════════════════════════════════════════════════
+    def test_resolve_attack_crit_does_not_double_flat_modifier(self):
+        from unittest.mock import patch
+
+        attacker = {
+            "id": "player",
+            "name": "Valeros",
+            "side": "player",
+            "class": "Fighter",
+            "level": 1,
+            "hp": {"current": 20, "max": 20},
+            "ac": 16,
+            "stats": self.base_stats,
+        }
+        target = {
+            "id": "orc_1",
+            "name": "Orc Warrior",
+            "side": "enemy",
+            "hp": {"current": 100, "max": 100},
+            "ac": 12,
+            "stats": self.base_stats,
+        }
+        attack = {
+            "name": "Longsword",
+            "attack_bonus": 5,
+            "damage": "1d8+5",
+            "damage_type": "slashing",
+        }
+
+        # Patch dice roll to always roll maximum (e.g. 1d8 -> 8)
+        with patch("combat_manager.random.randint", side_effect=lambda a, b: b):
+            # 1. Normal hit (roll 15 + 5 = 20 vs AC 12): damage = 8 + 5 = 13
+            with patch.object(cm, "_roll_d20", return_value=15):
+                res_hit = cm.resolve_attack(attacker, target, attack)
+            self.assertTrue(res_hit["hit"])
+            self.assertFalse(res_hit["crit"])
+            self.assertEqual(res_hit["damage"], 13)
+
+            # 2. Critical hit (natural 20): damage = 8 + 8 + 5 = 21 (modifier +5 is NOT doubled to 26)
+            with patch.object(cm, "_roll_d20", return_value=20):
+                res_crit = cm.resolve_attack(attacker, target, attack)
+            self.assertTrue(res_crit["hit"])
+            self.assertTrue(res_crit["crit"])
+            self.assertEqual(res_crit["damage"], 21)
+
+    def test_all_submodules_importable_as_first_module_in_subprocess(self):
+        import subprocess
+
+        submodules = [
+            "state.currency",
+            "state.persistence",
+            "state.equipment",
+            "state.checks",
+            "state.progression",
+            "state.magic",
+            "state.cooking",
+            "state.crime",
+            "state.companions",
+            "combat.conditions",
+            "combat.actions",
+            "combat.engine",
+            "dungeon.navigation",
+            "dungeon.events",
+            "dungeon.notice_board",
+            "llm.providers",
+            "llm.prompts",
+            "llm.generator",
+            "validators.entities",
+            "validators.extraction",
+        ]
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for mod in submodules:
+            proc = subprocess.run(
+                [sys.executable, "-c", f"import {mod}"],
+                cwd=project_root,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                proc.returncode,
+                0,
+                f"Submodule '{mod}' failed to import as first module:\n{proc.stderr}",
+            )
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 13. HOLY GRAIL WAR × 1-IN-65M TRANSPARENT CHOICE CARDS & STAT DELTA PILLS
+    # ══════════════════════════════════════════════════════════════════════════
+    def test_holy_grail_and_65m_choice_cards_and_stat_deltas(self):
+        import app
+
+        bard = character_creator.create_character(
+            "Scanlan", "Halfling", "Bard", "Noble",
+            {"STR": 8, "DEX": 14, "CON": 12, "INT": 10, "WIS": 13, "CHA": 15},
+            subclass="college_of_lore",
+            chosen_skills=["Persuasion", "Deception", "Insight", "Performance", "Stealth", "Arcana"],
+        )
+
+        # 1. Verify exact d20 success probability calculation (including Nat 1 / Nat 20 bounds)
+        # With total_modifier = +5 vs DC 12: need die >= 7 (rolls 7..20 = 14 faces out of 20 = 70%)
+        self.assertEqual(app.calculate_check_success_chance(5, 12), 70)
+        # Impossible DC (e.g. DC 35) still has 5% chance due to Nat 20
+        self.assertEqual(app.calculate_check_success_chance(0, 35), 5)
+        # Trivial DC (e.g. DC 2 with +10) caps at 95% due to Nat 1
+        self.assertEqual(app.calculate_check_success_chance(10, 2), 95)
+
+        # 2. Verify build_choice_card_metadata on skill check choice, roleplay tag choice, and exploration choice
+        meta_skill = app.build_choice_card_metadata("[Persuasion] เจรจาต่อรองขอลดราคาสินค้า", bard, index=1)
+        self.assertTrue(meta_skill["has_check"])
+        self.assertEqual(meta_skill["stat"], "CHA")
+        self.assertEqual(meta_skill["skill"], "persuasion")
+        self.assertEqual(meta_skill["dc"], 13)
+        self.assertGreaterEqual(meta_skill["success_pct"], 60)
+        self.assertIn("โอกาส", meta_skill["odds_label"])
+
+        meta_rp = app.build_choice_card_metadata("[Bard] ร้องเพลงบัลลาดปลุกใจชาวบ้านในโรงเตี๊ยม", bard, index=2)
+        self.assertTrue(meta_rp["has_check"])
+        self.assertTrue(meta_rp["is_roleplay_tag"])
+        self.assertEqual(meta_rp["tag_name"], "Bard")
+        self.assertEqual(meta_rp["skill"], "performance")
+
+        meta_exp = app.build_choice_card_metadata("เดินสำรวจรอบๆ จัตุรัสกลางเมือง", bard, index=3)
+        self.assertFalse(meta_exp["has_check"])
+        self.assertFalse(meta_exp["is_roleplay_tag"])
+
+        # 3. Verify snapshot_player_world_state & compute_turn_stat_deltas generate Stat Delta Pills
+        snap = app.snapshot_player_world_state(bard, self.world)
+        bard["hp"]["current"] -= 3
+        sm.add_currency(bard, gp=25)
+        sm.award_xp(50, bard)
+        sm.award_inspiration(bard, "Great performance")
+        self.world["current_location"] = "town_riverside"
+
+        deltas = app.compute_turn_stat_deltas(
+            snap, bard, self.world,
+            rel_change={"npc_id": "shadowheart", "npc_name": "Shadowheart", "delta": 10},
+        )
+        labels = [d["label"] for d in deltas]
+        self.assertIn("❤️ HP -3", labels)
+        self.assertIn("💰 Gold +25 GP", labels)
+        self.assertIn("✨ XP +50", labels)
+        self.assertIn("🌟 Inspiration +1", labels)
+        self.assertIn("💚 Shadowheart +10", labels)
+
 
 if __name__ == "__main__":
     unittest.main()

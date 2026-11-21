@@ -7,7 +7,7 @@
     "exits": {
       "north": "forest_edge",
       "east": "old_bridge",
-      "south": null,
+      "south": "drunken_dragon_tavern",
       "west": null
     },
     "shops": ["general_store", "blacksmith", "alchemist"],
@@ -24,7 +24,7 @@
       "north": "forest_clearing",
       "south": "town_riverside",
       "east": null,
-      "west": null
+      "west": "whispering_grove"
     },
     "shops": [],
     "npcs": [],
@@ -84,8 +84,8 @@
     "exits": {
       "west": "old_bridge",
       "north": "ruined_mill",
-      "south": null,
-      "east": null
+      "south": "bandit_outpost",
+      "east": "silverpeak_outpost"
     },
     "shops": ["market_stall"],
     "npcs": ["travelling_merchant"],
@@ -181,7 +181,7 @@
     "description": "A subterranean burial vault hidden below the mill. Ancient stone sarcophagi line the damp walls beneath flickering green witchfire.",
     "exits": {
       "south": "ruined_mill",
-      "north": null,
+      "north": "sunken_sanctum",
       "east": null,
       "west": null
     },
@@ -206,6 +206,91 @@
     "npcs": ["jailer_karr"],
     "is_safe": false,
     "loot": []
+  },
+  "drunken_dragon_tavern": {
+    "id": "drunken_dragon_tavern",
+    "name": "The Drunken Dragon Tavern",
+    "type": "town",
+    "description": "A warm, bustling two-story tavern smelled of roasted boar, spiced ale, and pipe smoke. Adventurers, bards, and shady informants gather around the hearth.",
+    "exits": {
+      "north": "town_riverside",
+      "south": null,
+      "east": null,
+      "west": null
+    },
+    "shops": ["general_store"],
+    "npcs": ["innkeeper_mira", "bard_lorien", "hooded_stranger"],
+    "notice_board": true,
+    "is_safe": true,
+    "loot": []
+  },
+  "whispering_grove": {
+    "id": "whispering_grove",
+    "name": "Whispering Fey Grove",
+    "type": "wilderness",
+    "description": "Bioluminescent mushrooms and silver-leafed willows surround a tranquil moonlit spring. Whispers of ancient Sylvan magic echo on the breeze.",
+    "exits": {
+      "east": "forest_edge",
+      "north": null,
+      "south": null,
+      "west": null
+    },
+    "shops": [],
+    "npcs": ["druid_elowen"],
+    "is_safe": true,
+    "loot": [{"item_id": "healing_potion", "quantity": 1}, {"item_id": "wild_vegetables", "quantity": 2}],
+    "encounter_table": ["wolf", "dire_wolf"]
+  },
+  "bandit_outpost": {
+    "id": "bandit_outpost",
+    "name": "Redcloak Bandit Hideout",
+    "type": "dungeon",
+    "description": "A fortified palisade hidden in a rocky ravine south of the crossroads. Stolen merchant crates and weapon racks surround a watchtower.",
+    "exits": {
+      "north": "crossroads",
+      "south": null,
+      "east": null,
+      "west": null
+    },
+    "shops": [],
+    "npcs": ["captured_merchant"],
+    "is_safe": false,
+    "loot": [{"item_id": "gold", "amount_min": 25, "amount_max": 60, "quantity": 40}, {"item_id": "shortsword", "quantity": 1}],
+    "encounter_table": ["bandit", "bandit_captain"]
+  },
+  "silverpeak_outpost": {
+    "id": "silverpeak_outpost",
+    "name": "Silverpeak Dwarven Outpost",
+    "type": "town",
+    "description": "A stone-carved trading fort at the foothills of the eastern mountains. Dwarven smiths hammer glowing steel while caravan guards patrol the gates.",
+    "exits": {
+      "west": "crossroads",
+      "north": null,
+      "south": null,
+      "east": null
+    },
+    "shops": ["blacksmith", "general_store", "alchemist"],
+    "npcs": ["forgemaster_thrain", "scholar_vael"],
+    "is_safe": true,
+    "loot": []
+  },
+  "sunken_sanctum": {
+    "id": "sunken_sanctum",
+    "name": "Sunken Sanctum of the Cult",
+    "type": "dungeon",
+    "description": "Deep beneath the ancient crypt lies a flooded obsidian chamber lit by purple braziers. A dark altar stands above a chasm.",
+    "exits": {
+      "south": "ancient_crypt",
+      "north": null,
+      "east": null,
+      "west": null
+    },
+    "shops": [],
+    "npcs": ["high_cultist_malakor"],
+    "is_safe": false,
+    "hazards": ["near_chasm"],
+    "loot": [{"item_id": "gold", "amount_min": 50, "amount_max": 100, "quantity": 75}, {"item_id": "ring_of_protection", "quantity": 1}],
+    "encounter_table": ["cultist", "ghoul", "ogre"]
   }
 }
 

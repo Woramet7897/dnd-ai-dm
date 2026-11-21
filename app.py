@@ -80,8 +80,12 @@ from ui.town_view import (
 from ui.exploration_view import (
     apply_escape_success,
     attempt_escape,
+    build_choice_card_metadata,
+    calculate_check_success_chance,
+    compute_turn_stat_deltas,
     resolve_inspiration_reroll,
     render_playing_view,
+    snapshot_player_world_state,
 )
 
 

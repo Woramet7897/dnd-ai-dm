@@ -5,8 +5,6 @@ combat/conditions.py — Combat conditions and surface combo reactions (Phase 11
 import logging
 from typing import Any, Dict, List, Optional
 
-import combat_manager
-
 logger = logging.getLogger("combat_manager")
 
 CONDITIONS = {
@@ -186,6 +184,7 @@ def apply_surface(
     pair = frozenset({current, surface_type})
 
     if pair == frozenset({"grease", "fire"}):
+        import combat_manager
         surface["type"] = "fire"
         surface["duration"] = 3
         effects: List[Dict[str, Any]] = []
@@ -248,6 +247,7 @@ def apply_surface(
 
 def trigger_lightning_surface_reaction(combat_state: Dict[str, Any]) -> Dict[str, Any]:
     """Trigger water + lightning reaction when lightning damage hits a room with a 'water' surface."""
+    import combat_manager
     surface = combat_state.setdefault("room_surface", {"type": None, "duration": 0})
     current = surface.get("type")
 

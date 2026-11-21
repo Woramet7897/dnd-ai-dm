@@ -2,7 +2,8 @@
 ui/exploration_view.py — Exploration HUD, compass navigation, imprisonment/escape, BG3 skill checks, and scene interactions.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
+import re
 import streamlit as st
 
 import check_manager
@@ -16,6 +17,9 @@ from ui.session import (
     get_current_active_model,
     get_display_spell_catalog,
     get_known_spell_count,
+    get_player_currency,
+    get_ration_count,
+    get_session_memory_manager,
     resolve_turn_extraction,
 )
 from ui.dialogs import (
@@ -134,6 +138,452 @@ def resolve_inspiration_reroll(
         "escaped": escaped,
         "safe_room": safe_room,
     }
+
+
+def calculate_check_success_chance(
+    total_modifier: int,
+    dc: int,
+    has_advantage: bool = False,
+) -> int:
+    """
+    Calculate the exact D&D 5e / BG3 percentage chance (5% to 99%) of passing a d20 check
+    given total_modifier and dc (accounting for Nat 20 auto-success and Nat 1 auto-fail).
+    """
+    success_faces = 0
+    for die in range(1, 21):
+        if die == 20:
+            success_faces += 1
+        elif die == 1:
+            continue
+        elif (die + total_modifier) >= dc:
+            success_faces += 1
+    p = success_faces / 20.0
+    if has_advantage:
+        p = 1.0 - ((1.0 - p) ** 2)
+    return int(round(p * 100))
+
+
+def build_choice_card_metadata(
+    action_text: str,
+    player: Dict[str, Any],
+    index: int = 1,
+) -> Dict[str, Any]:
+    """
+    Analyze a suggested action string to build transparent choice preview metadata
+    inspired by '1 ใน 65 ล้าน' and Baldur's Gate 3:
+    - Detects skill checks, DC, stat modifier, and exact % chance of success.
+    - Detects Class / Background roleplay tags (e.g. [Bard], [Fighter], [Soldier]).
+    """
+    text = (action_text or "").strip()
+    m_tag = re.match(r"^\s*\[([^\]]+)\]\s*(.*)$", text)
+    tag_name = m_tag.group(1).strip() if m_tag else None
+    check_spec = check_manager.detect_action_skill_check(text, player) if player else None
+
+    if check_spec:
+        tot_mod = check_spec["total_modifier"]
+        dc = check_spec["dc"]
+        pct = calculate_check_success_chance(tot_mod, dc)
+        if pct >= 65:
+            odds_color = "#4ade80"
+            odds_bg = "rgba(74, 222, 128, 0.14)"
+            odds_border = "rgba(74, 222, 128, 0.4)"
+        elif pct >= 40:
+            odds_color = "#fbbf24"
+            odds_bg = "rgba(251, 191, 36, 0.14)"
+            odds_border = "rgba(251, 191, 36, 0.4)"
+        else:
+            odds_color = "#f87171"
+            odds_bg = "rgba(248, 113, 113, 0.14)"
+            odds_border = "rgba(248, 113, 113, 0.4)"
+
+        prof_badge = " ★ชำนาญ" if check_spec.get("is_proficient") else ""
+        tag_prefix = f"[{tag_name}] • " if (tag_name and tag_name.lower() != check_spec["skill_name"].lower()) else ""
+        return {
+            "index": index,
+            "action_text": text,
+            "has_check": True,
+            "is_roleplay_tag": bool(tag_name),
+            "tag_name": tag_name,
+            "stat": check_spec["stat"],
+            "skill": check_spec["skill"],
+            "skill_name": check_spec["skill_name"],
+            "skill_thai": check_spec["skill_thai"],
+            "dc": dc,
+            "total_modifier": tot_mod,
+            "success_pct": pct,
+            "category_label": f"🎲 {tag_prefix}{check_spec['stat']} ({check_spec['skill_name']}) {tot_mod:+d}{prof_badge}",
+            "odds_label": f"DC {dc} • โอกาส {pct}%",
+            "odds_color": odds_color,
+            "odds_bg": odds_bg,
+            "odds_border": odds_border,
+            "sub_caption": f"ทอยทักษะ {check_spec['skill_thai']} ({check_spec['difficulty'].capitalize()})",
+        }
+
+    if m_tag and tag_name:
+        return {
+            "index": index,
+            "action_text": text,
+            "has_check": False,
+            "is_roleplay_tag": True,
+            "tag_name": tag_name,
+            "success_pct": 100,
+            "category_label": f"◆ บทบาท [{tag_name}]",
+            "odds_label": "สำเร็จทันที (Roleplay)",
+            "odds_color": "#f3d08a",
+            "odds_bg": "rgba(212, 175, 106, 0.16)",
+            "odds_border": "rgba(212, 175, 106, 0.45)",
+            "sub_caption": f"ใช้เอกลักษณ์ของ {tag_name} ในการดำเนินเรื่อง",
+        }
+
+    low = text.lower()
+    if any(k in low for k in ("พูดคุย", "ถาม", "สนทนา", "ทักทาย", "เจรจา")):
+        cat_lbl = "💬 สนทนา & ข่าวสาร"
+        sub_cap = "พูดคุยโต้ตอบกับตัวละครในฉาก"
+    elif any(k in low for k in ("ร้านค้า", "โรงเตี๊ยม", "ซื้อ", "ขาย", "กระดาน", "ภารกิจ")):
+        cat_lbl = "🏛️ สถานที่ & บริการ"
+        sub_cap = "ติดต่อสถานที่หรือตรวจสอบภารกิจ"
+    elif any(k in low for k in ("โจมตี", "ต่อสู้", "ชักดาบ", "ซุ่ม")):
+        cat_lbl = "⚔️ เตรียมปะทะ"
+        sub_cap = "อาจนำไปสู่การต่อสู้แบบ Turn-Based"
+    else:
+        cat_lbl = "🧭 สำรวจ & ดำเนินเรื่อง"
+        sub_cap = "สำรวจสภาพแวดล้อมและดำเนินเนื้อเรื่องต่อ"
+
+    return {
+        "index": index,
+        "action_text": text,
+        "has_check": False,
+        "is_roleplay_tag": False,
+        "success_pct": 100,
+        "category_label": cat_lbl,
+        "odds_label": "ไม่ต้องทอยเต๋า",
+        "odds_color": "#38bdf8",
+        "odds_bg": "rgba(56, 189, 248, 0.12)",
+        "odds_border": "rgba(56, 189, 248, 0.35)",
+        "sub_caption": sub_cap,
+    }
+
+
+def snapshot_player_world_state(player: Dict[str, Any], world: Dict[str, Any]) -> Dict[str, Any]:
+    """Capture a lightweight before-turn snapshot of key player/world stats to compute stat delta pills."""
+    hp_cur = player.get("hp", {}).get("current", 10) if isinstance(player, dict) else 10
+    curr = get_player_currency(player)
+    gold_gp = curr.get("gp", 0)
+    xp_cur = player.get("xp_current", 0) if isinstance(player, dict) else 0
+    lvl = player.get("level", 1) if isinstance(player, dict) else 1
+    insp = state_manager.get_inspiration(player) if isinstance(player, dict) else 0
+    inv_ids = [i.get("item_id") for i in player.get("inventory", []) if isinstance(i, dict)] if isinstance(player, dict) else []
+    loc = world.get("current_location", "") if isinstance(world, dict) else ""
+    q_cnt = get_active_quest_count(world) if isinstance(world, dict) else 0
+    return {
+        "hp": hp_cur,
+        "gold": gold_gp,
+        "xp": xp_cur,
+        "level": lvl,
+        "inspiration": insp,
+        "inv_ids": list(inv_ids),
+        "location": loc,
+        "quest_count": q_cnt,
+    }
+
+
+def compute_turn_stat_deltas(
+    before_snapshot: Dict[str, Any],
+    player: Dict[str, Any],
+    world: Dict[str, Any],
+    rel_change: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, str]]:
+    """
+    Compute Stat Delta Pills (like 'The Night the Grail Fills' & '1 ใน 65 ล้าน')
+    comparing before_snapshot against current player & world state.
+    """
+    if not before_snapshot or not isinstance(player, dict):
+        return []
+
+    deltas: List[Dict[str, str]] = []
+    hp_now = player.get("hp", {}).get("current", 10)
+    hp_diff = hp_now - before_snapshot.get("hp", hp_now)
+    if hp_diff != 0:
+        deltas.append({
+            "label": f"❤️ HP {hp_diff:+d}",
+            "kind": "pos" if hp_diff > 0 else "neg",
+        })
+
+    gold_now = get_player_currency(player).get("gp", 0)
+    gold_diff = gold_now - before_snapshot.get("gold", gold_now)
+    if gold_diff != 0:
+        deltas.append({
+            "label": f"💰 Gold {gold_diff:+d} GP",
+            "kind": "pos" if gold_diff > 0 else "neg",
+        })
+
+    xp_now = player.get("xp_current", 0)
+    xp_diff = xp_now - before_snapshot.get("xp", xp_now)
+    if xp_diff != 0:
+        deltas.append({
+            "label": f"✨ XP {xp_diff:+d}",
+            "kind": "pos",
+        })
+
+    lvl_now = player.get("level", 1)
+    lvl_diff = lvl_now - before_snapshot.get("level", lvl_now)
+    if lvl_diff > 0:
+        deltas.append({
+            "label": f"🆙 Level Up! (Lv.{lvl_now})",
+            "kind": "pos",
+        })
+
+    insp_now = state_manager.get_inspiration(player)
+    insp_diff = insp_now - before_snapshot.get("inspiration", insp_now)
+    if insp_diff != 0:
+        deltas.append({
+            "label": f"🌟 Inspiration {insp_diff:+d}",
+            "kind": "pos" if insp_diff > 0 else "neu",
+        })
+
+    if rel_change and isinstance(rel_change, dict) and rel_change.get("delta", 0) != 0:
+        d_val = int(rel_change["delta"])
+        npc_n = rel_change.get("npc_name", rel_change.get("npc_id", "NPC"))
+        deltas.append({
+            "label": f"{'💚' if d_val > 0 else '💔'} {npc_n} {d_val:+d}",
+            "kind": "pos" if d_val > 0 else "neg",
+        })
+
+    if isinstance(world, dict):
+        loc_now = world.get("current_location", "")
+        if loc_now and loc_now != before_snapshot.get("location", loc_now):
+            r_obj = dungeon_manager._get_room(loc_now, world) or {}
+            r_name = r_obj.get("name", loc_now)
+            deltas.append({
+                "label": f"📍 ย้ายสู่ {r_name}",
+                "kind": "neu",
+            })
+
+        q_now = get_active_quest_count(world)
+        q_diff = q_now - before_snapshot.get("quest_count", q_now)
+        if q_diff > 0:
+            deltas.append({
+                "label": f"📜 ภารกิจใหม่ +{q_diff}",
+                "kind": "neu",
+            })
+
+    return deltas
+
+
+def render_top_status_banner(
+    player: Dict[str, Any],
+    world: Dict[str, Any],
+    current_room: Dict[str, Any],
+) -> None:
+    """
+    Render the '1 ใน 65 ล้าน' × 'Holy Grail War' Top Status Banner with clear visual progress bars,
+    character identity, day/time period, and wealth/inspiration counters.
+    """
+    name = player.get("name", "Adventurer")
+    race = player.get("race", "Human")
+    cls_name = player.get("class_name", player.get("class", "Fighter"))
+    sub_name = player.get("subclass_name") or player.get("subclass") or ""
+    sub_display = f" ({sub_name.replace('_', ' ').title()})" if sub_name else ""
+    lvl = player.get("level", 1)
+    bg = player.get("background", "Folk Hero")
+
+    gt = world.get("game_time", {})
+    day = gt.get("day", 1)
+    period = str(gt.get("period", "morning")).lower()
+    period_icons = {
+        "morning": ("☀️ เช้า (Morning)", "#fbbf24"),
+        "afternoon": ("🌤️ บ่าย (Afternoon)", "#38bdf8"),
+        "evening": ("🌅 พลบค่ำ (Evening)", "#f97316"),
+        "night": ("🌙 กลางคืน (Night)", "#a855f7"),
+    }
+    p_label, _ = period_icons.get(period, ("☀️ เช้า", "#fbbf24"))
+
+    hp = player.get("hp", {"current": 10, "max": 10})
+    hp_cur = max(0, hp.get("current", 10))
+    hp_max = max(1, hp.get("max", 10))
+    hp_temp = hp.get("temp", player.get("temp_hp", 0))
+    hp_pct = min(100, int((hp_cur / hp_max) * 100))
+    hp_color = "#4ade80" if hp_pct >= 60 else ("#fbbf24" if hp_pct >= 30 else "#f87171")
+    temp_str = f" (+{hp_temp})" if hp_temp and hp_temp > 0 else ""
+
+    ac = player.get("ac", 10)
+    ac_pct = min(100, int((ac / 22.0) * 100))
+
+    xp_cur = player.get("xp_current", 0)
+    thresholds = state_manager.LEVEL_THRESHOLDS
+    next_xp = thresholds.get(min(5, lvl + 1), 6500)
+    prev_xp = thresholds.get(lvl, 0)
+    if lvl >= 5:
+        xp_pct = 100
+        xp_text = f"{xp_cur} (MAX)"
+    else:
+        span = max(1, next_xp - prev_xp)
+        xp_pct = min(100, max(0, int(((xp_cur - prev_xp) / span) * 100)))
+        xp_text = f"{xp_cur} / {next_xp}"
+
+    insp_cur = state_manager.get_inspiration(player)
+    insp_max = player.get("max_inspiration", state_manager.MAX_INSPIRATION)
+    insp_pct = min(100, int((insp_cur / max(1, insp_max)) * 100))
+
+    curr = get_player_currency(player)
+    gp_val = curr.get("gp", 0)
+    sp_val = curr.get("sp", 0)
+    rations = get_ration_count(player)
+    gold_pct = min(100, int((min(gp_val, 300) / 300.0) * 100))
+
+    room_name = current_room.get("name", "Unknown")
+    is_safe = current_room.get("is_safe", False)
+    zone_badge = "🛡️ เขตปลอดภัย" if is_safe else "⚔️ เขตอันตราย"
+
+    st.markdown(
+        f"""
+        <div class="hgw-status-banner">
+            <div class="hgw-banner-top">
+                <div>
+                    <span class="hgw-char-title">◆ {name}</span>
+                    <span style="color: #94a3b8; font-size: 0.9rem; margin-left: 8px;">
+                        Lv.{lvl} {race} {cls_name}{sub_display} &bull; {bg}
+                    </span>
+                </div>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                    <span class="hgw-badge-pill">🗓️ วันที่ {day} &bull; {p_label}</span>
+                    <span class="hgw-badge-pill">📍 {room_name} ({zone_badge})</span>
+                </div>
+            </div>
+            <div class="hgw-stats-grid">
+                <div class="hgw-stat-box">
+                    <div class="hgw-stat-header">
+                        <span>❤️ พลังชีวิต (HP)</span>
+                        <span class="hgw-stat-val" style="color: {hp_color};">{hp_cur}/{hp_max}{temp_str}</span>
+                    </div>
+                    <div class="hgw-bar-track">
+                        <div class="hgw-bar-fill" style="width: {hp_pct}%; background: {hp_color};"></div>
+                    </div>
+                </div>
+                <div class="hgw-stat-box">
+                    <div class="hgw-stat-header">
+                        <span>🛡️ เกราะป้องกัน (AC)</span>
+                        <span class="hgw-stat-val" style="color: #38bdf8;">{ac} AC</span>
+                    </div>
+                    <div class="hgw-bar-track">
+                        <div class="hgw-bar-fill" style="width: {ac_pct}%; background: linear-gradient(90deg, #0284c7, #38bdf8);"></div>
+                    </div>
+                </div>
+                <div class="hgw-stat-box">
+                    <div class="hgw-stat-header">
+                        <span>✨ ประสบการณ์ (XP)</span>
+                        <span class="hgw-stat-val" style="color: #c084fc;">{xp_text}</span>
+                    </div>
+                    <div class="hgw-bar-track">
+                        <div class="hgw-bar-fill" style="width: {xp_pct}%; background: linear-gradient(90deg, #7e22ce, #c084fc);"></div>
+                    </div>
+                </div>
+                <div class="hgw-stat-box">
+                    <div class="hgw-stat-header">
+                        <span>🌟 โชคชะตา (Insp.)</span>
+                        <span class="hgw-stat-val" style="color: #f3d08a;">{insp_cur} / {insp_max}</span>
+                    </div>
+                    <div class="hgw-bar-track">
+                        <div class="hgw-bar-fill" style="width: {insp_pct}%; background: linear-gradient(90deg, #b45309, #f3d08a);"></div>
+                    </div>
+                </div>
+                <div class="hgw-stat-box">
+                    <div class="hgw-stat-header">
+                        <span>💰 ทรัพย์สิน & เสบียง</span>
+                        <span class="hgw-stat-val" style="color: #fbbf24;">{gp_val}G {sp_val}S &bull; 🍖{rations}</span>
+                    </div>
+                    <div class="hgw-bar-track">
+                        <div class="hgw-bar-fill" style="width: {gold_pct}%; background: linear-gradient(90deg, #ca8a04, #facc15);"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_scene_stage_banner(current_room: Dict[str, Any], world: Dict[str, Any]) -> None:
+    """
+    Render the gold-framed Scene Stage with minimalist vector/silhouette illustration
+    ('The Night the Grail Fills' wireframe gold style × '1 ใน 65 ล้าน' framed stage viewport).
+    """
+    room_name = current_room.get("name", "Unknown Room")
+    room_desc = current_room.get("description", "")
+    room_type = current_room.get("type", "wilderness")
+    period = str(world.get("game_time", {}).get("period", "morning")).lower()
+
+    sky_gradients = {
+        "morning": "linear-gradient(180deg, #172038 0%, #24324f 65%, #121622 100%)",
+        "afternoon": "linear-gradient(180deg, #132238 0%, #1e334d 65%, #111520 100%)",
+        "evening": "linear-gradient(180deg, #21152b 0%, #3b2032 65%, #11131d 100%)",
+        "night": "linear-gradient(180deg, #070910 0%, #101526 65%, #0a0c14 100%)",
+    }
+    bg_grad = sky_gradients.get(period, sky_gradients["morning"])
+
+    if room_type == "town":
+        svg_art = """
+        <svg viewBox="0 0 800 120" width="100%" height="100%" preserveAspectRatio="none">
+            <circle cx="670" cy="34" r="16" fill="none" stroke="#d4af6a" stroke-width="1.6" opacity="0.85"/>
+            <circle cx="675" cy="34" r="13" fill="#131929" opacity="0.75"/>
+            <path d="M0,115 L0,85 L55,85 L55,62 L85,42 L115,62 L115,85 L170,85 L170,55 L205,30 L240,55 L240,85 L310,85 L310,70 L360,70 L360,48 L385,22 L410,48 L410,70 L470,70 L470,85 L560,85 L560,58 L595,38 L630,58 L630,85 L800,85 L800,120 Z" fill="#0b0d14" stroke="#d4af6a" stroke-width="1.2" opacity="0.9"/>
+            <line x1="385" y1="6" x2="385" y2="22" stroke="#f3d08a" stroke-width="1.5"/>
+            <rect x="195" y="62" width="7" height="9" fill="#f3d08a" opacity="0.75"/>
+            <rect x="208" y="62" width="7" height="9" fill="#f3d08a" opacity="0.75"/>
+            <rect x="378" y="56" width="6" height="10" fill="#f3d08a" opacity="0.85"/>
+            <rect x="388" y="56" width="6" height="10" fill="#f3d08a" opacity="0.85"/>
+            <rect x="590" y="66" width="8" height="8" fill="#f3d08a" opacity="0.7"/>
+        </svg>
+        """
+        type_pill = "🏘️ เขตเมือง / ชุมชน (Town)"
+    elif room_type == "dungeon":
+        svg_art = """
+        <svg viewBox="0 0 800 120" width="100%" height="100%" preserveAspectRatio="none">
+            <path d="M0,0 L800,0 L800,120 L0,120 Z" fill="none"/>
+            <path d="M180,120 L180,55 A65,45 0 0,1 310,55 L310,120" fill="#07080d" stroke="#d4af6a" stroke-width="1.4" opacity="0.85"/>
+            <path d="M490,120 L490,55 A65,45 0 0,1 620,55 L620,120" fill="#07080d" stroke="#d4af6a" stroke-width="1.4" opacity="0.85"/>
+            <circle cx="400" cy="48" r="22" fill="none" stroke="#d4af6a" stroke-width="1.5" opacity="0.75"/>
+            <polygon points="400,32 406,48 400,64 394,48" fill="#f3d08a" opacity="0.8"/>
+            <line x1="120" y1="0" x2="120" y2="120" stroke="#d4af6a" stroke-width="1" opacity="0.35"/>
+            <line x1="680" y1="0" x2="680" y2="120" stroke="#d4af6a" stroke-width="1" opacity="0.35"/>
+        </svg>
+        """
+        type_pill = "🏰 ดันเจี้ยน / โบราณสถาน (Dungeon)"
+    else:
+        svg_art = """
+        <svg viewBox="0 0 800 120" width="100%" height="100%" preserveAspectRatio="none">
+            <circle cx="650" cy="32" r="15" fill="none" stroke="#f3d08a" stroke-width="1.5" opacity="0.85"/>
+            <path d="M0,115 L90,62 L175,102 L290,42 L410,98 L530,48 L650,96 L750,58 L800,88 L800,120 L0,120 Z" fill="#0d111c" stroke="#d4af6a" stroke-width="1.1" opacity="0.75"/>
+            <polygon points="140,115 155,70 170,115" fill="#090b12" stroke="#d4af6a" stroke-width="1"/>
+            <polygon points="220,115 238,62 256,115" fill="#090b12" stroke="#d4af6a" stroke-width="1"/>
+            <polygon points="580,115 596,66 612,115" fill="#090b12" stroke="#d4af6a" stroke-width="1"/>
+        </svg>
+        """
+        type_pill = "🌲 ป่าและดินแดนธรรมชาติ (Wilderness)"
+
+    npcs = current_room.get("npcs", [])
+    npc_str = f"🧑 ผู้คนในฉาก: {', '.join(n.replace('_', ' ').title() for n in npcs)}" if npcs else "🍃 ไร้ผู้คนในบริเวณใกล้เคียง"
+
+    st.markdown(
+        f"""
+        <div class="hgw-scene-stage">
+            <div class="hgw-scene-visual" style="background: {bg_grad};">
+                {svg_art}
+            </div>
+            <div class="hgw-scene-body">
+                <div class="hgw-scene-header">
+                    <h2 class="hgw-scene-name">◆ {room_name}</h2>
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <span class="hgw-badge-pill">{type_pill}</span>
+                        <span class="hgw-badge-pill">{npc_str}</span>
+                    </div>
+                </div>
+                <p class="hgw-scene-desc">{room_desc}</p>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _render_navigation_column(player: Dict[str, Any], world: Dict[str, Any]):
@@ -275,6 +725,23 @@ def _render_navigation_column(player: Dict[str, Any], world: Dict[str, Any]):
         else:
             st.caption("⛔ บริเวณนี้ไม่มีทางออกที่ชัดเจน (Dead End)")
 
+        # Interactive World Atlas & Discovered Locations Minimap
+        visited_ids = list(world.get("visited_rooms", []))
+        cleared_ids = set(world.get("cleared_rooms", []))
+        cur_id = world.get("current_location")
+        if visited_ids:
+            with st.expander(f"🗺️ แผนที่โลกที่สำรวจแล้ว ({len(visited_ids)} พื้นที่)", expanded=False):
+                for vid in visited_ids:
+                    v_room = dungeon_manager._get_room(vid, world)
+                    if not v_room:
+                        continue
+                    v_name = v_room.get("name", vid)
+                    v_type = v_room.get("type", "wilderness")
+                    t_icon = "🏘️" if v_type == "town" else ("🏰" if v_type == "dungeon" else "🌲")
+                    here_badge = " 📍 **(อยู่ที่นี่)**" if vid == cur_id else ""
+                    clear_badge = " ✅" if (vid in cleared_ids or v_room.get("is_safe")) else ""
+                    st.markdown(f"{t_icon} **{v_name}**{here_badge}{clear_badge}")
+
 
 def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_room: Dict[str, Any]):
     """Render Tab 1: BG3 Skill Checks, Suggested Actions, Chat Form, and Manual Rolls/Pickpocket/Spells."""
@@ -291,24 +758,25 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
         bg3_prof = bg3_spec["proficiency"]
         bg3_is_prof = bg3_spec["is_proficient"]
         bg3_tot_mod = bg3_spec["total_modifier"]
+        bg3_chance_pct = calculate_check_success_chance(bg3_tot_mod, bg3_dc)
 
         st.markdown(
             f"""
-            <div style="background: linear-gradient(135deg, rgba(26, 20, 38, 0.95) 0%, rgba(15, 12, 24, 0.98) 100%); 
-                        border: 2px solid #b8860b; border-radius: 12px; padding: 18px; margin-bottom: 20px;
-                        box-shadow: 0 4px 20px rgba(184, 134, 11, 0.25);">
+            <div style="background: linear-gradient(135deg, rgba(22, 26, 39, 0.97) 0%, rgba(12, 14, 22, 0.99) 100%); 
+                        border: 2px solid #d4af6a; border-radius: 12px; padding: 18px; margin-bottom: 20px;
+                        box-shadow: 0 6px 24px rgba(212, 175, 106, 0.25);">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <span style="font-size: 1.15em; font-weight: 700; color: #ffd700; letter-spacing: 0.05em;">
-                        🎲 BALDUR'S GATE 3 — ABILITY CHECK
+                    <span style="font-family: 'Cinzel', serif; font-size: 1.15em; font-weight: 700; color: #f3d08a; letter-spacing: 0.05em;">
+                        ◆ D&D 5e / BG3 — ABILITY CHECK
                     </span>
-                    <span style="background: rgba(184, 134, 11, 0.2); border: 1px solid #b8860b; color: #fde047; padding: 2px 10px; border-radius: 20px; font-size: 0.85em;">
-                        DC {bg3_dc} ({bg3_diff.capitalize()})
+                    <span style="background: rgba(212, 175, 106, 0.2); border: 1px solid #d4af6a; color: #f3d08a; padding: 2px 12px; border-radius: 20px; font-size: 0.85em; font-weight: 600;">
+                        DC {bg3_dc} ({bg3_diff.capitalize()}) &bull; โอกาสสำเร็จ {bg3_chance_pct}%
                     </span>
                 </div>
                 <div style="font-size: 1.05em; color: #f1f5f9; margin-bottom: 12px;">
                     🎯 <b>การกระทำ:</b> <i>"{bg3_action}"</i>
                 </div>
-                <div style="background: rgba(255, 255, 255, 0.04); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: flex; justify-content: space-around; text-align: center;">
+                <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(212, 175, 106, 0.2); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: flex; justify-content: space-around; text-align: center;">
                     <div>
                         <div style="font-size: 0.8em; color: #94a3b8;">ทักษะ / สแตท</div>
                         <div style="font-size: 1.1em; font-weight: 600; color: #38bdf8;">{bg3_stat} ({bg3_skill})</div>
@@ -326,7 +794,11 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
                     </div>
                     <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 14px;">
                         <div style="font-size: 0.8em; color: #94a3b8;">โบนัสรวม</div>
-                        <div style="font-size: 1.2em; font-weight: 700; color: #fbbf24;">{bg3_tot_mod:+d}</div>
+                        <div style="font-size: 1.2em; font-weight: 700; color: #f3d08a;">{bg3_tot_mod:+d}</div>
+                    </div>
+                    <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 14px;">
+                        <div style="font-size: 0.8em; color: #94a3b8;">โอกาสสำเร็จ</div>
+                        <div style="font-size: 1.2em; font-weight: 700; color: {'#4ade80' if bg3_chance_pct >= 65 else ('#fbbf24' if bg3_chance_pct >= 40 else '#f87171')};">{bg3_chance_pct}%</div>
                     </div>
                 </div>
             </div>
@@ -353,6 +825,7 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
             st.rerun()
 
         if roll_clicked:
+            before_snap = snapshot_player_world_state(player, world)
             chk_res = state_manager.resolve_check(
                 stat=bg3_stat,
                 difficulty=bg3_diff,
@@ -402,12 +875,22 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
 
             hist = st.session_state.get("history_buffer", [])
             active_model = get_current_active_model()
+            mm = get_session_memory_manager()
+            relevant_lore = []
+            if mm is not None:
+                try:
+                    relevant_lore = mm.get_relevant_lore(f"{current_room.get('name', '')} {bg3_action}", n_results=3)
+                except Exception:
+                    relevant_lore = []
+
+            rel_res_turn = None
             with st.spinner("🎲 DM กำลังสรุปผลการทอยและเล่าเรื่องต่อ..."):
                 res = llm_handler.generate_narrative_response(
                     user_input=bg3_action,
                     player_state=player,
                     world_state=world,
                     history=hist,
+                    lore_entries=relevant_lore,
                     model=active_model,
                     roll_result=roll_inj,
                     single_pass=True,
@@ -443,11 +926,11 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
                     if "quest_updates" in ext_res and ext_res["quest_updates"]:
                         state_manager.apply_quest_updates(ext_res["quest_updates"], world)
                     if "npc_relationship_change" in ext_res and ext_res["npc_relationship_change"]:
-                        rel_res = state_manager.apply_npc_relationship_change(ext_res["npc_relationship_change"], world)
-                        if rel_res and rel_res.get("delta", 0) != 0:
-                            d_val = rel_res["delta"]
+                        rel_res_turn = state_manager.apply_npc_relationship_change(ext_res["npc_relationship_change"], world)
+                        if rel_res_turn and rel_res_turn.get("delta", 0) != 0:
+                            d_val = rel_res_turn["delta"]
                             icon_r = "💚" if d_val > 0 else "💔"
-                            st.toast(f"{icon_r} {rel_res['npc_name']}: ความสัมพันธ์ {d_val:+d}")
+                            st.toast(f"{icon_r} {rel_res_turn['npc_name']}: ความสัมพันธ์ {d_val:+d}")
                     if "combat_start" in ext_res and ext_res["combat_start"]:
                         c_enemies = ext_res["combat_start"].get("enemies", [])
                         if c_enemies:
@@ -457,9 +940,24 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
                                 "content": f"⚔️ Combat initiated against **{', '.join(e.replace('_', ' ').title() for e in c_enemies)}**!"
                             })
 
-                st.session_state["narrative_log"].append({"role": "assistant", "content": narrative_text})
+                turn_deltas = compute_turn_stat_deltas(before_snap, player, world, rel_change=rel_res_turn)
+                turn_deltas.insert(0, {
+                    "label": f"🎲 {bg3_stat} ({bg3_skill}) {tot_val} vs DC {dc_val}",
+                    "kind": "pos" if is_succ else "neg",
+                })
+                st.session_state["last_turn_deltas"] = turn_deltas
+                st.session_state["narrative_log"].append({
+                    "role": "assistant",
+                    "content": narrative_text,
+                    "deltas": turn_deltas,
+                })
                 st.session_state["history_buffer"].append({"role": "user", "content": bg3_action})
                 st.session_state["history_buffer"].append({"role": "assistant", "content": narrative_text})
+                if mm is not None and narrative_text:
+                    try:
+                        mm.add_turn(f"[{current_room.get('name', 'Location')}] Player: {bg3_action} -> Roll: {badge} -> Outcome: {narrative_text[:280]}")
+                    except Exception:
+                        pass
 
             st.session_state.pop("pending_bg3_check", None)
             auto_save()
@@ -467,21 +965,37 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
 
         st.stop()
 
-    # Contextual Action Suggestions
+    # Contextual Action Suggestions — '1 in 65 Million' × 'Holy Grail War' Transparent Choice Cards
     suggestions = st.session_state.get("action_suggestions") or list(llm_handler.DEFAULT_ACTION_SUGGESTIONS)
     if suggestions == llm_handler.DEFAULT_ACTION_SUGGESTIONS:
         suggestions = [
-            "เดินไปที่โรงเตี๊ยมเพื่อดูกระดานประกาศภารกิจ",
-            "แวะดูสินค้าที่ร้านค้าและโรงตีเหล็ก",
-            "พูดคุยสอบถามข่าวสารกับชาวบ้านในจัตุรัส",
+            "[Persuasion] พูดคุยสอบถามข่าวลือและขอคำแนะนำจากชาวบ้านในจัตุรัส",
+            "เดินไปที่โรงเตี๊ยมมังกรเมาเพื่อดูกระดานประกาศภารกิจ",
+            "[Insight] สังเกตท่าทีของผู้คนและแวะดูสินค้าที่ร้านค้า",
         ]
         st.session_state["action_suggestions"] = list(suggestions)
-    st.caption("💡 **Suggested Actions:**")
+
+    st.markdown("##### ◆ ทางเลือกการตัดสินใจ (Decision Choices — แสดงโอกาสสำเร็จ & ทักษะที่ใช้)")
     sug_cols = st.columns(3)
     clicked_suggestion = None
     for idx, sug_text in enumerate(suggestions[:3]):
+        meta = build_choice_card_metadata(sug_text, player, index=idx + 1)
         with sug_cols[idx]:
-            if st.button(f"✨ {sug_text}", key=f"sug_btn_{idx}", use_container_width=True):
+            st.markdown(
+                f"""
+                <div class="hgw-choice-preview">
+                    <div class="hgw-choice-top">
+                        <span class="hgw-choice-num">[{meta['index']}] {meta['category_label']}</span>
+                        <span class="hgw-choice-odds" style="color: {meta['odds_color']}; background: {meta['odds_bg']}; border: 1px solid {meta['odds_border']};">
+                            {meta['odds_label']}
+                        </span>
+                    </div>
+                    <div class="hgw-choice-meta">{meta['sub_caption']}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button(f"[{idx + 1}] {sug_text}", key=f"sug_btn_{idx}", use_container_width=True):
                 clicked_suggestion = sug_text
 
     # Action Text Input Form
@@ -553,16 +1067,26 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
             }
             st.rerun()
 
+        before_snap = snapshot_player_world_state(player, world)
         st.session_state["narrative_log"].append({"role": "user", "content": action_to_process})
 
         hist = st.session_state.get("history_buffer", [])
         active_model = get_current_active_model()
+        mm = get_session_memory_manager()
+        relevant_lore = []
+        if mm is not None:
+            try:
+                relevant_lore = mm.get_relevant_lore(f"{current_room.get('name', '')} {action_to_process}", n_results=3)
+            except Exception:
+                relevant_lore = []
+
         with st.spinner("📖 DM กำลังเล่าเรื่องราวต่อ..."):
             res = llm_handler.generate_narrative_response(
                 user_input=action_to_process,
                 player_state=player,
                 world_state=world,
                 history=hist,
+                lore_entries=relevant_lore,
                 model=active_model,
                 single_pass=True,
                 ollama_model=st.session_state.get("selected_model"),
@@ -581,6 +1105,7 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
                 ollama_model=st.session_state.get("selected_model"),
             )
 
+        rel_res_turn = None
         if ext_res:
             if "world_updates" in ext_res and ext_res["world_updates"]:
                 w_up = ext_res["world_updates"]
@@ -597,11 +1122,11 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
             if "quest_updates" in ext_res and ext_res["quest_updates"]:
                 state_manager.apply_quest_updates(ext_res["quest_updates"], world)
             if "npc_relationship_change" in ext_res and ext_res["npc_relationship_change"]:
-                rel_res = state_manager.apply_npc_relationship_change(ext_res["npc_relationship_change"], world)
-                if rel_res and rel_res.get("delta", 0) != 0:
-                    d_val = rel_res["delta"]
+                rel_res_turn = state_manager.apply_npc_relationship_change(ext_res["npc_relationship_change"], world)
+                if rel_res_turn and rel_res_turn.get("delta", 0) != 0:
+                    d_val = rel_res_turn["delta"]
                     icon_r = "💚" if d_val > 0 else "💔"
-                    st.toast(f"{icon_r} {rel_res['npc_name']}: ความสัมพันธ์ {d_val:+d}")
+                    st.toast(f"{icon_r} {rel_res_turn['npc_name']}: ความสัมพันธ์ {d_val:+d}")
             if "combat_start" in ext_res and ext_res["combat_start"]:
                 c_enemies = ext_res["combat_start"].get("enemies", [])
                 if c_enemies:
@@ -635,9 +1160,20 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
                 else:
                     st.session_state.pop("pending_inspiration_reroll", None)
 
-        st.session_state["narrative_log"].append({"role": "assistant", "content": narrative_text})
+        turn_deltas = compute_turn_stat_deltas(before_snap, player, world, rel_change=rel_res_turn)
+        st.session_state["last_turn_deltas"] = turn_deltas
+        st.session_state["narrative_log"].append({
+            "role": "assistant",
+            "content": narrative_text,
+            "deltas": turn_deltas,
+        })
         st.session_state["history_buffer"].append({"role": "user", "content": action_to_process})
         st.session_state["history_buffer"].append({"role": "assistant", "content": narrative_text})
+        if mm is not None and narrative_text:
+            try:
+                mm.add_turn(f"[{current_room.get('name', 'Location')}] Player: {action_to_process} -> DM: {narrative_text[:280]}")
+            except Exception:
+                pass
 
         auto_save()
         st.rerun()
@@ -907,6 +1443,9 @@ def render_playing_view():
         st.error("Current location is invalid or missing.")
         return
 
+    # ── 1 in 65 Million × Holy Grail War Top Status Banner ────────────────────
+    render_top_status_banner(player, world, current_room)
+
     # ── Top RPG Quick-Access HUD Bar ──────────────────────────────────────────
     inv_count = len(player.get("inventory", []))
     active_q_count = get_active_quest_count(world)
@@ -930,23 +1469,13 @@ def render_playing_view():
         if st.button(camp_label, use_container_width=True, key="hud_camp", help="ตั้งแคมป์ & พักผ่อน (Rest & Camp)"):
             show_camp_dialog()
 
-    # Header Room Description
-    st.title(f"📍 {current_room.get('name', 'Unknown Room')}")
-    st.info(f"*{current_room.get('description', '')}*")
+    # ── Gold-Framed Scene Stage Banner ────────────────────────────────────────
+    render_scene_stage_banner(current_room, world)
 
     # Status message if any
     if st.session_state.get("last_action_msg"):
         st.toast(st.session_state["last_action_msg"])
         st.session_state["last_action_msg"] = None
-
-    # Story & Narrative Log Header
-    char_display_name = player.get("name", "Player") if player else "Player"
-    total_msgs = len(st.session_state.get("narrative_log", []))
-    col_nh, col_nc = st.columns([3, 1])
-    with col_nh:
-        st.markdown(f"### 📜 Narrative Log &bull; <span style='font-size: 1.05rem; color: #cbd5e1;'>{char_display_name}</span>", unsafe_allow_html=True)
-    with col_nc:
-        st.caption(f"💬 {total_msgs} ข้อความในบันทึก")
 
     # Auto-enhance initial prologue if needed for current session
     log = st.session_state.get("narrative_log", [])
@@ -958,7 +1487,43 @@ def render_playing_view():
             "• 🌲 **เส้นทางออกนอกเมือง:** มุ่งหน้าสู่ป่าธอร์นวูดทางทิศเหนือ ซึ่งมีข่าวลือเรื่องก็อบลินและดันเจียนลึกลับ\n\n"
             "**เจ้าต้องการมุ่งหน้าไปสำรวจที่ไหนก่อนดี?** *(สามารถคลิกปุ่มตัวเลือกแนะนำด้านล่าง หรือพิมพ์คำสั่งสิ่งที่อยากทำได้เลย)*"
         )
-    log_container = st.container(height=520)
+
+    # ── Featured Current Event Card (Holy Grail War style) ────────────────────
+    char_display_name = player.get("name", "Player") if player else "Player"
+    total_msgs = len(log)
+    latest_assistant_entry = next((e for e in reversed(log) if e.get("role") == "assistant"), None)
+    if latest_assistant_entry:
+        gt = world.get("game_time", {})
+        ev_deltas = latest_assistant_entry.get("deltas") or st.session_state.get("last_turn_deltas") or []
+        delta_pills_html = ""
+        if ev_deltas:
+            pills = []
+            for d_item in ev_deltas:
+                k_cls = "hgw-delta-pos" if d_item.get("kind") == "pos" else ("hgw-delta-neg" if d_item.get("kind") == "neg" else "hgw-delta-neu")
+                pills.append(f'<span class="hgw-delta-pill {k_cls}">{d_item.get("label", "")}</span>')
+            delta_pills_html = f'<div class="hgw-delta-row">{"".join(pills)}</div>'
+
+        st.markdown(
+            f"""
+            <div class="hgw-featured-event">
+                <div class="hgw-event-eyebrow">
+                    <span>◆ เหตุการณ์ปัจจุบัน &bull; {current_room.get('name', 'Scene')}</span>
+                    <span>Day {gt.get('day', 1)} &bull; {str(gt.get('period', 'morning')).capitalize()}</span>
+                </div>
+                {delta_pills_html}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # Story & Narrative Log Header
+    col_nh, col_nc = st.columns([3, 1])
+    with col_nh:
+        st.markdown(f"### 📜 บันทึกการผจญภัย (Adventure Chronicle) &bull; <span style='font-size: 1.05rem; color: #f3d08a;'>{char_display_name}</span>", unsafe_allow_html=True)
+    with col_nc:
+        st.caption(f"💬 {total_msgs} เหตุการณ์ในบันทึก")
+
+    log_container = st.container(height=500)
     with log_container:
         for entry in st.session_state["narrative_log"]:
             role = entry.get("role", "assistant")
@@ -970,6 +1535,11 @@ def render_playing_view():
                 with st.chat_message("assistant", avatar="🎲"):
                     st.caption("**Dungeon Master AI**")
                     st.markdown(entry.get("content", ""))
+                    entry_deltas = entry.get("deltas")
+                    if entry_deltas:
+                        pills_md = " ".join(f"`{d.get('label')}`" for d in entry_deltas if d.get("label"))
+                        if pills_md:
+                            st.caption(f"◆ ผลลัพธ์: {pills_md}")
 
     combat_active = world.get("combat_state") is not None
 

@@ -720,12 +720,32 @@ def render_combat_panel(player: Dict[str, Any], world: Dict[str, Any], current_r
 
             # 5. Check combat end
             if outcome == "player_victory":
+                xp_gained = cs.get("xp_gained", 0)
+                gold_looted = cs.get("gold_looted", 0)
+                items_looted = cs.get("items_looted", [])
+                leveled_up = cs.get("leveled_up", False)
                 combat_manager.end_combat(world)
-                st.success("🎉 Combat Victory! All enemies have been defeated.")
+                loot_parts = [f"+{xp_gained} XP"]
+                if gold_looted > 0:
+                    loot_parts.append(f"+{gold_looted} GP")
+                if items_looted:
+                    loot_parts.append(f"Items: {', '.join(items_looted)}")
+                lvl_msg = " 🌟 **LEVEL UP!**" if leveled_up else ""
+                reward_summary = f" ({' | '.join(loot_parts)}){lvl_msg}"
+                st.success(f"🎉 Combat Victory! All enemies have been defeated.{reward_summary}")
                 st.session_state["narrative_log"].append({
                     "role": "assistant",
-                    "content": "🏆 **Victory!** You defeated your foes and stand triumphant."
+                    "content": f"🏆 **Victory!** You defeated your foes and stand triumphant.{reward_summary}"
                 })
+                # Store combat victory in long-term ChromaDB memory!
+                from ui.session import get_session_memory_manager
+                mm = get_session_memory_manager()
+                if mm is not None:
+                    try:
+                        enemy_names_str = ", ".join(e.get("name", "enemy") for e in enemies)
+                        mm.add_turn(f"Defeated {enemy_names_str} in combat at {current_room.get('name', 'the battlefield')}{reward_summary}.")
+                    except Exception:
+                        pass
             elif outcome == "player_defeat":
                 out_res = cs.get("downed_outcome") or state_manager.resolve_downed_outcome(player, cs, world)
                 combat_manager.end_combat(world)

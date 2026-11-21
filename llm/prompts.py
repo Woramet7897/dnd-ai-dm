@@ -8,8 +8,6 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-import validation
-
 logger = logging.getLogger("llm_handler")
 
 DEFAULT_NUM_CTX = 4096
@@ -410,6 +408,7 @@ def extract_and_strip_single_pass(
                         if s:
                             suggestions.append(s)
                 try:
+                    import validation
                     state_updates_res = validation.validate_extraction_output(
                         data, world_state=world_state, player_state=player_state
                     )

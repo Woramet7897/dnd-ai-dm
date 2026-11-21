@@ -94,12 +94,20 @@ def render_landing_view():
     apply_custom_css()
 
     st.markdown("""
-    <div style="text-align: center; padding: 18px 0 12px 0;">
-        <h1 style="font-size: 2.3rem; margin-bottom: 6px; background: linear-gradient(90deg, #f8fafc, #fda4af); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+    <div style="background: linear-gradient(180deg, #131724 0%, #0b0d14 100%);
+                border: 1px solid #d4af6a; border-radius: 14px; padding: 22px 24px 18px 24px;
+                margin-bottom: 18px; text-align: center;
+                box-shadow: 0 10px 32px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(212, 175, 106, 0.15);">
+        <div style="font-size: 0.78rem; letter-spacing: 0.16em; color: #d4af6a; text-transform: uppercase; margin-bottom: 6px;">
+            ◆ Tabletop D&D 5e &bull; Interactive Narrative RPG ◆
+        </div>
+        <h1 style="font-family: 'Cinzel', serif; font-size: 2.35rem; margin-bottom: 6px;
+                   background: linear-gradient(90deg, #f3d08a, #d4af6a, #f8fafc);
+                   -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
             ⚔️ D&D 5e AI DM Engine
         </h1>
-        <p style="color: #94a3b8; font-size: 1.05rem; margin: 0;">
-            A Tactical Single-Player D&D 5th Edition Adventure powered by AI (Baldur's Gate 3 Edition)
+        <p style="color: #cbd5e1; font-size: 1.02rem; margin: 0;">
+            ผจญภัยสวมบทบาท D&D 5e ขับเคลื่อนด้วย AI &bull; ระบบทักษะ Baldur's Gate 3 &bull; การ์ดตัวเลือกแสดงโอกาสสำเร็จชัดเจน
         </p>
     </div>
     """, unsafe_allow_html=True)

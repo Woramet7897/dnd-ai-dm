@@ -8,8 +8,6 @@ import math
 import re
 from typing import Any, Dict, List, Optional
 
-import validation
-
 logger = logging.getLogger("validation")
 
 PROMPT_INJECTION_PATTERNS: List[re.Pattern] = [
@@ -551,6 +549,7 @@ def validate_generated_event(
         title = "Local Rumor"
 
     loc_id = event_data.get("location_id")
+    import validation
     dm = validation._get_dungeon_manager()
     known_rooms = dm._all_known_room_ids(world_state if world_state else {})
     if not isinstance(loc_id, str) or loc_id not in known_rooms:

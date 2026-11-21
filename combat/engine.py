@@ -9,7 +9,6 @@ import logging
 import random
 from typing import Any, Dict, List, Optional
 
-import combat_manager
 from rules import _get_item_catalog, _inventory_item_info, get_modifier
 from combat.conditions import _get_condition_set, tick_conditions, tick_surface
 
@@ -28,6 +27,7 @@ def roll_initiative(combatants: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     Ties broken by DEX modifier, then by random tiebreak.
     Respects Alert feat (+5 initiative).
     """
+    import combat_manager
     for c in combatants:
         roll = combat_manager._roll_d20()
         dex_m = _get_dex_mod(c)
@@ -54,6 +54,7 @@ def _build_combatant_from_catalog(
     world_state: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Build a live combatant dict from the monster catalog entry or world_state["generated_monsters"]."""
+    import combat_manager
     catalog = combat_manager._get_monster_catalog()
     template = catalog.get(monster_id)
     if template is None and world_state and isinstance(world_state, dict):
@@ -290,7 +291,14 @@ def resolve_enemy_turn(
     targets: List[Dict[str, Any]],
     combat_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Resolve an enemy's turn: pick a target and attack with the first non-None attack."""
+    """
+    Resolve an enemy's turn with Tactical BG3 AI:
+    - Skips turn if stunned/held/paralyzed/sleeping.
+    - Target selection: prioritizes vulnerable targets (held/sleeping/prone/dazed or low HP < 30%) if multiple targets exist,
+      falling back to living_targets[0] (player) so deterministic single-target unit tests remain 100% consistent.
+    - Attack selection: if enemy has multiple attacks (e.g. melee + ranged, or special condition attack),
+      picks ranged/special attack if target has high ground or doesn't yet have the condition.
+    """
     e_conds = _get_condition_set(enemy)
     for skip_cond in ("stunned", "held", "paralyzed", "sleeping"):
         if skip_cond in e_conds:
@@ -304,14 +312,40 @@ def resolve_enemy_turn(
                 "skipped": True, "reason": "no_targets"}
 
     target = living_targets[0]
+    if len(living_targets) > 1:
+        # Tactical Target Priority: finish off critically wounded (<25% HP) or incapacitated companions/player
+        for t_cand in living_targets:
+            t_cset = _get_condition_set(t_cand)
+            t_hp = t_cand.get("hp", {})
+            t_ratio = t_hp.get("current", 10) / max(1, t_hp.get("max", 10))
+            if any(c in t_cset for c in ("held", "sleeping", "prone")) or t_ratio < 0.25:
+                target = t_cand
+                break
+
     attacks = enemy.get("attacks", [])
     if not attacks:
         return {"attacker_id": enemy["id"], "attacker_name": enemy.get("name", ""),
                 "skipped": True, "reason": "no_attacks"}
 
-    res = combat_manager.resolve_attack(enemy, target, attacks[0], combat_state=combat_state)
-    # Armor of Agathys cold retaliation if target has armor_of_agathys and temp HP
-    if res.get("hit") and not attacks[0].get("ranged", False):
+    chosen_attack = attacks[0]
+    if len(attacks) > 1:
+        t_conds = _get_condition_set(target)
+        # Prefer an attack that applies a condition the target doesn't have yet
+        cond_atk = next(
+            (a for a in attacks if a.get("applies_condition") and a["applies_condition"] not in t_conds),
+            None,
+        )
+        if cond_atk:
+            chosen_attack = cond_atk
+        elif target.get("has_high_ground") or enemy.get("has_high_ground"):
+            rng_atk = next((a for a in attacks if a.get("ranged")), None)
+            if rng_atk:
+                chosen_attack = rng_atk
+
+    import combat_manager
+    res = combat_manager.resolve_attack(enemy, target, chosen_attack, combat_state=combat_state)
+    # Armor of Agathys cold retaliation if target has armor_of_agathys
+    if res.get("hit") and not chosen_attack.get("ranged", False):
         if "armor_of_agathys" in _get_condition_set(target):
             e_hp = enemy.setdefault("hp", {"current": 10, "max": 10})
             e_hp["current"] = max(0, e_hp["current"] - 5)
@@ -324,13 +358,48 @@ def resolve_companion_turn(
     enemies: List[Dict[str, Any]],
     combat_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Resolve a companion's turn: attack the lowest-HP living enemy."""
+    """
+    Resolve a companion's turn with Tactical Support & Focus-Fire AI:
+    - Emergency Heal: If the player is critically wounded (<= 30% Max HP) and companion is a support role
+      (Cleric, Bard, Paladin, Druid, Healer) and hasn't used their emergency heal this combat, heals the player!
+    - Focus Fire: Attacks the lowest-HP living enemy using their strongest available attack.
+    """
+    import combat_manager
     c_conds = _get_condition_set(companion)
     for skip_cond in ("stunned", "held", "paralyzed", "sleeping"):
         if skip_cond in c_conds:
             logger.debug(f"resolve_companion_turn: {companion.get('name')} is {skip_cond} — skip.")
             return {"attacker_id": companion["id"], "attacker_name": companion.get("name", ""),
                     "skipped": True, "reason": skip_cond}
+
+    # Check if player needs emergency support healing from a healer companion
+    if combat_state and not companion.get("_emergency_heal_used"):
+        player_c = combat_state.get("player_combatant")
+        c_role = str(companion.get("role", companion.get("class", ""))).lower()
+        is_healer = any(r in c_role for r in ("cleric", "bard", "paladin", "druid", "healer", "priest", "support"))
+        if is_healer and isinstance(player_c, dict):
+            p_hp = player_c.get("hp", {})
+            p_cur = p_hp.get("current", 10)
+            p_max = max(1, p_hp.get("max", 10))
+            if 0 < p_cur <= max(3, int(p_max * 0.30)):
+                companion["_emergency_heal_used"] = True
+                heal_amt = combat_manager.roll_dice("1d8+2")
+                p_hp["current"] = min(p_max, p_cur + heal_amt)
+                c_name = companion.get("name", "Companion")
+                p_name = player_c.get("name", "Player")
+                return {
+                    "action_type": "class_action",
+                    "attacker_id": companion["id"],
+                    "attacker_name": c_name,
+                    "target_id": "player",
+                    "target_name": p_name,
+                    "attack_name": "Healing Word",
+                    "hit": True,
+                    "damage": 0,
+                    "healed": heal_amt,
+                    "target_hp_after": p_hp["current"],
+                    "narration": f"{c_name} casts an emergency healing prayer on {p_name}, restoring {heal_amt} HP!",
+                }
 
     living_enemies = [e for e in enemies if e.get("hp", {}).get("current", 0) > 0]
     if not living_enemies:
@@ -503,6 +572,28 @@ def check_combat_end(combat_state: Dict[str, Any], world_state: Optional[Dict[st
         state_manager.award_xp(total_xp, p_state)
         combat_state["xp_gained"] = total_xp
 
+        # Roll gold_drop and item loot from defeated enemies!
+        total_gold_looted = 0
+        items_looted: List[str] = []
+        for e in enemies:
+            g_drop = e.get("gold_drop")
+            if isinstance(g_drop, dict):
+                g_min = int(g_drop.get("min", 0))
+                g_max = int(g_drop.get("max", g_min))
+                if g_max > 0 and g_max >= g_min:
+                    total_gold_looted += random.randint(g_min, g_max)
+            e_loot = e.get("loot_table", [])
+            if isinstance(e_loot, list):
+                for l_iid in e_loot:
+                    if isinstance(l_iid, str) and l_iid.strip():
+                        items_looted.append(l_iid.strip())
+                        state_manager.apply_state_updates({"add_item_id": l_iid.strip()}, p_state, world_state)
+
+        if total_gold_looted > 0:
+            state_manager.add_currency(p_state, gp=total_gold_looted)
+        combat_state["gold_looted"] = total_gold_looted
+        combat_state["items_looted"] = items_looted
+
         leveled_up = False
         while state_manager.check_level_up(p_state):
             state_manager.apply_level_up(p_state)
@@ -516,6 +607,9 @@ def check_combat_end(combat_state: Dict[str, Any], world_state: Optional[Dict[st
 
         if world_state and isinstance(world_state, dict):
             cur_loc = world_state.get("current_location")
+            if cur_loc:
+                import dungeon_manager
+                dungeon_manager.mark_room_cleared(cur_loc, world_state)
             enemy_names = [e.get("monster_id", e.get("id", "")) for e in enemies]
             nb = world_state.get("notice_board", {})
             for entry in list(nb.get("entries", [])):

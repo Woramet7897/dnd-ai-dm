@@ -6,7 +6,6 @@ import copy
 import logging
 from typing import Any, Dict, List, Optional
 
-import dungeon_manager
 from dungeon.navigation import _all_known_room_ids, _get_room
 
 logger = logging.getLogger("dungeon_manager")
@@ -45,6 +44,7 @@ def refresh_notice_board(
     if not force and last_day > 0 and (current_day - last_day) < 3 and "entries" in nb:
         return nb.get("entries", [])
 
+    import dungeon_manager
     all_rooms = _all_known_room_ids(world_state)
     refresh_count = nb.get("refresh_count", 0) + 1
 
@@ -146,13 +146,15 @@ def refresh_notice_board(
     nb["entries"] = entries
 
     tavern_id = _find_tavern_room_id(world_state)
-    if tavern_id not in world_state.setdefault("dynamic_rooms", {}):
-        t_copy = dungeon_manager._load_static_catalog().get(tavern_id)
-        if t_copy:
-            world_state["dynamic_rooms"][tavern_id] = copy.deepcopy(t_copy)
-        else:
-            world_state["dynamic_rooms"][tavern_id] = {"id": tavern_id}
-    world_state["dynamic_rooms"][tavern_id]["notice_board"] = entries
+    for tid in {tavern_id, "town_riverside"}:
+        if tid in all_rooms:
+            if tid not in world_state.setdefault("dynamic_rooms", {}):
+                t_copy = dungeon_manager._load_static_catalog().get(tid)
+                if t_copy:
+                    world_state["dynamic_rooms"][tid] = copy.deepcopy(t_copy)
+                else:
+                    world_state["dynamic_rooms"][tid] = {"id": tid}
+            world_state["dynamic_rooms"][tid]["notice_board"] = entries
 
     logger.info(f"refresh_notice_board: refreshed notice board for Day {current_day} ({len(entries)} quests posted).")
     return entries

@@ -123,17 +123,19 @@ KEYWORD_RULES = [
     # Religion (INT)
     (r"(?:แท่นบูชา|บทสวด|สัญลักษณ์เทพ|รูปปั้นบูชา|\breligion\b|\baltar\b)", "religion", "medium"),
     # Insight (WIS)
-    (r"(?:จับโกหก|อ่านสีหน้า|สังเกตท่าที|หยั่งรู้|\binsight\b)", "insight", "medium"),
+    (r"(?:จับโกหก|จับพิรุธ|อ่านสีหน้า|สังเกตท่าที|สังเกตแววตา|อ่านใจ|หยั่งรู้|ดูว่าโกหก|\binsight\b|\bread motive\w*\b)", "insight", "medium"),
     # Medicine (WIS)
     (r"(?:รักษาแผล|ปฐมพยาบาล|ดูอาการบาดเจ็บ|ตรวจพิษ|\bmedicine\b|\bfirst aid\b)", "medicine", "medium"),
     # Animal Handling (WIS)
-    (r"(?:ปลอบสัตว์|ลูบหัวสัตว์|ทำให้ม้าสงบ|\banimal handling\b)", "animal_handling", "medium"),
+    (r"(?:ปลอบสัตว์|ลูบหัวสัตว์|ทำให้ม้าสงบ|ฝึกสัตว์|\banimal handling\b)", "animal_handling", "medium"),
+    # Performance (CHA)
+    (r"(?:ร้องเพลง|บรรเลงเพลง|ดีดพิณ|เป่าขลุ่ย|เล่าเรื่องตลก|แสดงละคร|ร่ายรำ|\bperform\w*\b|\bsing a song\b)", "performance", "medium"),
     # Persuasion (CHA)
-    (r"(?:เกลี้ยกล่อม|เจรจา|ขอร้อง|โน้มน้าวใจ|ขอความเห็นใจ|ต่อรองราคา|\bpersua\w*\b)", "persuasion", "medium"),
+    (r"(?:เกลี้ยกล่อม|หว่านล้อม|เจรจา|ขอร้อง|โน้มน้าว|โน้มน้าวใจ|ขอความเห็นใจ|ต่อรอง|ต่อรองราคา|ชักจูง|พูดให้ใจเย็น|ปลอบโยน|จีบ|เกี้ยวพาราสี|\bpersua\w*\b|\bnegotiate\b|\bconvince\b|\bcharm\b)", "persuasion", "medium"),
     # Deception (CHA)
-    (r"(?:โกหก|ตบตา|หลอกว่า|เสแสร้ง|แกล้งทำเป็น|ปลอมตัว|\bdeceiv\w*\b|\blie\b)", "deception", "medium"),
+    (r"(?:โกหก|ตบตา|หลอกว่า|หลอกล่อ|ปั้นน้ำเป็นตัว|เสแสร้ง|แกล้งทำเป็น|ปลอมตัว|อำพรางความจริง|บลัฟ|\bdeceiv\w*\b|\bdeception\b|\bbluff\b|\blie\b)", "deception", "medium"),
     # Intimidation (CHA)
-    (r"(?:ข่มขู่|คุกคาม|ตะคอกใส่|ชักดาบขู่|บีบบังคับ|\bintimidat\w*\b|\bthreaten\b)", "intimidation", "medium"),
+    (r"(?:ข่มขู่|ขู่บังคับ|ขู่ให้กลัว|คุกคาม|ตะคอกใส่|ชักดาบขู่|บีบบังคับ|แผ่จิตสังหาร|ข่มขวัญ|\bintimidat\w*\b|\bthreaten\b)", "intimidation", "medium"),
 ]
 
 # Exclusion regex for purely informational or everyday actions
@@ -142,7 +144,7 @@ EXCLUSION_RULES = [
     r"^(?:ซื้อ|ขาย|ดูสินค้า)",
     r"^(?:พัก|นอน|กางเต็นท์)",
     r"^(?:ดื่ม|กิน)",
-    r"^(?:พูดคุย|ทักทาย|ถามชื่อ|ถามข่าวสาร|ถามทาง)\b",
+    r"^(?:พูดคุย|ทักทาย|ถามชื่อ|ถามข่าวสาร|ถามทาง)\b(?!.*(?:หว่านล้อม|เกลี้ยกล่อม|โน้มน้าว|ต่อรอง|ข่มขู่|ขู่|โกหก|หลอก|ตบตา|จับโกหก|จับพิรุธ|จีบ|ร้องเพลง))",
 ]
 
 
@@ -171,6 +173,11 @@ def detect_action_skill_check(
             skill_id = TAG_ALIASES[tag_key]
             info = SKILL_MAP.get(skill_id, {"stat": "WIS", "name": skill_id.title(), "thai": skill_id})
             return _build_check_spec(skill_id, info, "medium", cleaned_action, player_state)
+        if tag_key in {
+            "fighter", "wizard", "rogue", "cleric", "bard", "paladin", "barbarian", "warlock",
+            "folk hero", "folk_hero", "acolyte", "criminal", "noble", "sage", "soldier", "entertainer",
+        }:
+            return None
 
     # 2. Check prioritized covert / active intent keywords first (stealth)
     # Even if preceded by casual movement like "เดินไปแอบฟังที่ประตู" or rest like "พักอยู่หลังหินแล้วแอบดูยาม"

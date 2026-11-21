@@ -12,8 +12,6 @@ import time
 import zoneinfo
 from typing import Any, Dict, List, Optional, Tuple
 
-import llm_handler
-
 logger = logging.getLogger("llm_handler")
 
 MODEL_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.\-]*$")
@@ -23,6 +21,7 @@ def _redact(text: Any, key: Optional[str] = None) -> str:
     """Redact Gemini and Groq API keys and URL query parameters containing keys."""
     if text is None:
         return ""
+    import llm_handler
     s = str(text)
     keys_to_redact = set()
     if key and str(key).strip():
@@ -44,6 +43,7 @@ def _redact(text: Any, key: Optional[str] = None) -> str:
 
 def reset_gemini_state() -> None:
     """Reset Gemini runtime cooldown and session disabled state (for testing and UI reset)."""
+    import llm_handler
     llm_handler._gemini_cooldown_until = 0.0
     llm_handler._gemini_session_disabled = False
     llm_handler._gemini_disabled_reason = None
@@ -62,6 +62,7 @@ def get_pacific_date_str() -> str:
 
 def get_gemini_daily_calls() -> int:
     """Retrieve number of successful Gemini calls today (Pacific time)."""
+    import llm_handler
     cfg = llm_handler.load_gemini_config()
     daily = cfg.get("daily_calls", {})
     today_pt = llm_handler.get_pacific_date_str()
@@ -75,6 +76,7 @@ def _update_gemini_config_fields(**fields: Any) -> bool:
     Safely update non-credential metadata fields (e.g. daily_calls, user_daily_limit)
     in data/gemini_config.json without touching api_key, model, or engine.
     """
+    import llm_handler
     protected_fields = {"api_key", "model", "engine"}
     fields_to_write = {k: v for k, v in fields.items() if k not in protected_fields}
     if not fields_to_write:
@@ -108,6 +110,7 @@ def _update_gemini_config_fields(**fields: Any) -> bool:
 
 def increment_gemini_daily_calls() -> int:
     """Increment successful Gemini call count for current Pacific date and persist."""
+    import llm_handler
     today_pt = llm_handler.get_pacific_date_str()
     count = llm_handler.get_gemini_daily_calls() + 1
     daily_data = {"date": today_pt, "count": count}
@@ -117,6 +120,7 @@ def increment_gemini_daily_calls() -> int:
 
 def get_gemini_user_daily_limit() -> Optional[int]:
     """Retrieve user-configured daily Gemini call limit if set."""
+    import llm_handler
     cfg = llm_handler.load_gemini_config()
     lim = cfg.get("user_daily_limit")
     if lim is not None and str(lim).isdigit() and int(lim) > 0:
@@ -131,6 +135,7 @@ def set_gemini_user_daily_limit(limit: Optional[int]) -> None:
 
 def get_gemini_status() -> Dict[str, Any]:
     """Expose current Gemini status for UI and monitoring."""
+    import llm_handler
     now = time.time()
     in_cooldown = now < llm_handler._gemini_cooldown_until
     return {
@@ -146,6 +151,7 @@ def get_gemini_status() -> Dict[str, Any]:
 
 def load_gemini_config() -> Dict[str, Any]:
     """Load local Gemini API configuration if present, substituting shutdown models."""
+    import llm_handler
     cfg_path = llm_handler.GEMINI_CONFIG_PATH
     if os.path.exists(cfg_path):
         try:
@@ -172,6 +178,7 @@ def save_gemini_config(
     **kwargs: Any,
 ) -> bool:
     """Save Gemini API configuration locally in data/gemini_config.json."""
+    import llm_handler
     clean_model = model.strip() if model else llm_handler.DEFAULT_GEMINI_MODEL
     if not MODEL_NAME_PATTERN.match(clean_model):
         logger.warning(
@@ -206,6 +213,7 @@ def save_gemini_config(
 
 def get_gemini_api_key() -> Optional[str]:
     """Retrieve Gemini API Key from environment or local config file."""
+    import llm_handler
     env_k = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if env_k and env_k.strip():
         return env_k.strip()
@@ -218,6 +226,7 @@ def get_gemini_api_key() -> Optional[str]:
 
 def load_groq_config() -> Dict[str, Any]:
     """Load Groq API configuration from data/groq_config.json."""
+    import llm_handler
     cfg_path = llm_handler.GROQ_CONFIG_PATH
     if os.path.exists(cfg_path):
         try:
@@ -232,6 +241,7 @@ def load_groq_config() -> Dict[str, Any]:
 
 def reset_groq_state() -> None:
     """Reset Groq runtime cooldown and session disabled state (for testing and UI reset)."""
+    import llm_handler
     llm_handler._groq_cooldown_until = 0.0
     llm_handler._groq_session_disabled = False
     llm_handler._groq_disabled_reason = None
@@ -240,6 +250,7 @@ def reset_groq_state() -> None:
 
 def get_groq_status() -> Dict[str, Any]:
     """Expose current Groq status for UI and monitoring."""
+    import llm_handler
     now = time.time()
     in_cooldown = now < llm_handler._groq_cooldown_until
     return {
@@ -254,6 +265,7 @@ def get_groq_status() -> Dict[str, Any]:
 
 def set_active_engine(engine: str) -> None:
     """Safely switch active engine by updating ONLY the 'engine' field in config files."""
+    import llm_handler
     clean_eng = str(engine).lower().strip()
 
     try:
@@ -287,6 +299,7 @@ def set_active_engine(engine: str) -> None:
 
 def get_groq_available_models(api_key: Optional[str] = None) -> List[str]:
     """Retrieve list of active text models from Groq API or return default list (cached for 10 min)."""
+    import llm_handler
     now = time.time()
     key = api_key or llm_handler.get_groq_api_key()
 
@@ -332,6 +345,7 @@ def save_groq_config(
     **kwargs: Any,
 ) -> bool:
     """Save Groq API configuration locally in data/groq_config.json."""
+    import llm_handler
     cfg_path = llm_handler.GROQ_CONFIG_PATH
     try:
         os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
@@ -354,6 +368,7 @@ def save_groq_config(
 
 def get_groq_api_key() -> Optional[str]:
     """Retrieve Groq API Key from environment or local config file."""
+    import llm_handler
     env_k = os.environ.get("GROQ_API_KEY")
     if env_k and env_k.strip():
         return env_k.strip()
@@ -366,6 +381,7 @@ def get_groq_api_key() -> Optional[str]:
 
 def get_active_engine() -> str:
     """Return active LLM engine: 'groq', 'gemini' or 'ollama'."""
+    import llm_handler
     now = time.time()
     env_e = os.environ.get("LLM_ENGINE")
     if env_e:
@@ -402,6 +418,7 @@ def call_groq_api(
     bypass_state: bool = False,
 ) -> Tuple[Optional[str], Dict[str, Any]]:
     """Call Groq Cloud REST API directly using requests."""
+    import llm_handler
     now = time.time()
 
     if not bypass_state:
@@ -522,6 +539,7 @@ def call_groq_api(
 
 def is_saved_groq_pair(api_key: Optional[str], model: Optional[str]) -> bool:
     """Check if the given (api_key, model) matches the currently configured / active Groq pair."""
+    import llm_handler
     cfg = llm_handler.load_groq_config()
     configured_key = (llm_handler.get_groq_api_key() or "").strip()
     configured_model = (cfg.get("model") or llm_handler.DEFAULT_GROQ_MODEL).strip()
@@ -533,6 +551,7 @@ def is_saved_groq_pair(api_key: Optional[str], model: Optional[str]) -> bool:
 
 def test_groq_connection(api_key: str, model: Optional[str] = None) -> Tuple[bool, str]:
     """Test Groq API connectivity with a simple ping prompt."""
+    import llm_handler
     if not api_key or not api_key.strip():
         return False, "Groq API Key ว่างเปล่า"
     chosen_model = model or llm_handler.DEFAULT_GROQ_MODEL
@@ -566,6 +585,7 @@ def call_gemini_api(
     bypass_state: bool = False,
 ) -> Tuple[Optional[str], Dict[str, Any]]:
     """Call Google Gemini REST API directly using requests."""
+    import llm_handler
     import requests
 
     now = time.time()
@@ -763,6 +783,7 @@ def call_gemini_api(
 
 def is_saved_gemini_pair(api_key: Optional[str], model: Optional[str]) -> bool:
     """Check if the given (api_key, model) matches the currently configured / active pair."""
+    import llm_handler
     cfg = llm_handler.load_gemini_config()
     configured_key = (llm_handler.get_gemini_api_key() or "").strip()
     configured_model = (cfg.get("model") or llm_handler.DEFAULT_GEMINI_MODEL).strip()
@@ -774,6 +795,7 @@ def is_saved_gemini_pair(api_key: Optional[str], model: Optional[str]) -> bool:
 
 def test_gemini_connection(api_key: str, model: str = "gemini-3.6-flash") -> Tuple[bool, str]:
     """Test Gemini API connectivity with a simple ping prompt."""
+    import llm_handler
     res, metrics = llm_handler.call_gemini_api(
         contents=[{"role": "user", "parts": [{"text": "Reply with 'OK' only."}]}],
         api_key=api_key,
@@ -820,6 +842,7 @@ def get_installed_models(client: Optional[Any] = None) -> List[str]:
 
 def resolve_model(model: Optional[str] = None, client: Optional[Any] = None) -> str:
     """Resolve model to use across Ollama or mock clients."""
+    import llm_handler
     if client is not None:
         return model if model else llm_handler.DEFAULT_MODEL
 

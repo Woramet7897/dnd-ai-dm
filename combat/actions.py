@@ -4,9 +4,9 @@ and Baldur's Gate 3 Class Actions & Subclass Mechanics.
 """
 
 import logging
+import re
 from typing import Any, Dict, Optional
 
-import combat_manager
 from combat.conditions import (
     CONDITIONS,
     _get_condition_set,
@@ -17,6 +17,21 @@ from combat.conditions import (
 )
 
 logger = logging.getLogger("combat_manager")
+
+
+def _extract_crit_dice_expr(damage_expr: str) -> str:
+    """
+    Extract only the dice portion ('NdX') from a damage expression like '1d8+5'
+    so flat modifiers ('+M' / '-M') are not rolled twice on a critical hit.
+    """
+    s = str(damage_expr).strip().replace(" ", "")
+    m = re.match(r"^(\d+d\d+)([+-]\d+)?$", s, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    m2 = re.match(r"^(\d+)([+-]\d+)?$", s)
+    if m2:
+        return m2.group(1)
+    return s
 
 
 def resolve_attack(
@@ -41,6 +56,7 @@ def resolve_attack(
       - Conditions: Paralyzed/Sleeping auto-crit, Bless (+1d4 to hit), Bardic Inspiration (+1d6), Hex (+1d6 necrotic),
         Divine Favor (+1d4 radiant), Guiding Bolt Marked (Advantage), Vow of Enmity (Advantage), Dodging (Disadvantage).
     """
+    import combat_manager
     attacker_conditions = _get_condition_set(attacker)
     target_conditions = _get_condition_set(target)
 
@@ -170,8 +186,9 @@ def resolve_attack(
             damage = 1
 
         if crit:
+            crit_dice_expr = _extract_crit_dice_expr(damage_expr)
             try:
-                damage += combat_manager.roll_dice(damage_expr)
+                damage += combat_manager.roll_dice(crit_dice_expr)
             except ValueError:
                 damage += 1
 
@@ -322,6 +339,7 @@ def resolve_class_action(
       - frenzied_strike (Berserker Barbarian Bonus Action: make a melee weapon attack as a bonus action)
     """
     real_p = actor.get("_player_state", actor)
+    import combat_manager
     actor_name = actor.get("name", real_p.get("name", "Hero"))
     level = actor.get("level", real_p.get("level", 1))
     resources = real_p.setdefault("class_resources", {})
@@ -571,6 +589,7 @@ def resolve_shove(
     shove_type: str = "push",
 ) -> Dict[str, Any]:
     """Resolve a Shove action (Module A §2 / Phase 11.2)."""
+    import combat_manager
     if isinstance(room_hazards, dict) and "turn_order" in room_hazards:
         combat_state = room_hazards
         room_hazards = combat_state.get("room_hazards", [])
@@ -786,8 +805,10 @@ def resolve_combat_parley(
       - Deception vs Enemy WIS/INT (DC = 10 + enemy WIS mod):
           On success: enemy is tricked, becoming Dazed & Prone (off-balance) for 2 rounds, and actor gains Hidden (Advantage)!
     """
+    import combat_manager
     import state_manager
     real_p = actor.get("_player_state", actor)
+    import combat_manager
     actor_name = actor.get("name", real_p.get("name", "Hero"))
     target_name = target.get("name", "Enemy")
 
@@ -933,6 +954,7 @@ def resolve_weapon_action(
     adjacent_target: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Resolve a Cooldown-Gated Weapon Action (Module A §3 / Phase 11.3)."""
+    import combat_manager
     available = attacker.get("weapon_actions_available")
     if available is None and "_player_state" in attacker:
         available = attacker["_player_state"].get("weapon_actions_available", True)

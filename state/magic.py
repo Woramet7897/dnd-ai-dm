@@ -14,7 +14,6 @@ import copy
 import logging
 from typing import Any, Dict, List, Optional
 
-import state_manager
 from rules import get_modifier, resolve_spell
 from state.equipment import apply_condition_to_state, remove_curse
 
@@ -111,6 +110,7 @@ def resolve_spell_save(
     Resolve a save-forcing spell (e.g. Vicious Mockery, Sacred Flame, Thunderwave, Fireball, Hold Person).
     Supports half_on_save=True (e.g. Fireball, Burning Hands, Thunderwave, Shatter, Lightning Bolt).
     """
+    import state_manager
     caster_prof = caster.get("proficiency_bonus", 2)
     _, cast_mod = _get_caster_stat_and_mod(caster)
     dc = 8 + caster_prof + cast_mod
@@ -214,6 +214,7 @@ def resolve_spell_attack(
     Resolve an attack-roll spell (e.g. Fire Bolt, Guiding Bolt, Magic Missile, Scorching Ray, Eldritch Blast).
     Supports multi-projectile spells and condition modifiers.
     """
+    import state_manager
     caster_prof = caster.get("proficiency_bonus", 2)
     _, cast_mod = _get_caster_stat_and_mod(caster)
     to_hit_bonus = caster_prof + cast_mod
@@ -399,6 +400,7 @@ def cast_spell(
     applies subclass bonuses (Life Domain, Abjuration Ward, Fiend Temp HP), triggers surface combos,
     and resolves single-target, multi-ray, AoE, buff, debuff, or heal effects.
     """
+    import state_manager
     spell = resolve_spell(spell_id, world_state=world_state)
     if not spell:
         return {"success": False, "reason": f"Unknown spell '{spell_id}'."}

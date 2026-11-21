@@ -6,7 +6,6 @@ import copy
 import logging
 from typing import Any, Dict, Optional, Tuple, Union
 
-import state_manager
 from rules import _get_item_catalog, get_modifier, is_proficient
 from state.checks import check_inspiration_trigger
 from state.currency import (
@@ -31,6 +30,7 @@ def attempt_pickpocket(
     world_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Attempt to pickpocket an item or gold from an NPC (Module B §3 / Phase 13.0)."""
+    import state_manager
     if isinstance(target_npc, dict):
         npc_name = target_npc.get("name", "NPC")
         dc = target_npc.get("passive_perception", target_npc.get("dc", 13))
@@ -162,6 +162,7 @@ def attempt_guard_persuasion(
     world_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Attempt to talk down confronting town guards with a DC 15 Persuasion check."""
+    import state_manager
     stats = player_state.get("stats", {})
     cha_val = stats.get("CHA", 10)
     cha_mod = get_modifier(cha_val)
@@ -258,6 +259,7 @@ def attempt_lockpick_escape(
     stealth_roll: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Multi-step prison break loop (Module B §3)."""
+    import state_manager
     stats = player_state.get("stats", {})
     dex_val = stats.get("DEX", 10)
     dex_mod = get_modifier(dex_val)

@@ -11,7 +11,6 @@ import random
 from typing import Any, Dict, List, Optional, Tuple
 
 import paths
-import state_manager
 from rules import _get_item_catalog, get_modifier
 from state.currency import SP_PER_GP, _ensure_currency, subtract_currency
 
@@ -311,6 +310,7 @@ def apply_feat_or_asi(
             hp = player_state.setdefault("hp", {"current": 10, "max": 10})
             hp["max"] += hp_diff
             hp["current"] += hp_diff
+        import state_manager
         player_state["ac"] = state_manager._compute_ac(player_state)
         if player_state.get("pending_level_up_choices", 0) > 0:
             player_state["pending_level_up_choices"] -= 1
@@ -406,6 +406,7 @@ def long_rest(
     if "exhausted" in active_conditions:
         active_conditions.remove("exhausted")
 
+    import state_manager
     state_manager.tick_food_spoilage(character_state, days=1)
 
     character_state["weapon_actions_available"] = True
@@ -475,6 +476,7 @@ def perform_short_rest(
 
     if world_state:
         import dungeon_manager
+        import state_manager
         dungeon_manager.advance_time(world_state, steps=1, character_state=character_state)
         for comp in world_state.get("party", {}).get("companions", []):
             cid = comp.get("id") or comp.get("name")

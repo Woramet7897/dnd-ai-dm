@@ -8,8 +8,6 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-import llm_handler
-import validation
 from llm.prompts import (
     DEFAULT_ACTION_SUGGESTIONS,
     DEFAULT_NUM_CTX,
@@ -45,6 +43,7 @@ def generate_narrative_response(
     Generate narrative response from Cloud engines (Groq/Gemini) or local Ollama.
     Streams/returns plain text narrative with NO JSON leakage.
     """
+    import llm_handler
     system_prompt, tier_costs, dropped_logs = assemble_system_prompt(
         player_state=player_state,
         world_state=world_state,
@@ -225,6 +224,8 @@ def extract_state_updates(
     ollama_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Perform extraction call to parse JSON state updates from narrative + player action."""
+    import llm_handler
+    import validation
     if is_combat_active(world_state, combat_active):
         logger.debug("extract_state_updates: combat is active (spec 9b-6) — skipping extraction API call entirely.")
         return {}
@@ -376,6 +377,7 @@ def generate_camp_dialogue(
     Spec Module D §2 / Phase 14.2:
     Generate camp companion dialogue reacting to recent notable events.
     """
+    import llm_handler
     if world_state is not None:
         import dungeon_manager
         if not dungeon_manager.is_camp_context(world_state):
