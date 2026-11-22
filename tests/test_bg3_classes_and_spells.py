@@ -1030,6 +1030,86 @@ class TestBG3ClassesAndSpells(unittest.TestCase):
         self.assertIn(pac_npc_id, self.world["generated_npcs"])
         self.assertIn(pac_npc_id, dm.get_current_room(self.world)["npcs"])
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # 17. CAMP BOND PERKS, MERCHANT HAGGLING, MEDIATION QUESTS & HEROIC REROLL
+    # ══════════════════════════════════════════════════════════════════════════
+    def test_bg3_camp_bond_perks_merchant_haggle_mediation_and_heroic_reroll(self):
+        from unittest.mock import patch
+        import dungeon_manager as dm
+
+        bard = character_creator.create_character(
+            "Orpheus", "Human", "Bard", "Entertainer",
+            {"STR": 8, "DEX": 14, "CON": 12, "INT": 12, "WIS": 12, "CHA": 15},
+        )
+        sm.add_currency(bard, gp=200)
+
+        # 1. Recruit a Cleric companion & do deep camp dialogue ("persuade" -> +10 approval) to reach 75+ Bond Perk
+        cleric_comp = {
+            "id": "acolyte_elira",
+            "name": "Acolyte Elira",
+            "class": "Cleric",
+            "role": "Healer & Shrine Keeper",
+            "secret": "Guards the sacred Tear of Selune beneath the shrine.",
+            "approval": 68,
+        }
+        sm.recruit_companion(cleric_comp, self.world)
+        dlg_res = sm.respond_to_camp_dialogue("acolyte_elira", "persuade", self.world, {"topic": "Faith & Destiny"})
+        self.assertEqual(dlg_res["approval_change"], 10)
+        self.assertEqual(dlg_res["new_approval"], 78)
+        self.assertTrue(dlg_res["secret_unlocked"])
+
+        bond_summary = sm.get_party_bond_bonuses(self.world, bard)
+        self.assertTrue(bond_summary["auto_guidance"])
+        self.assertEqual(bond_summary["skill_bonuses"].get("persuasion"), 2)
+
+        # Verify resolve_check automatically applies Companion's Guidance (+1d4) and +2 Persuasion Bond Bonus!
+        with patch.object(sm, "_roll_d20", return_value=10), patch.object(sm, "_roll_dice", return_value=3):
+            chk_bond = sm.resolve_check("CHA", "medium", bard, skill="Persuasion")
+        # Dice bonus (3) + bond_bonus (2) = 5
+        self.assertEqual(chk_bond["bond_bonus"], 2)
+        self.assertEqual(chk_bond["bonus"], 5)
+
+        # 2. Merchant Haggling & Secret Under-the-Counter Stock
+        hag_res = sm.attempt_shop_haggle("blacksmith", bard, self.world, skill="Persuasion", roll_override=19)
+        self.assertTrue(hag_res["success"])
+        self.assertTrue(hag_res["secret_unlocked"])
+        self.assertEqual(hag_res["discount_percent"], 50)
+        sec_id = hag_res["secret_item_id"]
+        self.assertEqual(sec_id, "silvered_rapier_of_eloquence")
+
+        # Buy the unlocked secret item at 50% discount (80 GP -> 40 GP)
+        gp_before = bard["currency"]["gp"]
+        ok_buy, msg_buy = sm.buy_item(sec_id, "blacksmith", bard, self.world)
+        self.assertTrue(ok_buy, msg_buy)
+        self.assertEqual(bard["currency"]["gp"], gp_before - 40)
+
+        # 3. Diplomatic Mediation Quest & Peacemaker Reputation (+2 Persuasion after 2 peaceful resolutions)
+        dm.refresh_notice_board(self.world, force=True)
+        med_q = dm.post_mediation_quest(self.world)
+        dm.accept_notice_board_quest(self.world, med_q["id"])
+        self.world["pacified_count"] = 1
+        med_res = dm.resolve_mediation_quest(self.world, med_q["id"], bard, skill="Persuasion", roll_override=16)
+        self.assertTrue(med_res["success"])
+        self.assertTrue(med_res["peacemaker_active"])
+        self.assertTrue(bard.get("peacemaker_active"))
+
+        # With Peacemaker active (+2) and Companion Bond (+2) and auto-guidance (3), bonus = 7
+        with patch.object(sm, "_roll_d20", return_value=10), patch.object(sm, "_roll_dice", return_value=3):
+            chk_pm = sm.resolve_check("CHA", "medium", bard, skill="Persuasion")
+        self.assertEqual(chk_pm["peacemaker_bonus"], 2)
+        self.assertEqual(chk_pm["bond_bonus"], 2)
+        self.assertEqual(chk_pm["bonus"], 7)
+
+        # 4. Post-Roll Heroic Inspiration Reroll (D&D 5.5e / BG3)
+        sm.award_inspiration(bard, "Diplomatic triumph")
+        with patch.object(sm, "_roll_d20", return_value=2), patch.object(sm, "_roll_dice", return_value=1):
+            failed_chk = sm.resolve_check("WIS", "hard", bard, skill="Perception")
+        self.assertFalse(failed_chk["success"])
+        with patch.object(sm, "_roll_d20", return_value=19):
+            heroic_reroll = sm.reroll_check(failed_chk, bard)
+        self.assertTrue(heroic_reroll["rerolled"])
+        self.assertTrue(heroic_reroll["success"])
+
 
 if __name__ == "__main__":
     unittest.main()

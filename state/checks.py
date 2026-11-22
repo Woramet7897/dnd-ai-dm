@@ -162,11 +162,17 @@ def resolve_check(
     if is_social_check and any(sc in cond_set for sc in ("friends_advantage", "thaumaturgy", "detect_thoughts", "disguised")):
         advantage = True
 
+    bond_info = state.get("party_bond_bonuses", {}) if isinstance(state.get("party_bond_bonuses"), dict) else {}
+
     if not bonus_dice:
         if "bardic_inspired" in cond_set:
             bonus_dice = "1d6"
-        elif "guidance" in cond_set:
+        elif "guidance" in cond_set or bond_info.get("auto_guidance"):
             bonus_dice = "1d4"
+
+    skill_key = skill_low.replace(" ", "_")
+    bond_bonus = int(bond_info.get("skill_bonuses", {}).get(skill_key, 0)) if skill_key else 0
+    peacemaker_bonus = 2 if (skill_key == "persuasion" and (state.get("peacemaker_active") or int(state.get("pacified_count", 0)) >= 2)) else 0
 
     inspiration_used = False
     if use_inspiration and spend_inspiration(state):
@@ -194,7 +200,8 @@ def resolve_check(
     critical = (roll == 20)
     fumble = (roll == 1)
 
-    bonus = state_manager._roll_dice(bonus_dice) if bonus_dice else 0
+    dice_bonus = state_manager._roll_dice(bonus_dice) if bonus_dice else 0
+    bonus = dice_bonus + bond_bonus + peacemaker_bonus
 
     total = roll + modifier + prof_contribution + bonus
 
@@ -214,6 +221,8 @@ def resolve_check(
         "modifier":          modifier,
         "proficiency":       prof_contribution,
         "bonus":             bonus,
+        "bond_bonus":        bond_bonus,
+        "peacemaker_bonus":  peacemaker_bonus,
         "total":             total,
         "dc":                dc,
         "difficulty":        difficulty,

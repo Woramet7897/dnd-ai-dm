@@ -58,18 +58,66 @@ def render_town_tab(player: Dict[str, Any], world: Dict[str, Any], current_room:
             if not is_open:
                 st.warning(f"ขณะนี้ร้านปิดให้บริการสำหรับช่วง {cur_period} (เปิดให้บริการช่วง: {', '.join(open_periods)})")
             else:
+                haggle_info = world.get("shop_haggle_state", {}).get(active_shop, {})
+                disc_mult = float(haggle_info.get("discount_multiplier", 1.0))
+                disc_pct = int(haggle_info.get("discount_percent", 0))
+                cur_day = int(world.get("game_time", {}).get("day", 1))
+                already_haggled = (haggle_info.get("haggled_day") == cur_day)
+
+                with st.container(border=True):
+                    st.markdown("##### 🗣️ ต่อรองราคา & ขอดูสินค้าลับใต้เคาน์เตอร์ (BG3 Social Bartering)")
+                    if already_haggled:
+                        if disc_pct > 0:
+                            st.success(f"✨ ต่อรองราคาสำเร็จแล้ววันนี้! ได้รับส่วนลด **{disc_pct}%** และเปิดคลังสินค้าลับใต้เคาน์เตอร์แล้ว")
+                        else:
+                            st.warning("⚠️ วันนี้คุณต่อรองราคาพลาดไปแล้ว (ราคาสินค้า +15% สำหรับวันนี้)")
+                    else:
+                        c_hag1, c_hag2 = st.columns([2.2, 1])
+                        with c_hag1:
+                            haggle_skill = st.selectbox(
+                                "เลือกทักษะเจรจากับพ่อค้า:",
+                                [
+                                    "Persuasion (หว่านล้อมขอลดราคาอย่างเป็นมิตร — DC 13)",
+                                    "Deception (แกล้งติตำหนิสินค้าเพื่อกดราคา — DC 13)",
+                                    "Intimidation (ข่มขู่พ่อค้าให้ลดราคา — DC 13, พลาดโดนแจ้งยาม)",
+                                ],
+                                key=f"sel_haggle_{active_shop}",
+                            )
+                        with c_hag2:
+                            st.markdown("<div style='padding-top: 26px;'></div>", unsafe_allow_html=True)
+                            if st.button("🎲 ทอยต่อรองราคา", key=f"btn_haggle_{active_shop}", type="primary", use_container_width=True):
+                                sk_clean = haggle_skill.split(" (")[0].strip()
+                                h_res = state_manager.attempt_shop_haggle(active_shop, player, world, skill=sk_clean)
+                                if h_res["success"]:
+                                    st.toast(f"🎉 ลดราคา {h_res['discount_percent']}% + ปลดล็อกสินค้าลับ!")
+                                else:
+                                    st.toast("❌ ต่อรองราคาไม่สำเร็จ")
+                                st.session_state["narrative_log"].append({
+                                    "role": "assistant",
+                                    "content": h_res["message"],
+                                })
+                                auto_save()
+                                st.rerun()
+
                 buy_tab, sell_tab = st.tabs(["🛍️ Buy Goods (ซื้อสินค้า)", "💰 Sell Items (ขายของ)"])
                 with buy_tab:
-                    sell_items = s_data.get("sell_items", [])
+                    sell_items = list(s_data.get("sell_items", []))
+                    if haggle_info.get("secret_unlocked") and haggle_info.get("secret_item_id"):
+                        if haggle_info["secret_item_id"] not in sell_items:
+                            sell_items.append(haggle_info["secret_item_id"])
                     item_cat = state_manager._get_item_catalog()
+                    eff_sell_mult = s_data.get("sell_multiplier", 1.0) * disc_mult
                     for s_item_id in sell_items:
-                        i_info = item_cat.get(s_item_id, {})
+                        is_secret = (s_item_id == haggle_info.get("secret_item_id"))
+                        i_info = item_cat.get(s_item_id) or world.get("generated_items", {}).get(s_item_id) or haggle_info.get("secret_item") or {}
                         i_name = i_info.get("name", s_item_id)
-                        cost_info = state_manager.get_item_price_breakdown(i_info, s_data.get("sell_multiplier", 1.0))
+                        cost_info = state_manager.get_item_price_breakdown(i_info, eff_sell_mult)
                         cost_text = cost_info["text"]
+                        secret_badge = " 🗝️ **[สินค้าลับใต้เคาน์เตอร์]**" if is_secret else ""
+                        disc_badge = f" *(ลด {disc_pct}%)*" if disc_pct > 0 else ""
                         col_b1, col_b2 = st.columns([3, 1])
                         with col_b1:
-                            st.markdown(f"**{i_name}** — {cost_text}")
+                            st.markdown(f"**{i_name}**{secret_badge} — {cost_text}{disc_badge}")
                             if i_info.get("description"):
                                 st.caption(i_info["description"])
                         with col_b2:
@@ -144,7 +192,21 @@ def render_town_tab(player: Dict[str, Any], world: Dict[str, Any], current_room:
     # Tavern Notice Board UI (Module C §2 / Phase 13.5)
     if current_room.get("id") in ("town_riverside", "tavern") or current_room.get("notice_board") is not None or "innkeeper_mira" in current_room.get("npcs", []):
         st.markdown("---")
-        st.markdown("##### 📜 Tavern Notice Board")
+        c_nb_h, c_nb_med = st.columns([2.2, 1.3])
+        with c_nb_h:
+            st.markdown("##### 📜 Tavern Notice Board (กระดานภารกิจ & ไกล่เกลี่ย)")
+        with c_nb_med:
+            if st.button("🕊️ ขอรับงานไกล่เกลี่ย / สืบสวน", key="btn_post_mediation_nb", use_container_width=True):
+                med_q = dungeon_manager.post_mediation_quest(world)
+                dungeon_manager.accept_notice_board_quest(world, med_q["id"])
+                st.toast(f"รับงานสายเจรจา: {med_q['title']}")
+                st.session_state["narrative_log"].append({
+                    "role": "assistant",
+                    "content": f"🕊️ **รับภารกิจสายเจรจา/สืบสวน:** {med_q['title']} — {med_q['description']}",
+                })
+                auto_save()
+                st.rerun()
+
         nb_entries = dungeon_manager.get_notice_board(world)
         if not nb_entries:
             st.caption("No notices currently posted. Check back in a few days!")
@@ -155,12 +217,13 @@ def render_town_tab(player: Dict[str, Any], world: Dict[str, Any], current_room:
                 e_title = entry.get("title", "Notice")
                 e_desc = entry.get("description", "")
                 e_status = entry.get("status", "available")
-                icon = "🗡️" if e_type == "bounty" else ("📦" if e_type == "delivery" else "🗺️")
+                icon = "🗡️" if e_type == "bounty" else ("📦" if e_type == "delivery" else ("🕊️" if e_type == "mediation" else "🗺️"))
 
-                with st.expander(f"{icon} {e_title} [{e_status.capitalize()}]", expanded=(e_status == "available")):
+                with st.expander(f"{icon} {e_title} [{e_status.capitalize()}]", expanded=(e_status in ("available", "accepted"))):
                     st.write(e_desc)
                     if entry.get("reward_gold"):
-                        st.caption(f"💰 Reward: **{entry['reward_gold']} GP**")
+                        pac_lbl = " *(+25 GP โบนัสเจรจาสันติหากกล่อมให้ยอมแพ้โดยไม่ฆ่า!)*" if e_type == "bounty" else ""
+                        st.caption(f"💰 Reward: **{entry['reward_gold']} GP**{pac_lbl}")
                     if entry.get("target_room_name"):
                         st.caption(f"📍 Location: **{entry['target_room_name']}**")
 
@@ -190,6 +253,42 @@ def render_town_tab(player: Dict[str, Any], world: Dict[str, Any], current_room:
                                     st.rerun()
                                 else:
                                     st.error(res_cmp["message"])
+                        elif e_type == "mediation":
+                            c_m1, c_m2 = st.columns([2, 1])
+                            with c_m1:
+                                med_sk = st.selectbox(
+                                    "เลือกทักษะที่ใช้ไกล่เกลี่ย/สืบสวน:",
+                                    ["Persuasion", "Insight", "Investigation"],
+                                    key=f"med_sk_{e_id}",
+                                )
+                            with c_m2:
+                                st.markdown("<div style='padding-top: 26px;'></div>", unsafe_allow_html=True)
+                                if st.button("🕊️ ทอยไกล่เกลี่ย", key=f"btn_med_{e_id}", type="primary", use_container_width=True):
+                                    res_m = dungeon_manager.resolve_mediation_quest(world, e_id, player, skill=med_sk)
+                                    st.toast(res_m["message"])
+                                    st.session_state["narrative_log"].append({
+                                        "role": "assistant",
+                                        "content": res_m["message"],
+                                    })
+                                    auto_save()
+                                    st.rerun()
+                        elif e_type == "bounty":
+                            tgt_rm = entry.get("target_room_id")
+                            tgt_mon = entry.get("target_monster", "")
+                            is_rm_cleared = (tgt_rm in world.get("cleared_rooms", [])) or bool(entry.get("pacified_completed")) or (f"pacified_{tgt_mon}" in world.get("generated_npcs", {}))
+                            if is_rm_cleared:
+                                if st.button(f"🏆 ส่งมอบภารกิจ Bounty / Pacifist Resolution", key=f"comp_bounty_{e_id}", type="primary", use_container_width=True):
+                                    res_cmp = dungeon_manager.complete_notice_board_quest(world, e_id, player)
+                                    if res_cmp["success"]:
+                                        st.toast(res_cmp["message"])
+                                        st.session_state["narrative_log"].append({
+                                            "role": "assistant",
+                                            "content": f"🎉 **Bounty Completed:** {res_cmp['message']}"
+                                        })
+                                        auto_save()
+                                        st.rerun()
+                            else:
+                                st.info("Status: เดินทางไปยังพื้นที่เป้าหมายเพื่อปราบมอนสเตอร์ หรือใช้ปุ่ม '🕊️ เจรจาเลี่ยงศึก' กล่อมให้ยอมแพ้เพื่อรับโบนัสสันติ +25 GP!")
                         else:
                             st.info("Status: Quest active in your quest log! Fulfill the objectives to earn the bounty.")
                     elif e_status == "completed":

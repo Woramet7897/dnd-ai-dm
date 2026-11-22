@@ -101,8 +101,10 @@ from state.persistence import (
 
 from state.equipment import (
     ConditionEntry,
+    SHOP_SECRET_STOCK,
     _compute_ac,
     apply_condition_to_state,
+    attempt_shop_haggle,
     buy_item,
     equip_item,
     generate_item,
@@ -171,6 +173,8 @@ from state.companions import (
     MAX_PARTY_COMPANIONS,
     dismiss_companion,
     get_companion_approval,
+    get_companion_bond_perk,
+    get_party_bond_bonuses,
     recruit_companion,
     respond_to_camp_dialogue,
 )

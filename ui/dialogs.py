@@ -139,23 +139,35 @@ def show_character_dialog():
                 else:
                     st.error(msg_a)
 
-    # Party Companions & Approval
+    # Party Companions & Approval + BG3 Bond Perks
     party = world.get("party", {})
     companions = party.get("companions", [])
     if companions:
+        state_manager.get_party_bond_bonuses(world, player)
         st.markdown("---")
-        st.markdown("##### 👥 สหายร่วมเดินทาง (Companions)")
+        st.markdown("##### 👥 สหายร่วมเดินทาง & สายสัมพันธ์รอบกองไฟ (Companions & Bond Perks)")
         for comp in companions:
             cid = comp.get("id") or comp.get("name")
             c_name = comp.get("name", cid)
             c_app = state_manager.get_companion_approval(world, cid)
             c_approval = c_app.get("approval", 50)
-            col_c1, col_c2, col_c3 = st.columns([2, 1, 1])
+            pending_talk = c_app.get("camp_dialogue_pending", True)
+            talk_badge = " ❗ *(อยากคุยกับคุณรอบกองไฟ)*" if pending_talk else ""
+            perk = state_manager.get_companion_bond_perk(comp, c_approval)
+            col_c1, col_c2, col_c3 = st.columns([2.2, 1, 0.8])
             with col_c1:
-                st.markdown(f"**{c_name}** &bull; ความสนิทสนม: `{c_approval}/100`")
+                st.markdown(f"**{c_name}**{talk_badge} &bull; ความสนิทสนม: `{c_approval}/100`")
                 st.progress(max(0.0, min(1.0, c_approval / 100)))
+                if perk:
+                    st.caption(f"✨ **{perk['tier']} — {perk['name']}:** {perk['description']}")
+                else:
+                    st.caption(f"🔒 *เพิ่มความสนิทถึง 75/100 เพื่อปลดล็อก Bond Perk และความลับส่วนตัวของ {c_name}*")
+                c_sec = comp.get("secret") or (state_manager.resolve_npc(cid, world) or {}).get("secret")
+                if c_sec and c_approval >= 75:
+                    st.caption(f"🔓 **ความลับที่เปิดใจเล่า:** *{c_sec}*")
             with col_c2:
-                if st.button(f"💬 พูดคุยรอบกองไฟ", key=f"dlg_talk_{cid}", use_container_width=True):
+                btn_lbl = "❗ คุยรอบกองไฟ" if pending_talk else "💬 พูดคุยรอบกองไฟ"
+                if st.button(btn_lbl, key=f"dlg_talk_{cid}", use_container_width=True):
                     mm = get_current_active_model()
                     mem = get_session_memory_manager()
                     dlg = state_manager.generate_camp_dialogue(
@@ -176,6 +188,7 @@ def show_character_dialog():
                     if st.button("ยืนยัน", key=f"dlg_dismiss_{cid}", use_container_width=True):
                         try:
                             state_manager.dismiss_companion(cid, world)
+                            state_manager.get_party_bond_bonuses(world, player)
                             auto_save()
                             st.toast(f"{c_name} ออกจากกลุ่มแล้ว")
                             st.rerun()
@@ -190,24 +203,29 @@ def show_character_dialog():
             d_cname = active_dlg.get("companion_name", "Companion")
             st.info(f"🔥 **บทสนทนารอบกองไฟกับ {d_cname}**\n\n> *\"{active_dlg.get('statement', '')}\"*")
             opts = active_dlg.get("options", {})
-            c_o1, c_o2, c_o3 = st.columns(3)
+            c_o1, c_o2, c_o3, c_o4 = st.columns(4)
             chosen_resp_type = None
             chosen_resp_text = ""
             with c_o1:
-                if st.button(f"💚 เห็นด้วย: {opts.get('agree', 'เห็นด้วย')[:30]}", key="camp_opt_agree", use_container_width=True):
+                if st.button("🕊️ [Persuasion] เปิดใจลึกซึ้ง (+10)", key="camp_opt_persuade", use_container_width=True):
+                    chosen_resp_type = "persuade"
+                    chosen_resp_text = f"ฉันเข้าใจความรู้สึกของเธอนะ {d_cname} เราจะผ่านเรื่องนี้ไปด้วยกัน"
+            with c_o2:
+                if st.button(f"💚 เห็นด้วย (+5): {opts.get('agree', 'เห็นด้วย')[:22]}", key="camp_opt_agree", use_container_width=True):
                     chosen_resp_type = "agree"
                     chosen_resp_text = opts.get("agree", "")
-            with c_o2:
-                if st.button(f"⚖️ เป็นกลาง: {opts.get('neutral', 'เป็นกลาง')[:30]}", key="camp_opt_neutral", use_container_width=True):
+            with c_o3:
+                if st.button(f"⚖️ เป็นกลาง: {opts.get('neutral', 'เป็นกลาง')[:22]}", key="camp_opt_neutral", use_container_width=True):
                     chosen_resp_type = "neutral"
                     chosen_resp_text = opts.get("neutral", "")
-            with c_o3:
-                if st.button(f"💔 ไม่เห็นด้วย: {opts.get('disagree', 'ไม่เห็นด้วย')[:30]}", key="camp_opt_disagree", use_container_width=True):
+            with c_o4:
+                if st.button(f"💔 ไม่เห็นด้วย: {opts.get('disagree', 'ไม่เห็นด้วย')[:22]}", key="camp_opt_disagree", use_container_width=True):
                     chosen_resp_type = "disagree"
                     chosen_resp_text = opts.get("disagree", "")
 
             if chosen_resp_type:
                 r_out = state_manager.respond_to_camp_dialogue(d_cid, chosen_resp_type, world, active_dlg)
+                state_manager.get_party_bond_bonuses(world, player)
                 delta = r_out.get("approval_change", 0)
                 st.session_state["narrative_log"].append({
                     "role": "user",

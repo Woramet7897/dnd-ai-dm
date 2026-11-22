@@ -113,6 +113,8 @@ def respond_to_camp_dialogue(
     resp_lower = (response_type or "").strip().lower()
     if resp_lower == "agree":
         delta = 5
+    elif resp_lower in ("persuade", "insight", "comfort", "deep_talk"):
+        delta = 10
     elif resp_lower == "disagree":
         delta = -5
     elif resp_lower == "neutral":
@@ -124,12 +126,16 @@ def respond_to_camp_dialogue(
     new_approval = max(0, min(100, old_approval + delta))
     comp_state["approval"] = new_approval
     comp_state["camp_dialogue_pending"] = False
+    if new_approval >= 75:
+        comp_state["secret_unlocked"] = True
 
     topic = None
     if dialogue_data and isinstance(dialogue_data, dict):
         topic = dialogue_data.get("topic") or dialogue_data.get("statement")
     if topic:
         comp_state["last_discussion_topic"] = topic
+
+    bond_summary = get_party_bond_bonuses(world_state)
 
     logger.info(
         f"respond_to_camp_dialogue: companion '{companion_id}' {resp_lower} -> "
@@ -143,4 +149,106 @@ def respond_to_camp_dialogue(
         "new_approval": new_approval,
         "camp_dialogue_pending": False,
         "last_discussion_topic": comp_state.get("last_discussion_topic"),
+        "secret_unlocked": new_approval >= 75,
+        "bond_summary": bond_summary,
     }
+
+
+def get_companion_bond_perk(companion: Dict[str, Any], approval: int) -> Optional[Dict[str, Any]]:
+    """
+    BG3 Companion Bond Perk system:
+    When a companion's approval reaches 75+ (Trusted) or 90+ (Sworn Bond),
+    returns their active passive bond perk that assists the player in dialogue and skill checks.
+    """
+    if approval < 75 or not isinstance(companion, dict):
+        return None
+
+    tier = "👑 คู่หูร่วมสาบาน (Sworn Soulmate 90+)" if approval >= 90 else "💚 สหายรู้ใจ (Trusted Bond 75+)"
+    bonus_val = 3 if approval >= 90 else 2
+    comp_str = " ".join([
+        str(companion.get("id", "")),
+        str(companion.get("name", "")),
+        str(companion.get("class", "")),
+        str(companion.get("role", "")),
+    ]).lower()
+
+    if any(k in comp_str for k in ("cleric", "druid", "priest", "healer", "acolyte", "elira", "shadowheart", "mira")):
+        return {
+            "id": "bond_divine_guidance",
+            "tier": tier,
+            "name": "🙏 พรนำทางแห่งสหาย (Companion's Guidance)",
+            "auto_guidance": True,
+            "skill_bonus": bonus_val,
+            "skills": ["insight", "persuasion", "religion", "medicine"],
+            "description": f"สหายช่วยร่าย Guidance (+1d4) นำทางให้อัตโนมัติทุกครั้งที่ทอยเช็ค และบวก +{bonus_val} ให้ Insight/Persuasion",
+        }
+    if any(k in comp_str for k in ("rogue", "bard", "ranger", "scout", "thief", "smuggler", "astarion")):
+        return {
+            "id": "bond_silver_whisper",
+            "tier": tier,
+            "name": "🃏 เสียงกระซิบสายลับ (Silver Whisper)",
+            "auto_guidance": False,
+            "skill_bonus": bonus_val,
+            "skills": ["persuasion", "deception", "sleight_of_hand", "stealth", "insight"],
+            "description": f"สหายคอยส่งซิกและช่วยรับลูกในการเจรจา มอบโบนัส +{bonus_val} ให้ Persuasion, Deception, Insight และ Sleight of Hand",
+        }
+    if any(k in comp_str for k in ("wizard", "mage", "warlock", "sorcerer", "sage", "scholar", "cultist", "malakor", "gale")):
+        return {
+            "id": "bond_arcane_insight",
+            "tier": tier,
+            "name": "🔮 เนตรหยั่งรู้เวทมนตร์ (Arcane Insight)",
+            "auto_guidance": False,
+            "skill_bonus": bonus_val,
+            "skills": ["arcana", "investigation", "history", "insight", "persuasion"],
+            "description": f"สหายช่วยวิเคราะห์จุดอ่อนคู่สนทนา มอบโบนัส +{bonus_val} ให้ Arcana, Investigation, Insight และ Persuasion",
+        }
+    return {
+        "id": "bond_stalwart_presence",
+        "tier": tier,
+        "name": "🛡️ บารมีสหายร่วมสาบาน (Stalwart Presence)",
+        "auto_guidance": False,
+        "skill_bonus": bonus_val,
+        "skills": ["intimidation", "persuasion", "athletics", "survival"],
+        "description": f"สหายยืนเคียงข้างเสริมบารมี มอบโบนัส +{bonus_val} ให้ Intimidation, Persuasion และ Survival",
+    }
+
+
+def get_party_bond_bonuses(world_state: Dict[str, Any], player_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Aggregate all active Companion Bond Perks across the current party and store in world_state['party_bond_bonuses']
+    (and player_state['party_bond_bonuses'] if provided).
+    """
+    companions = world_state.get("party", {}).get("companions", [])
+    active_perks = []
+    auto_guidance = False
+    skill_bonuses: Dict[str, int] = {}
+
+    for comp in companions:
+        if not isinstance(comp, dict):
+            continue
+        cid = comp.get("id") or comp.get("name", "")
+        c_app = get_companion_approval(world_state, cid)
+        app_val = int(c_app.get("approval", comp.get("approval", 50)))
+        perk = get_companion_bond_perk(comp, app_val)
+        if perk:
+            c_app["secret_unlocked"] = True
+            perk_copy = dict(perk)
+            perk_copy["companion_id"] = cid
+            perk_copy["companion_name"] = comp.get("name", cid)
+            active_perks.append(perk_copy)
+            if perk.get("auto_guidance"):
+                auto_guidance = True
+            s_bon = int(perk.get("skill_bonus", 0))
+            for sk in perk.get("skills", []):
+                sk_low = sk.strip().lower().replace(" ", "_")
+                skill_bonuses[sk_low] = max(skill_bonuses.get(sk_low, 0), s_bon)
+
+    summary = {
+        "active_perks": active_perks,
+        "auto_guidance": auto_guidance,
+        "skill_bonuses": skill_bonuses,
+    }
+    world_state["party_bond_bonuses"] = summary
+    if isinstance(player_state, dict):
+        player_state["party_bond_bonuses"] = summary
+    return summary

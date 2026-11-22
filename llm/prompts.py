@@ -147,6 +147,12 @@ def build_system_prompt_tiers(
     )
 
     tier_2_parts = []
+    if isinstance(world_state, dict) and int(world_state.get("pacified_count", 0)) > 0:
+        p_cnt = int(world_state.get("pacified_count", 0))
+        pm_title = world_state.get("peacemaker_title", "Silver-Tongued Diplomat")
+        tier_2_parts.append(
+            f"- Player Social Reputation: {pm_title} (Resolved {p_cnt} conflicts peacefully without bloodshed; NPCs respect the player's diplomacy and eloquence)."
+        )
     active_comps = companions_present
     if active_comps is None and isinstance(world_state, dict):
         active_comps = world_state.get("party", {}).get("companions", [])

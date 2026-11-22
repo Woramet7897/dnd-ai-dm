@@ -12,6 +12,7 @@ from rules import (
     _get_shop_catalog,
     _inventory_item_info,
     get_modifier,
+    is_proficient,
 )
 from state.currency import (
     _ensure_currency,
@@ -427,6 +428,175 @@ def use_consumable(item_id: str, character_state: Dict[str, Any]) -> Tuple[bool,
     return True, "", result_dict
 
 
+SHOP_SECRET_STOCK: Dict[str, Dict[str, Any]] = {
+    "blacksmith": {
+        "item_id": "silvered_rapier_of_eloquence",
+        "name": "Silvered Rapier of Eloquence (+1)",
+        "type": "weapon",
+        "slot": "weapon",
+        "rarity": "rare",
+        "value_gold": 80,
+        "damage": "1d8+1",
+        "damage_type": "piercing",
+        "finesse": True,
+        "description": "ดาบเรเปียร์เคลือบเงินสลักอักขระนักการทูต (+1 Attack/Damage และ +2 Persuasion)",
+        "effects": {"attack_bonus": 1, "skill_bonus": {"Persuasion": 2}},
+    },
+    "general_store": {
+        "item_id": "cloak_of_silver_tongue",
+        "name": "Cloak of the Silver Tongue",
+        "type": "wearable",
+        "slot": "cloak",
+        "rarity": "uncommon",
+        "value_gold": 60,
+        "description": "ผ้าคลุมไหมทอเวทมนตร์แห่งวาทศิลป์ (+1 AC, +2 Persuasion และ +2 Deception)",
+        "effects": {"ac_bonus": 1, "skill_bonus": {"Persuasion": 2, "Deception": 2}},
+    },
+    "apothecary": {
+        "item_id": "elixir_of_mind_reading",
+        "name": "Elixir of Silver Presence",
+        "type": "consumable",
+        "rarity": "uncommon",
+        "value_gold": 40,
+        "description": "ยาอมฤตเพิ่มเสน่ห์และฟื้นฟูพลังชีวิต (ฟื้นฟู 2d8+4 HP และมอบ +10 Temp HP)",
+        "effects": {"heal": "2d8+4", "temp_hp": 10},
+    },
+    "default": {
+        "item_id": "ring_of_diplomatic_grace",
+        "name": "Ring of Diplomatic Grace",
+        "type": "wearable",
+        "slot": "ring",
+        "rarity": "rare",
+        "value_gold": 75,
+        "description": "แหวนตราฑูตโบราณ (+1 AC, +1 Saving Throws และ +2 Persuasion)",
+        "effects": {"ac_bonus": 1, "saving_throw_bonus": 1, "skill_bonus": {"Persuasion": 2}},
+    },
+}
+
+
+def attempt_shop_haggle(
+    shop_id: str,
+    character_state: Dict[str, Any],
+    world_state: Dict[str, Any],
+    skill: str = "Persuasion",
+    roll_override: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    BG3 / D&D 5e Social Bartering & Haggling:
+    Attempt to haggle with a merchant using Persuasion, Deception, or Intimidation.
+    On success:
+      - Unlocks a 30% discount (or 50% on Critical / beating DC by 5+)
+      - Unlocks the merchant's Secret Under-the-Counter Stock item!
+    On failure:
+      - Merchant raises prices by 15% for the day
+      - Failed Intimidation alerts the town guards (+15 GP bounty)
+    """
+    import state_manager
+    shops = _get_shop_catalog()
+    shop = shops.get(shop_id, {"name": shop_id.replace("_", " ").title(), "sell_multiplier": 1.0})
+    s_name = shop.get("name", shop_id.replace("_", " ").title())
+    cur_day = int(world_state.get("game_time", {}).get("day", 1))
+
+    haggle_map = world_state.setdefault("shop_haggle_state", {})
+    existing = haggle_map.get(shop_id, {})
+    if existing.get("haggled_day") == cur_day and roll_override is None:
+        return {
+            "success": False,
+            "already_haggled": True,
+            "discount_multiplier": existing.get("discount_multiplier", 1.0),
+            "secret_unlocked": existing.get("secret_unlocked", False),
+            "secret_item": existing.get("secret_item"),
+            "message": f"คุณได้เจรจาต่อรองกับร้าน **{s_name}** ไปแล้วในวันนี้ (กลับมาเจรจาใหม่ในวันพรุ่งนี้)",
+        }
+
+    skill_norm = (skill or "Persuasion").strip()
+    if roll_override is not None:
+        dc = 13
+        cha_mod = get_modifier(character_state.get("stats", {}).get("CHA", 10))
+        prof_b = character_state.get("proficiency_bonus", 2) if is_proficient(skill_norm, character_state) else 0
+        total = int(roll_override) + cha_mod + prof_b
+        is_crit = (int(roll_override) == 20)
+        is_fumble = (int(roll_override) == 1)
+        is_succ = True if is_crit else (False if is_fumble else (total >= dc))
+        chk_res = {
+            "roll": int(roll_override),
+            "total": total,
+            "dc": dc,
+            "success": is_succ,
+            "critical": is_crit,
+            "fumble": is_fumble,
+            "skill": skill_norm,
+        }
+    else:
+        chk_res = state_manager.resolve_check(
+            stat="CHA",
+            difficulty="medium",
+            state=character_state,
+            proficient=is_proficient(skill_norm, character_state),
+            skill=skill_norm,
+        )
+
+    if chk_res["success"]:
+        is_big_win = chk_res.get("critical") or (chk_res["total"] >= chk_res["dc"] + 5)
+        disc_mult = 0.50 if is_big_win else 0.70
+        disc_pct = 50 if is_big_win else 30
+
+        sec_template = copy.deepcopy(SHOP_SECRET_STOCK.get(shop_id, SHOP_SECRET_STOCK["default"]))
+        sec_id = sec_template["item_id"]
+        world_state.setdefault("generated_items", {})[sec_id] = sec_template
+
+        haggle_map[shop_id] = {
+            "haggled_day": cur_day,
+            "discount_multiplier": disc_mult,
+            "discount_percent": disc_pct,
+            "secret_unlocked": True,
+            "secret_item_id": sec_id,
+            "secret_item": sec_template,
+        }
+        return {
+            "success": True,
+            "check_result": chk_res,
+            "discount_multiplier": disc_mult,
+            "discount_percent": disc_pct,
+            "secret_unlocked": True,
+            "secret_item_id": sec_id,
+            "secret_item": sec_template,
+            "message": (
+                f"🗣️ **ต่อรองราคาสำเร็จ!** คุณใช้ **{skill_norm}** (ทอยได้ **{chk_res['total']}** vs **DC {chk_res['dc']}**) "
+                f"จนพ่อค้าร้าน **{s_name}** ยอมลดราคาสินค้าให้ **{disc_pct}%** และนำสินค้าลับใต้เคาน์เตอร์ **{sec_template['name']}** ออกมาวางขาย!"
+            ),
+        }
+    else:
+        disc_mult = 1.15
+        bounty_added = 0
+        if skill_norm.lower() == "intimidation":
+            bounty_added = 15
+            character_state["is_wanted"] = True
+            character_state["bounty"] = int(character_state.get("bounty", 0)) + bounty_added
+
+        haggle_map[shop_id] = {
+            "haggled_day": cur_day,
+            "discount_multiplier": disc_mult,
+            "discount_percent": -15,
+            "secret_unlocked": False,
+            "secret_item_id": None,
+            "secret_item": None,
+        }
+        bounty_msg = f" และพ่อค้าแจ้งความข้อหาข่มขู่ (ค่าหัว +{bounty_added} GP)!" if bounty_added else "!"
+        return {
+            "success": False,
+            "check_result": chk_res,
+            "discount_multiplier": disc_mult,
+            "discount_percent": -15,
+            "secret_unlocked": False,
+            "bounty_added": bounty_added,
+            "message": (
+                f"❌ **ต่อรองราคาไม่สำเร็จ!** (ทอย {skill_norm} ได้ **{chk_res['total']}** vs **DC {chk_res['dc']}**) "
+                f"พ่อค้าร้าน **{s_name}** ไม่พอใจและปรับราคาสินค้าขึ้น **+15%** สำหรับวันนี้{bounty_msg}"
+            ),
+        }
+
+
 def buy_item(
     item_id: str,
     shop_id: str,
@@ -445,16 +615,25 @@ def buy_item(
         if open_periods and period not in open_periods:
             return False, f"The shop '{shop.get('name', shop_id)}' is closed for the {period}."
 
-    sell_items = shop.get("sell_items", [])
+    haggle_info = (world_state or {}).get("shop_haggle_state", {}).get(shop_id, {})
+    sell_items = list(shop.get("sell_items", []))
+    if haggle_info.get("secret_unlocked") and haggle_info.get("secret_item_id"):
+        if haggle_info["secret_item_id"] not in sell_items:
+            sell_items.append(haggle_info["secret_item_id"])
+
     if item_id not in sell_items:
         return False, f"Shop '{shop.get('name', shop_id)}' does not sell '{item_id}'."
 
     catalog = _get_item_catalog()
     item_info = catalog.get(item_id)
+    if not item_info and world_state:
+        item_info = world_state.get("generated_items", {}).get(item_id)
+    if not item_info and haggle_info.get("secret_item_id") == item_id:
+        item_info = haggle_info.get("secret_item")
     if not item_info:
         return False, f"Item '{item_id}' not found in catalog."
 
-    sell_mult = shop.get("sell_multiplier", 1.0)
+    sell_mult = shop.get("sell_multiplier", 1.0) * float(haggle_info.get("discount_multiplier", 1.0))
     cost_info = get_item_price_breakdown(item_info, sell_mult)
 
     _ensure_currency(character_state)
@@ -467,7 +646,15 @@ def buy_item(
     if existing and existing.get("quantity") is not None:
         existing["quantity"] = existing.get("quantity", 1) + 1
     elif not existing:
-        inventory.append({"item_id": item_id, "equipped": False, "quantity": 1})
+        new_inv_entry: Dict[str, Any] = {"item_id": item_id, "equipped": False, "quantity": 1}
+        if item_id not in catalog and isinstance(item_info, dict):
+            new_inv_entry["name"] = item_info.get("name", item_id)
+            new_inv_entry["type"] = item_info.get("type", "wearable")
+            if "slot" in item_info:
+                new_inv_entry["slot"] = item_info["slot"]
+            if "effects" in item_info:
+                new_inv_entry["effects"] = copy.deepcopy(item_info["effects"])
+        inventory.append(new_inv_entry)
 
     logger.debug(f"buy_item: bought '{item_id}' from '{shop_id}' for {cost_info['text']}. Remaining: {format_currency(character_state)}.")
     return True, f"Bought {item_info.get('name', item_id)} for {cost_info['text']}."

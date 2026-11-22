@@ -277,8 +277,23 @@ def resolve_exploration_parley(
 
     world.setdefault("npc_relationships", {})[npc_slug] = 20
 
+    # Track Pacifist / Peacemaker Reputation & Notice Board Pacifist Bounty completion
+    world["pacified_count"] = int(world.get("pacified_count", 0)) + 1
+    player["pacified_count"] = world["pacified_count"]
+    peacemaker_unlocked = False
+    if world["pacified_count"] >= 2:
+        player["peacemaker_active"] = True
+        world["peacemaker_title"] = "🕊️ ผู้สร้างสันติลิ้นทองคำ (Silver-Tongued Peacemaker)"
+        peacemaker_unlocked = True
+
+    for nb_e in world.get("notice_board", {}).get("entries", []):
+        if isinstance(nb_e, dict) and nb_e.get("type") == "bounty":
+            if nb_e.get("target_room_id") == room_id or nb_e.get("target_monster") in enc_table:
+                nb_e["pacified_completed"] = True
+
     speech_note = f' ด้วยคำพูด *"{speech_text}"*' if speech_text else ""
     lvl_note = " 🆙 **(Level Up!)**" if leveled_up else ""
+    pm_note = " 🕊️ *(ปลดล็อกฉายา: ผู้สร้างสันติลิ้นทองคำ +2 Persuasion!)*" if peacemaker_unlocked else ""
     return {
         "success": True,
         "parley_success": True,
@@ -288,10 +303,11 @@ def resolve_exploration_parley(
         "gold_gained": total_gold,
         "leveled_up": leveled_up,
         "pacified_npc_id": npc_slug,
+        "peacemaker_active": bool(player.get("peacemaker_active")),
         "message": (
             f"🕊️ **ชนะด้วยการเจรจา (Social Victory)!** คุณใช้ **{skill_norm}** กล่อม **{lead_name}**{speech_note} สำเร็จ "
             f"(ทอยได้ **{chk_res['total']}** vs **DC {chk_res['dc']}**)! "
-            f"ได้รับ **+{total_xp} XP**, ของกำนัล **+{total_gold} GP**{lvl_note} และ **{lead_name}** ยอมเป็นพันธมิตรในพื้นที่นี้โดยไม่ต้องต่อสู้!"
+            f"ได้รับ **+{total_xp} XP**, ของกำนัล **+{total_gold} GP**{lvl_note}{pm_note} และ **{lead_name}** ยอมเป็นพันธมิตรในพื้นที่นี้โดยไม่ต้องต่อสู้!"
         ),
     }
 
@@ -1110,11 +1126,54 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
                     except Exception:
                         pass
 
+            if not is_succ and state_manager.get_inspiration(player) > 0:
+                st.session_state["pending_bg3_reroll"] = {
+                    "action": bg3_action,
+                    "spec": bg3_spec,
+                    "prev_result": chk_res,
+                }
+            else:
+                st.session_state.pop("pending_bg3_reroll", None)
+
             st.session_state.pop("pending_bg3_check", None)
             auto_save()
             st.rerun()
 
         st.stop()
+
+    # D&D 5.5e (2024) / BG3 Post-Roll Heroic Inspiration Reroll Banner
+    pending_bg3_reroll = st.session_state.get("pending_bg3_reroll")
+    if pending_bg3_reroll and state_manager.get_inspiration(player) > 0:
+        pr_res = pending_bg3_reroll["prev_result"]
+        pr_spec = pending_bg3_reroll["spec"]
+        pr_act = pending_bg3_reroll["action"]
+        insp_rem = state_manager.get_inspiration(player)
+        with st.container(border=True):
+            st.warning(
+                f"🔄 **D&D 5.5e / BG3 Heroic Inspiration Reroll:** การทอย **{pr_spec['stat']} ({pr_spec['skill_name']})** เมื่อสักครู่ล้มเหลว "
+                f"(ได้ **{pr_res['total']}** vs **DC {pr_res['dc']}**) — คุณมี **{insp_rem} Inspiration ✨** ต้องการใช้ 1 แต้มทอยเต๋าแก้ตัวทันทีหรือไม่?"
+            )
+            c_hr1, c_hr2 = st.columns([2, 1])
+            with c_hr1:
+                if st.button("✨ ใช้ 1 Heroic Inspiration ทอยแก้ตัว (Reroll d20)", key="btn_heroic_reroll_bg3", type="primary", use_container_width=True):
+                    new_chk = state_manager.reroll_check(pr_res, player)
+                    st.session_state.pop("pending_bg3_reroll", None)
+                    r_badge = "✅ HEROIC REROLL SUCCESS!" if new_chk["success"] else "❌ REROLL STILL FAILED"
+                    if new_chk["success"]:
+                        st.balloons()
+                    st.session_state["narrative_log"].append({
+                        "role": "assistant",
+                        "content": (
+                            f"🔄 **[Heroic Inspiration Reroll] {pr_spec['stat']} ({pr_spec['skill_name']}) vs DC {new_chk['dc']}**\n\n"
+                            f"ทอยใหม่ได้ `[{new_chk.get('raw_reroll', new_chk['roll'])}]` (เลือกค่าสูงสุด `[{new_chk['roll']}]`) → รวม **`{new_chk['total']}`** vs **DC `{new_chk['dc']}`** → **{r_badge}**"
+                        ),
+                    })
+                    auto_save()
+                    st.rerun()
+            with c_hr2:
+                if st.button("ยอมรับผลเดิม", key="btn_skip_heroic_reroll_bg3", use_container_width=True):
+                    st.session_state.pop("pending_bg3_reroll", None)
+                    st.rerun()
 
     # Contextual Action Suggestions — '1 in 65 Million' × 'Holy Grail War' Transparent Choice Cards
     suggestions = st.session_state.get("action_suggestions") or list(llm_handler.DEFAULT_ACTION_SUGGESTIONS)

@@ -235,9 +235,27 @@ def complete_notice_board_quest(
 
     target["status"] = "completed"
     reward = target.get("reward_gold", 0)
+    pacifist_bonus = 0
+    xp_bonus = 0
+
+    if target.get("type") == "bounty":
+        tgt_mon = str(target.get("target_monster", ""))
+        pac_id = f"pacified_{tgt_mon}"
+        is_pacified = bool(
+            target.get("pacified_completed")
+            or (pac_id in world_state.get("generated_npcs", {}))
+            or any(k.startswith("pacified_") for k in world_state.get("generated_npcs", {}))
+        )
+        if is_pacified:
+            pacifist_bonus = int(target.get("pacifist_bonus_gold", 25))
+            reward += pacifist_bonus
+            xp_bonus = 50
+
     if character_state is not None and reward > 0:
         import state_manager
         state_manager.add_currency(character_state, gp=reward)
+        if xp_bonus > 0:
+            state_manager.award_xp(xp_bonus, character_state)
 
     ql = world_state.get("quest_log", {})
     for q in ql.get("side", []):
@@ -246,9 +264,144 @@ def complete_notice_board_quest(
             for obj in q.get("objectives", []):
                 obj["done"] = True
 
-    logger.info(f"complete_notice_board_quest: completed '{quest_id}', rewarded {reward} GP.")
+    pac_note = f" (รวมโบนัสเจรจาสันติ +{pacifist_bonus} GP & +{xp_bonus} XP!)" if pacifist_bonus > 0 else ""
+    logger.info(f"complete_notice_board_quest: completed '{quest_id}', rewarded {reward} GP{pac_note}.")
     return {
         "success": True,
         "reward_gold": reward,
-        "message": f"Completed quest: {target['title']}! Received {reward} GP reward.",
+        "pacifist_bonus": pacifist_bonus,
+        "xp_bonus": xp_bonus,
+        "message": f"Completed quest: {target['title']}! Received {reward} GP reward{pac_note}.",
+    }
+
+
+def post_mediation_quest(world_state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Generate or retrieve an active Diplomatic Mediation & Investigation Quest on the Tavern Notice Board
+    for conversational roleplay players.
+    """
+    nb = world_state.setdefault("notice_board", {})
+    entries = nb.setdefault("entries", [])
+    existing = next((e for e in entries if e.get("type") == "mediation" and e.get("status") != "completed"), None)
+    if existing:
+        return existing
+
+    all_rooms = sorted(_all_known_room_ids(world_state))
+    npc_targets = []
+    for r_id in all_rooms:
+        r_obj = _get_room(r_id, world_state) or {}
+        for npc in r_obj.get("npcs", []):
+            npc_targets.append((r_id, npc, r_obj.get("name", r_id.replace("_", " ").title())))
+    if not npc_targets:
+        npc_targets = [("town_riverside", "captain_valdis", "Riverside Village")]
+
+    refresh_count = int(nb.get("refresh_count", 1))
+    med_room_id, target_npc, med_room_name = npc_targets[refresh_count % len(npc_targets)]
+    npc_title = target_npc.replace("_", " ").title()
+
+    med_entry = {
+        "id": f"mediation_{target_npc}_{refresh_count}_{len(entries) + 1}",
+        "type": "mediation",
+        "title": f"Mediation: ไกล่เกลี่ยข้อพิพาทของ {npc_title}",
+        "description": (
+            f"เกิดความขัดแย้งและข่าวลือเรื่องการทุจริตใน {med_room_name} ที่เกี่ยวข้องกับ {npc_title} "
+            f"ผู้ว่าจ้างต้องการนักเจรจาฝีปากเอกไปช่วยสืบสวนหรือไกล่เกลี่ยด้วย Persuasion, Insight หรือ Investigation โดยไม่ใช้กำลัง"
+        ),
+        "target_npc": target_npc,
+        "target_room_id": med_room_id,
+        "target_room_name": med_room_name,
+        "reward_gold": 45,
+        "reward_xp": 75,
+        "status": "available",
+    }
+    entries.append(med_entry)
+    return med_entry
+
+
+def resolve_mediation_quest(
+    world_state: Dict[str, Any],
+    quest_id: str,
+    character_state: Dict[str, Any],
+    skill: str = "Persuasion",
+    roll_override: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Resolve an accepted Diplomatic Mediation / Investigation quest using Persuasion, Insight, or Investigation.
+    On success: completes the quest, awards 45 GP + 75 XP, increases town reputation & NPC relationship,
+    and increments pacified_count toward the Peacemaker title!
+    """
+    import state_manager
+    nb = world_state.get("notice_board", {})
+    entries = nb.get("entries", [])
+    target = next((q for q in entries if q.get("id") == quest_id), None)
+    if not target:
+        return {"success": False, "message": f"Mediation quest '{quest_id}' not found."}
+
+    skill_norm = (skill or "Persuasion").strip()
+    stat = "WIS" if skill_norm.lower() == "insight" else ("INT" if skill_norm.lower() == "investigation" else "CHA")
+    is_prof = state_manager.is_proficient(skill_norm, character_state)
+
+    if roll_override is not None:
+        dc = 13
+        mod = state_manager.get_modifier(character_state.get("stats", {}).get(stat, 10))
+        pb = character_state.get("proficiency_bonus", 2) if is_prof else 0
+        tot = int(roll_override) + mod + pb
+        succ = True if int(roll_override) == 20 else (False if int(roll_override) == 1 else (tot >= dc))
+        chk_res = {"roll": int(roll_override), "total": tot, "dc": dc, "success": succ, "skill": skill_norm, "stat": stat}
+    else:
+        chk_res = state_manager.resolve_check(
+            stat=stat,
+            difficulty="medium",
+            state=character_state,
+            proficient=is_prof,
+            skill=skill_norm,
+        )
+
+    if not chk_res["success"]:
+        return {
+            "success": False,
+            "check_result": chk_res,
+            "message": (
+                f"❌ การไกล่เกลี่ยยังไม่สำเร็จ (ทอย {stat} [{skill_norm}] ได้ **{chk_res['total']}** vs **DC {chk_res['dc']}**) "
+                f"— คุณสามารถเตรียมบัฟ Guidance / Friends หรือใช้ Inspiration แล้วลองเจรจาใหม่ได้!"
+            ),
+        }
+
+    reward_gp = int(target.get("reward_gold", 45))
+    reward_xp = int(target.get("reward_xp", 75))
+    target["status"] = "completed"
+
+    state_manager.add_currency(character_state, gp=reward_gp)
+    state_manager.award_xp(reward_xp, character_state)
+    while state_manager.check_level_up(character_state):
+        state_manager.apply_level_up(character_state)
+
+    ql = world_state.get("quest_log", {})
+    for q in ql.get("side", []):
+        if q.get("id") == quest_id:
+            q["status"] = "completed"
+            for obj in q.get("objectives", []):
+                obj["done"] = True
+
+    tgt_npc = target.get("target_npc")
+    if tgt_npc:
+        rels = world_state.setdefault("npc_relationships", {})
+        rels[tgt_npc] = int(rels.get(tgt_npc, 0)) + 15
+
+    world_state["pacified_count"] = int(world_state.get("pacified_count", 0)) + 1
+    character_state["pacified_count"] = world_state["pacified_count"]
+    if world_state["pacified_count"] >= 2:
+        character_state["peacemaker_active"] = True
+        world_state["peacemaker_title"] = "🕊️ ผู้สร้างสันติลิ้นทองคำ (Silver-Tongued Peacemaker)"
+
+    return {
+        "success": True,
+        "check_result": chk_res,
+        "reward_gold": reward_gp,
+        "reward_xp": reward_xp,
+        "peacemaker_active": bool(character_state.get("peacemaker_active")),
+        "message": (
+            f"🕊️ **ไกล่เกลี่ยสำเร็จ!** คุณใช้ **{skill_norm}** (ทอยได้ **{chk_res['total']}** vs **DC {chk_res['dc']}**) "
+            f"คลี่คลายความขัดแย้งอย่างสันติ! ได้รับ **+{reward_gp} GP**, **+{reward_xp} XP** และความสัมพันธ์กับ NPC **+15**!"
+        ),
     }

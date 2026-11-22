@@ -72,5 +72,7 @@ from dungeon.notice_board import (
     accept_notice_board_quest,
     complete_notice_board_quest,
     get_notice_board,
+    post_mediation_quest,
     refresh_notice_board,
+    resolve_mediation_quest,
 )
