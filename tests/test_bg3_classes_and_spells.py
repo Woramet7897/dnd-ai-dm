@@ -917,6 +917,119 @@ class TestBG3ClassesAndSpells(unittest.TestCase):
         at.run()
         self.assertEqual(len(at.exception), 0, f"Combat view raised exception: {at.exception}")
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # 16. BG3 SOCIAL SPELLS, ALL 12 CLASSES, HALFLING LUCKY, & PACIFIST PARLEY
+    # ══════════════════════════════════════════════════════════════════════════
+    def test_bg3_social_spells_12_classes_halfling_lucky_and_pacifist_parley(self):
+        from unittest.mock import patch
+        import app
+        import check_manager
+        import dungeon_manager as dm
+
+        # 1. Create the 4 newly added core classes (Druid, Sorcerer, Ranger, Monk) -> All 12 D&D 5e / BG3 classes complete
+        druid = character_creator.create_character(
+            "Halsin", "Elf", "Druid", "Folk Hero",
+            {"STR": 10, "DEX": 14, "CON": 14, "INT": 10, "WIS": 15, "CHA": 8},
+        )
+        self.assertEqual(druid["class"], "Druid")
+        self.assertIn("guidance", druid["known_spells"])
+        self.assertIn("speak_with_animals", druid["known_spells"])
+        self.assertEqual(druid["class_resources"]["wild_shape"]["max"], 2)
+
+        sorcerer = character_creator.create_character(
+            "Galeia", "Tiefling", "Sorcerer", "Noble",
+            {"STR": 8, "DEX": 14, "CON": 14, "INT": 10, "WIS": 10, "CHA": 15},
+            subclass="draconic_bloodline",
+        )
+        self.assertEqual(sorcerer["class"], "Sorcerer")
+        # Draconic Resilience AC = 13 + DEX mod (14 -> +2) = 15
+        self.assertEqual(sorcerer["ac"], 15)
+        self.assertIn("friends", sorcerer["known_spells"])
+        self.assertIn("disguise_self", sorcerer["known_spells"])
+
+        ranger = character_creator.create_character(
+            "Minsc", "Human", "Ranger", "Folk Hero",
+            {"STR": 12, "DEX": 15, "CON": 14, "INT": 8, "WIS": 14, "CHA": 8},
+        )
+        self.assertEqual(ranger["class"], "Ranger")
+        self.assertIn("hunters_mark", ranger["known_spells"])
+        self.assertIn("speak_with_animals", ranger["known_spells"])
+
+        monk = character_creator.create_character(
+            "Zenyatta", "Human", "Monk", "Acolyte",
+            {"STR": 10, "DEX": 15, "CON": 13, "INT": 10, "WIS": 14, "CHA": 8},
+        )
+        self.assertEqual(monk["class"], "Monk")
+        # Human +1 all stats -> DEX 16 (+3), WIS 15 (+2). Unarmored Defense AC = 10 + 3 + 2 = 15
+        self.assertEqual(monk["ac"], 15)
+        self.assertIn("ki_points", monk["class_resources"])
+
+        # 2. Cast Guidance & Friends -> Verify automatic +1d4 bonus and Advantage on social checks
+        cast_g = sm.cast_spell(druid, sorcerer, "guidance", druid, self.world)
+        self.assertTrue(cast_g["success"])
+        cast_f = sm.cast_spell(sorcerer, sorcerer, "friends", sorcerer, self.world)
+        self.assertTrue(cast_f["success"])
+
+        # With 'friends_advantage' active on sorcerer, resolve_check on CHA rolls 2d20 and takes highest (e.g. 4 and 17 -> 17)
+        # And with 'guidance' active on sorcerer, adds +1d4 bonus!
+        with patch.object(sm, "_roll_d20", side_effect=[4, 17]), patch.object(sm, "_roll_dice", return_value=4):
+            chk_soc = sm.resolve_check("CHA", "medium", sorcerer, skill="Persuasion")
+        self.assertEqual(chk_soc["roll"], 17)
+        self.assertEqual(chk_soc["bonus"], 4)
+        self.assertTrue(chk_soc["success"])
+
+        # 3. Verify Halfling Lucky automatically rerolls a natural 1 on ability checks
+        halfling = character_creator.create_character(
+            "Bilbo", "Halfling", "Bard", "Folk Hero",
+            {"STR": 8, "DEX": 14, "CON": 12, "INT": 12, "WIS": 10, "CHA": 15},
+        )
+        with patch.object(sm, "_roll_d20", side_effect=[1, 16]):
+            chk_lucky = sm.resolve_check("CHA", "medium", halfling, skill="Persuasion")
+        self.assertTrue(chk_lucky["halfling_lucky_reroll"])
+        self.assertEqual(chk_lucky["roll"], 16)
+        self.assertTrue(chk_lucky["success"])
+
+        # 4. Verify War Caster feat grants Advantage on Concentration saves
+        druid["feats"] = ["war_caster"]
+        druid["concentration"] = "entangle"
+        with patch.object(sm, "_roll_d20", side_effect=[3, 18]):
+            conc_res = sm.resolve_concentration_check(10, druid)
+        self.assertEqual(conc_res["roll"], 18)
+        self.assertTrue(conc_res["success"])
+
+        # 5. Verify BG3 Social Spell & Racial Dialogue Tags in check_manager
+        self.assertEqual(check_manager.detect_action_skill_check("[Detect Thoughts] แอบอ่านความคิดของพ่อค้า", sorcerer)["skill"], "insight")
+        self.assertEqual(check_manager.detect_action_skill_check("[Speak with Animals] ถามหมาป่าเรื่องทางลับ", druid)["skill"], "animal_handling")
+        self.assertEqual(check_manager.detect_action_skill_check("[Speak with Dead] ซักถามวิญญาณนักรบโบราณ", druid)["skill"], "religion")
+        self.assertEqual(check_manager.detect_action_skill_check("[Tiefling] ข่มขวัญด้วยสายเลือดอสูร", sorcerer)["skill"], "intimidation")
+
+        # 6. Verify Pre-Combat Pacifist Exploration Parley clears room, awards XP & gold, and creates a friendly NPC!
+        self.world["current_location"] = "ruined_mill"
+        self.world["cleared_rooms"] = []
+        mill_room = dm.get_current_room(self.world)
+        init_xp = sorcerer["xp_current"]
+        init_gp = sorcerer["currency"]["gp"]
+
+        with patch.object(sm, "_roll_d20", return_value=18):
+            parley_res = app.resolve_exploration_parley(
+                sorcerer,
+                self.world,
+                mill_room,
+                skill="Persuasion",
+                speech_text="วางอาวุธลงเถอะ เรามาเจรจาแบ่งสมบัติกันอย่างสันติ",
+                use_guidance=True,
+                use_social_advantage=True,
+            )
+        self.assertTrue(parley_res["parley_success"])
+        self.assertGreater(parley_res["xp_gained"], 0)
+        self.assertGreater(parley_res["gold_gained"], 0)
+        self.assertEqual(sorcerer["xp_current"], init_xp + parley_res["xp_gained"])
+        self.assertEqual(sorcerer["currency"]["gp"], init_gp + parley_res["gold_gained"])
+        self.assertIn("ruined_mill", self.world["cleared_rooms"])
+        pac_npc_id = parley_res["pacified_npc_id"]
+        self.assertIn(pac_npc_id, self.world["generated_npcs"])
+        self.assertIn(pac_npc_id, dm.get_current_room(self.world)["npcs"])
+
 
 if __name__ == "__main__":
     unittest.main()

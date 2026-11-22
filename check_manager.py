@@ -81,7 +81,7 @@ TAG_ALIASES: Dict[str, str] = {
     "เจรจา": "persuasion",
     "เกลี้ยกล่อม": "persuasion",
     "โน้มน้าว": "persuasion",
-    # Class / Background Roleplay Dialogue Tags -> Mapped to signature D&D 5e social/knowledge skills
+    # Class / Background / Race / Social Spell Roleplay Dialogue Tags -> Mapped to signature D&D 5e social/knowledge skills
     "bard": "performance",
     "paladin": "persuasion",
     "cleric": "religion",
@@ -90,12 +90,37 @@ TAG_ALIASES: Dict[str, str] = {
     "barbarian": "intimidation",
     "rogue": "deception",
     "fighter": "athletics",
+    "druid": "animal_handling",
+    "sorcerer": "persuasion",
+    "ranger": "survival",
+    "monk": "insight",
     "criminal": "deception",
     "noble": "persuasion",
     "sage": "history",
     "acolyte": "religion",
     "soldier": "intimidation",
     "folk hero": "persuasion",
+    "folk_hero": "persuasion",
+    "elf": "perception",
+    "tiefling": "intimidation",
+    "dwarf": "history",
+    "halfling": "persuasion",
+    "half-orc": "intimidation",
+    "half_orc": "intimidation",
+    "dragonborn": "intimidation",
+    "human": "persuasion",
+    "detect thoughts": "insight",
+    "detect_thoughts": "insight",
+    "อ่านใจ": "insight",
+    "speak with animals": "animal_handling",
+    "speak_with_animals": "animal_handling",
+    "คุยกับสัตว์": "animal_handling",
+    "speak with dead": "religion",
+    "speak_with_dead": "religion",
+    "คุยกับศพ": "religion",
+    "disguise self": "deception",
+    "disguise_self": "deception",
+    "ปลอมตัว": "deception",
 }
 
 # Regex keywords matching actions that should trigger a check
@@ -173,11 +198,6 @@ def detect_action_skill_check(
             skill_id = TAG_ALIASES[tag_key]
             info = SKILL_MAP.get(skill_id, {"stat": "WIS", "name": skill_id.title(), "thai": skill_id})
             return _build_check_spec(skill_id, info, "medium", cleaned_action, player_state)
-        if tag_key in {
-            "fighter", "wizard", "rogue", "cleric", "bard", "paladin", "barbarian", "warlock",
-            "folk hero", "folk_hero", "acolyte", "criminal", "noble", "sage", "soldier", "entertainer",
-        }:
-            return None
 
     # 2. Check prioritized covert / active intent keywords first (stealth)
     # Even if preceded by casual movement like "เดินไปแอบฟังที่ประตู" or rest like "พักอยู่หลังหินแล้วแอบดูยาม"

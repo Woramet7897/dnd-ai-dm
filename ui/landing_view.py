@@ -45,6 +45,22 @@ CLASS_FLAVOR = {
         "quote": "พันธสัญญาลี้ลับแลกมาด้วยพลังอำนาจเหนือมนุษย์... ลำแสงมรณะของข้าจะฉีกกระชากทุกสิ่งที่ขวางทาง!",
         "desc": "ผู้ทำพันธสัญญากับตัวตนต่างมิติ ยิงลำแสง Eldritch Blast และฟื้นฟูสล็อตเวททั้งหมดได้ทันทีเมื่อพักสั้น (Short Rest)",
     },
+    "Druid": {
+        "quote": "เสียงกระซิบของสายลมและสัตว์ป่าล้วนบอกเล่าความลับของโลกใบนี้แก่ผู้ที่รับฟัง...",
+        "desc": "ผู้พิทักษ์ธรรมชาติที่พูดคุยกับสัตว์ป่าได้ตั้งแต่เลเวล 1 (Speak with Animals), มีคาถา Guidance (+1d4 ช่วยคุย) และแปลงร่างสัตว์ Wild Shape",
+    },
+    "Sorcerer": {
+        "quote": "เวทมนตร์ไม่ได้อยู่ในตำรา แต่มันไหลเวียนอยู่ในสายเลือดและทุกคำพูดของข้า!",
+        "desc": "จอมเวทสายเสน่ห์ (CHA) ผู้มีเวทสายคุยครบเครื่องตั้งแต่เริ่ม (Friends, Charm Person, Disguise Self) และเกราะเกล็ดมังกร",
+    },
+    "Ranger": {
+        "quote": "ไม่มีร่องรอยใดรอดพ้นสายตาข้า และสัตว์ทุกตัวในผืนป่าคือสหายผู้คอยส่งข่าวให้ข้าเสมอ",
+        "desc": "พรานป่าผู้เชี่ยวชาญการแกะรอย ล็อกเป้าด้วย Hunter's Mark (+1d6) และพูดคุยกับสัตว์ป่าเพื่อสืบหาความลับ",
+    },
+    "Monk": {
+        "quote": "เมื่อจิตสงบนิ่ง ย่อมมองเห็นความจริงที่ซ่อนอยู่หลังคำลวง และหมัดของข้าคือคำตัดสิน",
+        "desc": "นักพรตผู้มีค่า WIS สูง หยั่งรู้จิตใจคู่สนทนา (Insight), เกราะปราณธรรมชาติ (10 + DEX + WIS) และท่ารัวหมัด Flurry of Blows",
+    },
 }
 
 RACE_FLAVOR = {
@@ -66,6 +82,10 @@ CLASS_PRIORITY = {
     "Paladin":   ["STR", "CHA", "CON", "WIS", "DEX", "INT"],
     "Barbarian": ["STR", "CON", "DEX", "WIS", "CHA", "INT"],
     "Warlock":   ["CHA", "CON", "DEX", "WIS", "INT", "STR"],
+    "Druid":     ["WIS", "CON", "DEX", "INT", "CHA", "STR"],
+    "Sorcerer":  ["CHA", "CON", "DEX", "WIS", "INT", "STR"],
+    "Ranger":    ["DEX", "WIS", "CON", "STR", "INT", "CHA"],
+    "Monk":      ["DEX", "WIS", "CON", "STR", "INT", "CHA"],
 }
 
 
@@ -160,8 +180,8 @@ def render_landing_view():
                 )
             with col_c:
                 cls_name = st.selectbox(
-                    "คลาสหลัก (Class):",
-                    ["Fighter", "Wizard", "Rogue", "Cleric", "Bard", "Paladin", "Barbarian", "Warlock"],
+                    "คลาสหลัก (Class — ครบ 12 คลาส D&D 5e / BG3):",
+                    ["Fighter", "Wizard", "Rogue", "Cleric", "Bard", "Paladin", "Barbarian", "Warlock", "Druid", "Sorcerer", "Ranger", "Monk"],
                     key="select_class",
                 )
 

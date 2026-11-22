@@ -83,6 +83,7 @@ from ui.exploration_view import (
     build_choice_card_metadata,
     calculate_check_success_chance,
     compute_turn_stat_deltas,
+    resolve_exploration_parley,
     resolve_inspiration_reroll,
     render_playing_view,
     snapshot_player_world_state,

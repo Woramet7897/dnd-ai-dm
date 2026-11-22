@@ -832,13 +832,20 @@ def resolve_combat_parley(
     prof_bonus = actor.get("proficiency_bonus", real_p.get("proficiency_bonus", 2)) if is_prof else 0
 
     a_conds = _get_condition_set(actor)
-    bless_bonus = combat_manager.roll_dice("1d4") if "blessed" in a_conds else 0
+    bless_bonus = combat_manager.roll_dice("1d4") if ("blessed" in a_conds or "guidance" in a_conds) else 0
     bi_bonus = 0
     if "bardic_inspired" in a_conds:
         bi_bonus = combat_manager.roll_dice("1d6")
         remove_condition(actor, "bardic_inspired")
 
-    raw_roll = combat_manager._roll_d20()
+    has_social_adv = any(c in a_conds for c in ("friends_advantage", "thaumaturgy", "detect_thoughts", "disguised"))
+    if has_social_adv:
+        raw_roll = max(combat_manager._roll_d20(), combat_manager._roll_d20())
+    else:
+        raw_roll = combat_manager._roll_d20()
+    if raw_roll == 1 and str(actor.get("race", real_p.get("race", ""))).strip().lower() == "halfling":
+        raw_roll = combat_manager._roll_d20()
+
     total_mod = cha_mod + prof_bonus + bless_bonus + bi_bonus
     total_roll = raw_roll + total_mod
 
@@ -873,6 +880,9 @@ def resolve_combat_parley(
             if crit or total_roll >= dc + 3 or hp_ratio <= 0.5:
                 e_hp["current"] = 0
                 enemy_surrendered = True
+                target["surrendered_peacefully"] = True
+                if isinstance(combat_state, dict):
+                    combat_state["pacifist_victory"] = True
                 narration = (
                     f"{actor_name} speaks with compelling conviction to {target_name}{speech_snippet} "
                     f"({skill_norm} {total_roll} vs DC {dc})! Moved by the words, {target_name} lowers their weapon and surrenders peacefully!"
@@ -888,6 +898,9 @@ def resolve_combat_parley(
             if crit or total_roll >= dc + 4 or hp_ratio <= 0.4:
                 e_hp["current"] = 0
                 enemy_surrendered = True
+                target["surrendered_peacefully"] = True
+                if isinstance(combat_state, dict):
+                    combat_state["pacifist_victory"] = True
                 narration = (
                     f"{actor_name} unleashes a terrifying threat at {target_name}{speech_snippet} "
                     f"({skill_norm} {total_roll} vs DC {dc})! Broken by terror, {target_name} drops their weapon and flees the battlefield!"

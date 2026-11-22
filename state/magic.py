@@ -540,7 +540,7 @@ def cast_spell(
         if target_type == "all_allies" and combat_state:
             buff_targets = [combat_state.get("player_combatant", caster)] + combat_state.get("companions", [])
         else:
-            buff_targets = [target if (target and target.get("side") == "player") else caster]
+            buff_targets = [target if (target and target.get("side") != "enemy") else caster]
 
         import combat_manager
         for bt in buff_targets:

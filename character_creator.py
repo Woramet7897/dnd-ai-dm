@@ -25,12 +25,16 @@ XP_THRESHOLDS: Dict[int, int] = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 HIT_DIE_AVERAGE: Dict[str, int] = {
     "fighter": 6,    # 1d10 average = 5.5 -> floor+1 = 6
     "paladin": 6,    # 1d10 average = 5.5 -> floor+1 = 6
+    "ranger": 6,     # 1d10 average = 5.5 -> floor+1 = 6
     "barbarian": 7,  # 1d12 average = 6.5 -> floor+1 = 7
     "wizard": 4,     # 1d6  average = 3.5 -> floor+1 = 4
+    "sorcerer": 4,   # 1d6  average = 3.5 -> floor+1 = 4
     "rogue": 5,      # 1d8  average = 4.5 -> floor+1 = 5
     "bard": 5,       # 1d8  average = 4.5 -> floor+1 = 5
     "cleric": 5,     # 1d8  average = 4.5 -> floor+1 = 5
     "warlock": 5,    # 1d8  average = 4.5 -> floor+1 = 5
+    "druid": 5,      # 1d8  average = 4.5 -> floor+1 = 5
+    "monk": 5,       # 1d8  average = 4.5 -> floor+1 = 5
 }
 
 import paths
@@ -145,6 +149,13 @@ def compute_ac(
     elif class_id == "barbarian":
         # Barbarian Unarmored Defense: 10 + DEX mod + CON mod
         ac_base = 10 + dex_mod + max(0, con_mod)
+    elif class_id == "monk":
+        # Monk Unarmored Defense: 10 + DEX mod + WIS mod
+        wis_mod = get_modifier(stats.get("WIS", 10))
+        ac_base = 10 + dex_mod + max(0, wis_mod)
+    elif class_id == "sorcerer":
+        # Draconic Bloodline Sorcerer Resilience: 13 + DEX mod
+        ac_base = 13 + dex_mod
 
     if "shield" in starting_gear:
         ac_base += 2
@@ -181,6 +192,14 @@ def build_initial_class_resources(class_id: str, stats: Dict[str, int], level: i
         resources["rage_charges"] = {"current": rage_max, "max": rage_max}
     elif class_id == "warlock":
         resources["pact_magic"] = True
+    elif class_id == "druid":
+        resources["wild_shape"] = {"current": 2, "max": 2}
+    elif class_id == "sorcerer":
+        resources["sorcery_points"] = {"current": max(1, level), "max": max(1, level)}
+    elif class_id == "monk":
+        resources["ki_points"] = {"current": max(2, level), "max": max(2, level)}
+    elif class_id == "ranger":
+        resources["favored_enemy"] = True
 
     return resources
 

@@ -163,6 +163,139 @@ def calculate_check_success_chance(
     return int(round(p * 100))
 
 
+def resolve_exploration_parley(
+    player: Dict[str, Any],
+    world: Dict[str, Any],
+    current_room: Dict[str, Any],
+    skill: str = "Persuasion",
+    speech_text: str = "",
+    use_guidance: bool = False,
+    use_social_advantage: bool = False,
+    use_inspiration: bool = False,
+) -> Dict[str, Any]:
+    """
+    Tabletop D&D 5e / BG3 Pre-Combat Pacifist Encounter Resolution:
+    Allows players who prefer talking over fighting to negotiate, bluff, intimidate, or use Animal Handling
+    with hostile creatures in an uncleared room BEFORE combat starts!
+    On success:
+      - Marks the room as cleared
+      - Awards full Milestone Social XP and gold tribute from the encounter monsters
+      - Checks level-up
+      - Converts the lead monster into a friendly pacified NPC in the room (with a secret!)
+    """
+    import copy
+    room_id = current_room.get("id", world.get("current_location", "unknown"))
+    enc_table = list(current_room.get("encounter_table", []))
+    if not enc_table:
+        return {"success": False, "parley_success": False, "reason": "No hostile encounter present in this room."}
+
+    skill_norm = (skill or "Persuasion").strip()
+    stat = "WIS" if skill_norm.lower() in ("animal handling", "animal_handling", "insight") else "CHA"
+    is_prof = state_manager.is_proficient(skill_norm, player)
+    bonus_dice = "1d4" if use_guidance else None
+
+    chk_res = state_manager.resolve_check(
+        stat=stat,
+        difficulty="medium",
+        state=player,
+        advantage=use_social_advantage,
+        proficient=is_prof,
+        bonus_dice=bonus_dice,
+        skill=skill_norm,
+        use_inspiration=use_inspiration,
+    )
+
+    mon_cat = combat_manager._get_monster_catalog()
+    gen_mons = world.get("generated_monsters", {})
+    lead_id = enc_table[0]
+    lead_def = mon_cat.get(lead_id) or gen_mons.get(lead_id) or {"name": lead_id.replace("_", " ").title(), "xp_value": 50}
+    lead_name = lead_def.get("name", lead_id.replace("_", " ").title())
+
+    if not chk_res["success"]:
+        return {
+            "success": True,
+            "parley_success": False,
+            "check_result": chk_res,
+            "target_name": lead_name,
+            "xp_gained": 0,
+            "gold_gained": 0,
+            "pacified_npc_id": None,
+            "message": (
+                f"❌ การเจรจากับ **{lead_name}** ไม่สำเร็จ "
+                f"(ทอย {stat} [{skill_norm}] ได้ **{chk_res['total']}** vs **DC {chk_res['dc']}**)"
+            ),
+        }
+
+    # Social Victory! Award full encounter XP + gold tribute & clear room
+    total_xp = 0
+    total_gold = 0
+    for mid in enc_table:
+        mdef = mon_cat.get(mid) or gen_mons.get(mid) or {}
+        total_xp += int(mdef.get("xp_value", 50))
+        g_drop = mdef.get("gold_drop")
+        if isinstance(g_drop, dict):
+            total_gold += max(5, int(g_drop.get("max", 10)))
+        else:
+            total_gold += 10
+
+    state_manager.award_xp(total_xp, player)
+    state_manager.add_currency(player, gp=total_gold)
+    leveled_up = False
+    while state_manager.check_level_up(player):
+        state_manager.apply_level_up(player)
+        leveled_up = True
+
+    dungeon_manager.mark_room_cleared(room_id, world)
+
+    # Convert lead monster into a friendly talkable/recruitable NPC in this room
+    npc_slug = f"pacified_{lead_id}"
+    gen_npcs = world.setdefault("generated_npcs", {})
+    if npc_slug not in gen_npcs:
+        hp_val = lead_def.get("hp", {}).get("max", 20) if isinstance(lead_def.get("hp"), dict) else int(lead_def.get("hp", 20))
+        gen_npcs[npc_slug] = {
+            "id": npc_slug,
+            "name": f"{lead_name} (พันธมิตรที่เจรจาสำเร็จ)",
+            "role": "Pacified Ally",
+            "persona_seed": f"A former guardian of {current_room.get('name', room_id)} who was won over by {player.get('name', 'the hero')}'s words.",
+            "secret": f"Knows the hidden passages and secret caches inside {current_room.get('name', room_id)}.",
+            "hp": {"current": hp_val, "max": hp_val},
+            "ac": lead_def.get("ac", 13),
+            "stats": lead_def.get("stats", {"STR": 12, "DEX": 12, "CON": 12, "INT": 10, "WIS": 12, "CHA": 10}),
+            "attacks": lead_def.get("attacks", [{"name": "Strike", "attack_bonus": 4, "damage": "1d6+2", "damage_type": "slashing"}]),
+            "approval": 65,
+            "side": "player",
+        }
+
+    dyn_rooms = world.setdefault("dynamic_rooms", {})
+    if room_id not in dyn_rooms:
+        dyn_rooms[room_id] = copy.deepcopy(current_room)
+    r_npcs = dyn_rooms[room_id].setdefault("npcs", [])
+    if npc_slug not in r_npcs:
+        r_npcs.append(npc_slug)
+    if npc_slug not in current_room.setdefault("npcs", []):
+        current_room["npcs"].append(npc_slug)
+
+    world.setdefault("npc_relationships", {})[npc_slug] = 20
+
+    speech_note = f' ด้วยคำพูด *"{speech_text}"*' if speech_text else ""
+    lvl_note = " 🆙 **(Level Up!)**" if leveled_up else ""
+    return {
+        "success": True,
+        "parley_success": True,
+        "check_result": chk_res,
+        "target_name": lead_name,
+        "xp_gained": total_xp,
+        "gold_gained": total_gold,
+        "leveled_up": leveled_up,
+        "pacified_npc_id": npc_slug,
+        "message": (
+            f"🕊️ **ชนะด้วยการเจรจา (Social Victory)!** คุณใช้ **{skill_norm}** กล่อม **{lead_name}**{speech_note} สำเร็จ "
+            f"(ทอยได้ **{chk_res['total']}** vs **DC {chk_res['dc']}**)! "
+            f"ได้รับ **+{total_xp} XP**, ของกำนัล **+{total_gold} GP**{lvl_note} และ **{lead_name}** ยอมเป็นพันธมิตรในพื้นที่นี้โดยไม่ต้องต่อสู้!"
+        ),
+    }
+
+
 def build_choice_card_metadata(
     action_text: str,
     player: Dict[str, Any],
@@ -758,12 +891,36 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
         bg3_prof = bg3_spec["proficiency"]
         bg3_is_prof = bg3_spec["is_proficient"]
         bg3_tot_mod = bg3_spec["total_modifier"]
-        bg3_chance_pct = calculate_check_success_chance(bg3_tot_mod, bg3_dc)
+
+        insp_cnt = state_manager.get_inspiration(player)
+        col_ast1, col_ast2, col_ast3 = st.columns(3)
+        with col_ast1:
+            use_insp = st.checkbox(
+                f"✨ ใช้ Inspiration (มี {insp_cnt} แต้ม)",
+                value=False,
+                disabled=(insp_cnt <= 0),
+                key="bg3_chk_use_insp",
+            )
+        with col_ast2:
+            use_guid = st.checkbox(
+                "🙏 Guidance (+1d4 โบนัสเต๋านำทาง)",
+                value=("guidance" in player.get("known_spells", [])),
+                key="bg3_chk_use_guidance",
+            )
+        with col_ast3:
+            use_soc_adv = st.checkbox(
+                "💖 Friends / Thaumaturgy (Advantage ทอย 2 ลูก)",
+                value=any(sp in player.get("known_spells", []) for sp in ("friends", "thaumaturgy", "charm_person", "detect_thoughts", "disguise_self")),
+                key="bg3_chk_use_soc_adv",
+            )
+
+        eff_mod_preview = bg3_tot_mod + (2 if use_guid else 0)
+        bg3_chance_pct = calculate_check_success_chance(eff_mod_preview, bg3_dc, has_advantage=(use_insp or use_soc_adv))
 
         st.markdown(
             f"""
             <div style="background: linear-gradient(135deg, rgba(22, 26, 39, 0.97) 0%, rgba(12, 14, 22, 0.99) 100%); 
-                        border: 2px solid #d4af6a; border-radius: 12px; padding: 18px; margin-bottom: 20px;
+                        border: 2px solid #d4af6a; border-radius: 12px; padding: 18px; margin-bottom: 16px;
                         box-shadow: 0 6px 24px rgba(212, 175, 106, 0.25);">
                 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
                     <span style="font-family: 'Cinzel', serif; font-size: 1.15em; font-weight: 700; color: #f3d08a; letter-spacing: 0.05em;">
@@ -776,7 +933,7 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
                 <div style="font-size: 1.05em; color: #f1f5f9; margin-bottom: 12px;">
                     🎯 <b>การกระทำ:</b> <i>"{bg3_action}"</i>
                 </div>
-                <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(212, 175, 106, 0.2); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: flex; justify-content: space-around; text-align: center;">
+                <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(212, 175, 106, 0.2); border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; display: flex; justify-content: space-around; text-align: center;">
                     <div>
                         <div style="font-size: 0.8em; color: #94a3b8;">ทักษะ / สแตท</div>
                         <div style="font-size: 1.1em; font-weight: 600; color: #38bdf8;">{bg3_stat} ({bg3_skill})</div>
@@ -794,7 +951,7 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
                     </div>
                     <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 14px;">
                         <div style="font-size: 0.8em; color: #94a3b8;">โบนัสรวม</div>
-                        <div style="font-size: 1.2em; font-weight: 700; color: #f3d08a;">{bg3_tot_mod:+d}</div>
+                        <div style="font-size: 1.2em; font-weight: 700; color: #f3d08a;">{bg3_tot_mod:+d}{' + 1d4' if use_guid else ''}</div>
                     </div>
                     <div style="border-left: 1px solid rgba(255,255,255,0.1); padding-left: 14px;">
                         <div style="font-size: 0.8em; color: #94a3b8;">โอกาสสำเร็จ</div>
@@ -804,14 +961,6 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
             </div>
             """,
             unsafe_allow_html=True,
-        )
-
-        insp_cnt = state_manager.get_inspiration(player)
-        use_insp = st.checkbox(
-            f"✨ ใช้แต้ม Inspiration (ทอยเต๋า 2 ลูกเลือกแต้มสูงสุด — มี {insp_cnt} แต้ม)",
-            value=False,
-            disabled=(insp_cnt <= 0),
-            key="bg3_chk_use_insp",
         )
 
         c_roll, c_cancel = st.columns([3, 1])
@@ -830,7 +979,9 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
                 stat=bg3_stat,
                 difficulty=bg3_diff,
                 state=player,
+                advantage=use_soc_adv,
                 proficient=bg3_is_prof,
+                bonus_dice="1d4" if use_guid else None,
                 skill=bg3_spec["skill"],
                 use_inspiration=use_insp,
             )
@@ -1036,15 +1187,21 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
                 soc_target = "ผู้คนในบริเวณนี้"
                 st.caption("💬 สามารถพูดคุยกับสิ่งแวดล้อมหรือตัวละครในฉากได้อย่างอิสระ")
         with col_soc_a:
+            p_race = player.get("race", "Human")
             soc_approach = st.selectbox(
-                "🎭 ท่าที / กลยุทธ์การพูดคุย:",
+                "🎭 ท่าที / กลยุทธ์การพูดคุย (D&D 5e / BG3):",
                 [
                     "💬 พูดคุยทั่วไป (Casual Conversation)",
                     "[Persuasion] 🕊️ หว่านล้อม / เจรจาต่อรองอย่างมีเหตุผล",
                     "[Deception] 🃏 โกหก / ปั้นน้ำเป็นตัว / ตบตา",
                     "[Intimidation] 👹 ข่มขู่ / กดดันด้วยท่าทีน่าเกรงขาม",
                     "[Insight] 👁️ จับโกหก / อ่านสีหน้าและเจตนาที่ซ่อนอยู่",
+                    "[Detect Thoughts] 🧠 แอบอ่านความคิดในใจและความลับที่ซ่อนอยู่",
+                    "[Speak with Animals] 🐾 พูดคุยสื่อสารกับสัตว์ในบริเวณนี้",
+                    "[Speak with Dead] 💀 เรียกวิญญาณจากร่างไร้ลมหายใจมาซักถามความจริง",
+                    "[Disguise Self] 🎭 ปลอมตัวแฝงตัวเข้าสนทนา",
                     f"[{p_cls}] 🌟 ใช้เอกลักษณ์คลาส {p_cls} ในการสนทนา",
+                    f"[{p_race}] 🧬 ใช้สายเลือดเผ่าพันธุ์ {p_race} ในการสนทนา",
                     f"[{p_bg}] 📜 อ้างอิงประสบการณ์ภูมิหลัง ({p_bg})",
                 ],
                 key="soc_approach_sel",
@@ -1275,17 +1432,47 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
 
     with cols_actions[c_idx]:
         c_idx += 1
-        if st.button("⚔️ Attack / Trigger Combat", use_container_width=True):
+        with st.popover("🕊️ เจรจาเลี่ยงศึก / ⚔️ ปะทะ"):
             enc_table = current_room.get("encounter_table", ["goblin_scout"])
             monster_id = enc_table[0] if enc_table else "goblin_scout"
-
-            combat_manager.start_combat([monster_id], player, world)
-            auto_save()
-            st.session_state["narrative_log"].append({
-                "role": "assistant",
-                "content": f"⚔️ Combat initiated against **{monster_id.replace('_', ' ').title()}**!"
-            })
-            st.rerun()
+            mon_name = monster_id.replace("_", " ").title()
+            st.caption(f"เผชิญหน้ากับ **{mon_name}** — เลือกเจรจาเพื่อชนะด้วยการคุย หรือเปิดฉากต่อสู้:")
+            parley_skill = st.selectbox(
+                "ทักษะที่ใช้เจรจา:",
+                ["Persuasion", "Deception", "Intimidation", "Animal Handling"],
+                key="exp_parley_skill",
+            )
+            parley_line = st.text_input("คำพูดเจรจา (ไม่บังคับ):", placeholder="เช่น 'เรามาตกลงแบ่งสมบัติกันดีกว่า!'", key="exp_parley_line")
+            p_guid = st.checkbox("🙏 ใช้ Guidance (+1d4)", value=True, key="exp_parley_guid")
+            p_adv = st.checkbox("💖 ใช้ Friends / Social Advantage", value=False, key="exp_parley_adv")
+            if st.button("🕊️ เจรจาจบศึกด้วยการคุย (Social Parley)", use_container_width=True, type="primary", key="btn_exp_parley"):
+                before_snap = snapshot_player_world_state(player, world)
+                p_out = resolve_exploration_parley(
+                    player,
+                    world,
+                    current_room,
+                    skill=parley_skill,
+                    speech_text=parley_line.strip(),
+                    use_guidance=p_guid,
+                    use_social_advantage=p_adv,
+                )
+                turn_deltas = compute_turn_stat_deltas(before_snap, player, world)
+                st.session_state["last_turn_deltas"] = turn_deltas
+                st.session_state["narrative_log"].append({
+                    "role": "assistant",
+                    "content": p_out["message"],
+                    "deltas": turn_deltas,
+                })
+                auto_save()
+                st.rerun()
+            if st.button("⚔️ เปิดฉากโจมตี (Start Combat)", use_container_width=True, key="btn_exp_start_combat"):
+                combat_manager.start_combat([monster_id], player, world)
+                auto_save()
+                st.session_state["narrative_log"].append({
+                    "role": "assistant",
+                    "content": f"⚔️ Combat initiated against **{mon_name}**!"
+                })
+                st.rerun()
 
     if has_ooc_spells:
         with cols_actions[c_idx]:

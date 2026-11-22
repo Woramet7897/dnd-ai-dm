@@ -320,5 +320,159 @@
     },
     "level_1_feature": "Eldritch Blast & Pact Magic — ยิงลำแสงทมิฬที่บวกโบนัส CHA ดาเมจ (Agonizing Blast) และสล็อตเวทมนตร์รีชาร์จเต็มทุกครั้งที่กด Short Rest!",
     "level_5_feature_note": "Eldritch Blast ยิง 2 ลำแสงพร้อมกัน และปลดล็อก Fireball / Hunger of Hadar"
+  },
+  "druid": {
+    "name": "Druid",
+    "hit_die": 8,
+    "primary_stat": "WIS",
+    "casting_stat": "WIS",
+    "proficient_saves": ["INT", "WIS"],
+    "proficient_skills_choose": 2,
+    "proficient_skills_options": ["Arcana", "Animal Handling", "Insight", "Medicine", "Nature", "Perception", "Religion", "Survival"],
+    "armor_proficiencies": ["light", "medium", "shields"],
+    "weapon_proficiencies": ["daggers", "quarterstaffs", "scimitars"],
+    "starting_equipment": ["leather_armor", "shield", "quarterstaff", "component_pouch"],
+    "spellcasting": true,
+    "spell_slots_level_1": {"1": {"max": 2, "current": 2}},
+    "cantrips_known": 2,
+    "default_cantrips": ["guidance", "light"],
+    "level_1_spells_known": ["guidance", "speak_with_animals", "cure_wounds", "healing_word", "entangle", "thunderwave"],
+    "default_subclass": "circle_of_the_moon",
+    "subclasses": {
+      "circle_of_the_moon": {
+        "name": "Circle of the Moon",
+        "level_unlocked": 2,
+        "description": "ดรูอิดจ้าวสมิง (Combat Wild Shape: แปลงร่างเป็นสัตว์ป่าได้ด้วย Bonus Action พร้อมได้รับเกราะเลือดร่างสัตว์พิเศษและคุยกับสัตว์ได้ทุกชนิด)"
+      },
+      "circle_of_the_land": {
+        "name": "Circle of the Land",
+        "level_unlocked": 2,
+        "description": "ดรูอิดผู้พิทักษ์ผืนป่า (Natural Recovery: ฟื้นฟูสล็อตเวทมนตร์จากพลังธรรมชาติ และเชี่ยวชาญเวทควบคุมพื้นที่/พูดคุยกับธรรมชาติ)"
+      }
+    },
+    "features_by_level": {
+      "1": ["druidic", "speak_with_animals"],
+      "2": ["wild_shape", "druid_circle"],
+      "3": ["level_2_spells"],
+      "4": ["ability_score_improvement"],
+      "5": ["level_3_spells"]
+    },
+    "level_1_feature": "Speak with Animals & Guidance — สื่อสารกับสัตว์ป่าทุกชนิดเพื่อถามความลับ และร่าย Guidance (+1d4) ช่วยทอยทักษะสนทนา!",
+    "level_5_feature_note": "Wild Shape แข็งแกร่งขึ้น และปลดล็อกเวทระดับ 3"
+  },
+  "sorcerer": {
+    "name": "Sorcerer",
+    "hit_die": 6,
+    "primary_stat": "CHA",
+    "casting_stat": "CHA",
+    "proficient_saves": ["CON", "CHA"],
+    "proficient_skills_choose": 2,
+    "proficient_skills_options": ["Arcana", "Deception", "Insight", "Intimidation", "Persuasion", "Religion"],
+    "armor_proficiencies": [],
+    "weapon_proficiencies": ["daggers", "quarterstaffs", "light_crossbows"],
+    "starting_equipment": ["quarterstaff", "dagger", "component_pouch"],
+    "spellcasting": true,
+    "spell_slots_level_1": {"1": {"max": 2, "current": 2}},
+    "cantrips_known": 4,
+    "default_cantrips": ["friends", "fire_bolt", "ray_of_frost", "shocking_grasp"],
+    "level_1_spells_known": ["friends", "charm_person", "disguise_self", "magic_missile", "shield_spell", "fire_bolt"],
+    "default_subclass": "draconic_bloodline",
+    "subclasses": {
+      "draconic_bloodline": {
+        "name": "Draconic Bloodline",
+        "level_unlocked": 1,
+        "description": "สายเลือดมังกรโบราณ (Draconic Resilience: เกราะเกล็ดมังกร Base AC = 13 + DEX mod และเพิ่ม Max HP +1 ทุกเลเวล พร้อมเสน่ห์ CHA สูงสุดในการเจรจา!)"
+      },
+      "wild_magic": {
+        "name": "Wild Magic",
+        "level_unlocked": 1,
+        "description": "มนตราอลเวง (Tides of Chaos: บิดเบือนโชคชะตาเพื่อรับ Advantage ในการทอยพูดคุยหรือโจมตีได้ทันที!)"
+      }
+    },
+    "features_by_level": {
+      "1": ["sorcerous_origin", "draconic_resilience"],
+      "2": ["font_of_magic", "sorcery_points"],
+      "3": ["metamagic"],
+      "4": ["ability_score_improvement"],
+      "5": ["level_3_spells"]
+    },
+    "level_1_feature": "CHA Spellcaster & Friends — จอมเวทสายเสน่ห์ (CHA) ที่มีทั้ง Friends, Charm Person, Disguise Self สำหรับสายคุยโดยเฉพาะ!",
+    "level_5_feature_note": "Metamagic & มหาเวทระดับ 3 (Fireball, Haste, Counterspell)"
+  },
+  "ranger": {
+    "name": "Ranger",
+    "hit_die": 10,
+    "primary_stat": "DEX",
+    "casting_stat": "WIS",
+    "proficient_saves": ["STR", "DEX"],
+    "proficient_skills_choose": 3,
+    "proficient_skills_options": ["Animal Handling", "Athletics", "Insight", "Investigation", "Nature", "Perception", "Stealth", "Survival"],
+    "armor_proficiencies": ["light", "medium", "shields"],
+    "weapon_proficiencies": ["simple", "martial"],
+    "starting_equipment": ["leather_armor", "shortbow", "quiver", "shortsword"],
+    "spellcasting": true,
+    "spell_slots_level_1": {"1": {"max": 2, "current": 2}},
+    "level_1_spells_known": ["hunters_mark", "speak_with_animals", "cure_wounds"],
+    "default_subclass": "gloom_stalker",
+    "subclasses": {
+      "gloom_stalker": {
+        "name": "Gloom Stalker",
+        "level_unlocked": 3,
+        "description": "พรานเงารัตติกาล (Dread Ambusher: +3 Initiative และเคลื่อนไหวซ่อนตัวในเงามืดได้อย่างแนบเนียน)"
+      },
+      "hunter": {
+        "name": "Hunter",
+        "level_unlocked": 3,
+        "description": "นายพรานจ้าวสมรภูมิ (Colossus Slayer: สร้างความเสียหายเพิ่มเติม +1d8 ต่อศัตรูที่บาดเจ็บอยู่แล้ว)"
+      }
+    },
+    "fighting_styles": {
+      "archery": {"name": "Archery", "description": "+2 โบนัสความแม่นยำเมื่อโจมตีด้วยอาวุธระยะไกล (ธนู/หน้าไม้)"},
+      "dueling": {"name": "Dueling", "description": "+2 Damage เมื่อถืออาวุธประชิดมือเดียว"},
+      "defence": {"name": "Defence", "description": "+1 Armor Class เมื่อสวมใส่ชุดเกราะ"}
+    },
+    "features_by_level": {
+      "1": ["favored_enemy", "natural_explorer", "speak_with_animals"],
+      "2": ["fighting_style", "spellcasting"],
+      "3": ["ranger_archetype"],
+      "4": ["ability_score_improvement"],
+      "5": ["extra_attack"]
+    },
+    "level_1_feature": "Hunter's Mark & Speak with Animals — ล็อกเป้าเหยื่อ (+1d6 ดาเมจ) และพูดคุยกับสัตว์ป่าเพื่อสืบหาเบาะแสได้ตั้งแต่เลเวล 1!",
+    "level_5_feature_note": "Extra Attack — ยิงธนูหรือฟันดาบได้ 2 ครั้งต่อ 1 Action"
+  },
+  "monk": {
+    "name": "Monk",
+    "hit_die": 8,
+    "primary_stat": "DEX",
+    "proficient_saves": ["STR", "DEX"],
+    "proficient_skills_choose": 2,
+    "proficient_skills_options": ["Acrobatics", "Athletics", "History", "Insight", "Religion", "Stealth"],
+    "armor_proficiencies": [],
+    "weapon_proficiencies": ["simple", "shortswords"],
+    "starting_equipment": ["quarterstaff"],
+    "spellcasting": false,
+    "default_subclass": "way_of_the_open_hand",
+    "subclasses": {
+      "way_of_the_open_hand": {
+        "name": "Way of the Open Hand",
+        "level_unlocked": 3,
+        "description": "วิถีฝ่ามือไร้ลักษณ์ (Open Hand Technique: ท่ารัวหมัด Flurry of Blows ที่ซัดศัตรูให้ล้ม Prone หรือมึนงง Dazed)"
+      },
+      "way_of_shadow": {
+        "name": "Way of Shadow",
+        "level_unlocked": 3,
+        "description": "วิถีเงาเร้นลับ (Shadow Arts: เร้นกายในเงามืดและอ่านภาษากายของคู่สนทนาได้อย่างเฉียบคม)"
+      }
+    },
+    "features_by_level": {
+      "1": ["unarmored_defense", "martial_arts"],
+      "2": ["ki_points", "flurry_of_blows"],
+      "3": ["monastic_tradition"],
+      "4": ["ability_score_improvement"],
+      "5": ["extra_attack", "stunning_strike"]
+    },
+    "level_1_feature": "Unarmored Defense (10 + DEX + WIS) & Martial Arts — เกราะปราณธรรมชาติจากค่า WIS (ซึ่งช่วยให้ทอย Insight จับโกหกในการคุยเก่งมาก!)",
+    "level_5_feature_note": "Extra Attack & Stunning Strike"
   }
 }

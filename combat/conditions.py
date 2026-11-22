@@ -15,6 +15,9 @@ CONDITIONS = {
     "hexed", "hasted", "shielded", "divine_favor", "guiding_bolt_marked",
     "bardic_inspired", "vow_of_enmity", "disadvantage_next_attack",
     "dodging", "hidden", "mirror_image", "spirit_guardians", "armor_of_agathys",
+    # BG3 Social & Dialogue Conditions
+    "guidance", "friends_advantage", "thaumaturgy", "speak_with_animals",
+    "speak_with_dead", "detect_thoughts", "disguised",
 }
 
 CONDITION_EFFECTS: Dict[str, Dict[str, Any]] = {

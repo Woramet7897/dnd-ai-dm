@@ -80,6 +80,21 @@ SIGNATURE_LEVEL_UP_SPELLS: Dict[str, Dict[int, List[str]]] = {
     "rogue": {
         3: ["sleep", "invisibility", "minor_illusion"],  # Arcane Trickster
     },
+    "druid": {
+        2: ["lesser_restoration", "speak_with_animals"],
+        3: ["hold_person", "misty_step"],
+        5: ["mass_healing_word", "revivify"],
+    },
+    "sorcerer": {
+        2: ["detect_thoughts", "scorching_ray", "misty_step"],
+        3: ["hold_person", "invisibility"],
+        5: ["fireball", "haste", "counterspell"],
+    },
+    "ranger": {
+        2: ["cure_wounds", "speak_with_animals", "entangle"],
+        3: ["lesser_restoration", "misty_step"],
+        5: ["silence"],
+    },
 }
 
 
@@ -135,6 +150,14 @@ def _sync_class_resources_on_level_up(state: Dict[str, Any], new_lvl: int) -> No
         resources["rage_charges"] = {"current": rage_max, "max": rage_max}
     elif cls_id == "warlock":
         resources["pact_magic"] = True
+    elif cls_id == "druid":
+        resources.setdefault("wild_shape", {"current": 2, "max": 2})
+    elif cls_id == "sorcerer":
+        resources["sorcery_points"] = {"current": new_lvl, "max": new_lvl}
+    elif cls_id == "monk":
+        resources["ki_points"] = {"current": new_lvl, "max": new_lvl}
+    elif cls_id == "ranger":
+        resources["favored_enemy"] = True
 
     # Load features_by_level from classes_catalog.json
     try:
@@ -168,25 +191,26 @@ def apply_level_up(state: Dict[str, Any]) -> Dict[str, Any]:
 
     cls_name = state.get("class", state.get("class_name", "Fighter"))
     cls_id = str(cls_name).strip().lower()
-    if cls_name in ("Fighter", "Paladin") or cls_id in ("fighter", "paladin"):
+    if cls_name in ("Fighter", "Paladin", "Ranger") or cls_id in ("fighter", "paladin", "ranger"):
         hit_die_avg = 6
     elif cls_name == "Barbarian" or cls_id == "barbarian":
         hit_die_avg = 7
-    elif cls_name == "Wizard" or cls_id == "wizard":
+    elif cls_name in ("Wizard", "Sorcerer") or cls_id in ("wizard", "sorcerer"):
         hit_die_avg = 4
     else:
         hit_die_avg = 5
 
     con_mod = get_modifier(state.get("stats", {}).get("CON", 10))
     tough_bonus = 2 if "tough" in state.get("feats", []) else 0
-    hp_gain = max(1, hit_die_avg + con_mod + tough_bonus)
+    draconic_bonus = 1 if (cls_id == "sorcerer" and state.get("subclass") == "draconic_bloodline") else 0
+    hp_gain = max(1, hit_die_avg + con_mod + tough_bonus + draconic_bonus)
 
     hp = state.setdefault("hp", {"current": 10, "max": 10})
     hp["max"] = hp.get("max", 10) + hp_gain
     hp["current"] = hp.get("current", 10) + hp_gain
 
-    # Full casters: Bard, Cleric, Wizard
-    if cls_name in ("Bard", "Cleric", "Wizard") or cls_id in ("bard", "cleric", "wizard"):
+    # Full casters: Bard, Cleric, Wizard, Druid, Sorcerer
+    if cls_name in ("Bard", "Cleric", "Wizard", "Druid", "Sorcerer") or cls_id in ("bard", "cleric", "wizard", "druid", "sorcerer"):
         slots = state.setdefault("spell_slots", {})
         target_slots_table = {
             1: {"1": 2},
@@ -203,8 +227,8 @@ def apply_level_up(state: Dict[str, Any]) -> Dict[str, Any]:
             curr_info["max"] = target_max
             curr_info["current"] = curr_info.get("current", 0) + delta
 
-    # Half-caster: Paladin (unlocks spell slots at Level 2+)
-    elif cls_id == "paladin":
+    # Half-casters: Paladin, Ranger (unlock/upgrade spell slots at Level 2+)
+    elif cls_id in ("paladin", "ranger"):
         slots = state.setdefault("spell_slots", {})
         paladin_slots_table = {
             2: {"1": 2},
@@ -253,7 +277,7 @@ def apply_level_up(state: Dict[str, Any]) -> Dict[str, Any]:
     known = state.setdefault("known_spells", [])
     sig_for_cls = SIGNATURE_LEVEL_UP_SPELLS.get(cls_id, {}).get(new_lvl, [])
     learned_now = []
-    if cls_id in ("wizard", "cleric", "bard", "paladin", "warlock") or (
+    if cls_id in ("wizard", "cleric", "bard", "paladin", "warlock", "druid", "sorcerer", "ranger") or (
         cls_id == "fighter" and state.get("subclass") == "eldritch_knight"
     ) or (
         cls_id == "rogue" and state.get("subclass") == "arcane_trickster"

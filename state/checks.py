@@ -152,6 +152,22 @@ def resolve_check(
     prof_bonus = state.get("proficiency_bonus", 2)
     prof_contribution = prof_bonus if proficient else 0
 
+    cond_set = {
+        (c.get("condition") or c.get("name")) if isinstance(c, dict) else str(c)
+        for c in state.get("active_conditions", [])
+    }
+    skill_low = str(skill or "").strip().lower()
+    is_social_check = (stat == "CHA") or (skill_low in ("persuasion", "deception", "intimidation", "performance", "insight", "animal_handling", "animal handling"))
+
+    if is_social_check and any(sc in cond_set for sc in ("friends_advantage", "thaumaturgy", "detect_thoughts", "disguised")):
+        advantage = True
+
+    if not bonus_dice:
+        if "bardic_inspired" in cond_set:
+            bonus_dice = "1d6"
+        elif "guidance" in cond_set:
+            bonus_dice = "1d4"
+
     inspiration_used = False
     if use_inspiration and spend_inspiration(state):
         inspiration_used = True
@@ -164,6 +180,12 @@ def resolve_check(
         roll = min(roll1, roll2)
     else:
         roll = state_manager._roll_d20()
+
+    # Halfling Lucky (D&D 5e / BG3 Racial Trait): automatically reroll a natural 1
+    halfling_lucky_reroll = False
+    if roll == 1 and str(state.get("race", "")).strip().lower() == "halfling":
+        roll = state_manager._roll_d20()
+        halfling_lucky_reroll = True
 
     if inspiration_used:
         reroll = state_manager._roll_d20()
@@ -201,6 +223,7 @@ def resolve_check(
         "critical":          critical,
         "fumble":            fumble,
         "inspiration_spent": inspiration_used,
+        "halfling_lucky_reroll": halfling_lucky_reroll,
     }
 
 
@@ -301,12 +324,17 @@ def resolve_concentration_check(damage_taken: int, state: Dict[str, Any]) -> Dic
     stats = state.get("stats", {})
     con_value = stats.get("CON", 10)
     modifier = get_modifier(con_value)
-    proficient_saves = state.get("proficient_saves", [])
+    proficient_saves = state.get("saving_throw_proficiencies") or state.get("proficient_saves", [])
     proficient = "CON" in proficient_saves
     prof_bonus = state.get("proficiency_bonus", 2)
     prof_contribution = prof_bonus if proficient else 0
 
-    roll = state_manager._roll_d20()
+    if "war_caster" in state.get("feats", []):
+        roll = max(state_manager._roll_d20(), state_manager._roll_d20())
+    else:
+        roll = state_manager._roll_d20()
+    if roll == 1 and str(state.get("race", "")).strip().lower() == "halfling":
+        roll = state_manager._roll_d20()
     critical = (roll == 20)
     fumble = (roll == 1)
     total = roll + modifier + prof_contribution

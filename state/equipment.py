@@ -129,6 +129,11 @@ def _compute_ac(character_state: Dict[str, Any]) -> int:
         if cls_name == "barbarian":
             con_mod = max(0, get_modifier(stats.get("CON", 10)))
             total_ac = 10 + dex_mod + con_mod + ac_bonus_total
+        elif cls_name == "monk":
+            wis_mod = max(0, get_modifier(stats.get("WIS", 10)))
+            total_ac = 10 + dex_mod + wis_mod + ac_bonus_total
+        elif cls_name == "sorcerer" and character_state.get("subclass") == "draconic_bloodline":
+            total_ac = 13 + dex_mod + ac_bonus_total
         else:
             total_ac = 10 + dex_mod + ac_bonus_total
 

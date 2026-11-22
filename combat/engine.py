@@ -619,6 +619,36 @@ def check_combat_end(combat_state: Dict[str, Any], world_state: Optional[Dict[st
             if cur_loc:
                 import dungeon_manager
                 dungeon_manager.mark_room_cleared(cur_loc, world_state)
+            # If any enemy surrendered peacefully via Combat Parley, convert them into a friendly room NPC!
+            for e in enemies:
+                if e.get("surrendered_peacefully"):
+                    e_name = e.get("name", "Pacified Foe")
+                    npc_slug = f"pacified_{e.get('id', 'foe')}"
+                    gen_npcs = world_state.setdefault("generated_npcs", {})
+                    if npc_slug not in gen_npcs:
+                        gen_npcs[npc_slug] = {
+                            "id": npc_slug,
+                            "name": e_name,
+                            "role": "Former Adversary (Pacified)",
+                            "persona_seed": f"A former opponent who surrendered after being convinced by {p_state.get('name', 'the hero')}.",
+                            "secret": f"Knows the layout and hidden supply caches of {cur_loc or 'this area'}.",
+                            "hp": {"current": max(1, e.get("hp", {}).get("max", 10)), "max": max(1, e.get("hp", {}).get("max", 10))},
+                            "ac": e.get("ac", 12),
+                            "stats": e.get("stats", {"STR": 12, "DEX": 12, "CON": 12, "INT": 10, "WIS": 10, "CHA": 10}),
+                            "attacks": e.get("attacks", [{"name": "Strike", "attack_bonus": 3, "damage": "1d6+1", "damage_type": "slashing"}]),
+                            "approval": 60,
+                            "side": "player",
+                        }
+                        if cur_loc:
+                            import dungeon_manager
+                            r_obj = dungeon_manager._get_room(cur_loc, world_state)
+                            if isinstance(r_obj, dict):
+                                dyn_r = world_state.setdefault("dynamic_rooms", {})
+                                if cur_loc not in dyn_r:
+                                    dyn_r[cur_loc] = copy.deepcopy(r_obj)
+                                r_npcs = dyn_r[cur_loc].setdefault("npcs", [])
+                                if e_name not in r_npcs and npc_slug not in r_npcs:
+                                    r_npcs.append(npc_slug)
             enemy_names = [e.get("monster_id", e.get("id", "")) for e in enemies]
             nb = world_state.get("notice_board", {})
             for entry in list(nb.get("entries", [])):
