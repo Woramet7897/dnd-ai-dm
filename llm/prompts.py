@@ -85,7 +85,7 @@ JSON Schema (all fields optional/nullable):
   "requires_roll": {"stat": ("STR"|"DEX"|"CON"|"INT"|"WIS"|"CHA"), "difficulty": ("easy"|"medium"|"hard"|"very_hard")},
   "generated_monsters": {"<enemy_alias>": {"name": (str), "hp": {"current": (int), "max": (int)}, "ac": (int), "stats": {"STR":(int),"DEX":(int),"CON":(int),"INT":(int),"WIS":(int),"CHA":(int)}, "attacks": [{"name":(str),"attack_bonus":(int),"damage":(str),"damage_type":(str),"applies_condition":(str|null),"ranged":(bool|null)}], "xp_value":(int), "gold_drop":{"min":(int),"max":(int)}, "challenge_rating":(float)}},
   "generated_items": {"<item_alias>": {"name": (str), "type": ("weapon"|"wearable"|"consumable"|"tool"|"food"), "slot": (str|null), "effects": (object), "rarity": ("common"|"uncommon"|"rare"), "value_gold": (int), "description": (str)}},
-  "generated_npcs": {"<npc_alias>": {"name": (str), "role": (str|null), "persona_seed": (str|null), "hp": (int|null), "ac": (int|null), "stats": {"STR":(int),"DEX":(int),"CON":(int),"INT":(int),"WIS":(int),"CHA":(int)}, "attacks": [{"name":(str),"attack_bonus":(int),"damage":(str),"damage_type":(str)}], "approval":(int|null)}},
+  "generated_npcs": {"<npc_alias>": {"name": (str), "role": (str|null), "persona_seed": (str|null), "secret": (str|null), "hp": (int|null), "ac": (int|null), "stats": {"STR":(int),"DEX":(int),"CON":(int),"INT":(int),"WIS":(int),"CHA":(int)}, "attacks": [{"name":(str),"attack_bonus":(int),"damage":(str),"damage_type":(str)}], "approval":(int|null)}},
   "generated_events": {"<event_alias>": {"title": (str), "location_id": (str|null), "context_line": (str), "rumor_text": (str|null), "post_to_notice_board": (bool|null), "reward_gold": (int|null)}},
   "generated_spells": {"<spell_alias>": {"name": (str), "level": (int), "type": ("attack_roll"|"attack_save"|"heal"|"buff"|"utility"), "save_stat": (str|null), "effect": (object), "description": (str)}},
   "combat_start": {"enemies": [(str)]},
@@ -157,11 +157,18 @@ def build_system_prompt_tiers(
             c_id = comp.get("id") or comp.get("name", "Companion")
             c_name = comp.get("name", "Companion")
             c_seed = comp.get("persona_seed", comp.get("description", ""))
+            c_secret = comp.get("secret", "")
             c_app = world_state.get("companions_approval", {}).get(c_id, {}).get("approval", comp.get("approval", 50)) if isinstance(world_state, dict) else 50
+            sec_tag = ""
+            if c_secret:
+                if c_app >= 65:
+                    sec_tag = f" [SECRET UNLOCKED — WILLING TO SHARE: {c_secret}]"
+                else:
+                    sec_tag = f" [HIDDEN SECRET (reveal on high trust or successful social check): {c_secret}]"
             if c_seed:
-                tier_2_parts.append(f"- {c_name} (Approval: {c_app}/100): {c_seed}")
+                tier_2_parts.append(f"- {c_name} (Approval: {c_app}/100): {c_seed}{sec_tag}")
             else:
-                tier_2_parts.append(f"- {c_name} (Approval: {c_app}/100)")
+                tier_2_parts.append(f"- {c_name} (Approval: {c_app}/100){sec_tag}")
 
     # Include Local NPCs in current room & NPC relationships so DM remembers how NPCs feel about the player!
     if isinstance(world_state, dict):
@@ -192,6 +199,12 @@ def build_system_prompt_tiers(
                 g_info = static_npcs.get(rn) or next((v for k, v in static_npcs.items() if isinstance(v, dict) and v.get("name") == rn), None)
             disp_name = g_info.get("name", rn) if isinstance(g_info, dict) else rn
             p_str = f" — {g_info.get('role', '')}: {g_info.get('persona_seed', '')}" if g_info else ""
+            n_secret = g_info.get("secret", "") if isinstance(g_info, dict) else ""
+            if n_secret:
+                if rel_val >= 15:
+                    p_str += f" [SECRET UNLOCKED — WILLING TO SHARE: {n_secret}]"
+                else:
+                    p_str += f" [HIDDEN SECRET (reveal if player succeeds on Persuasion/Deception/Intimidation/Insight or builds trust): {n_secret}]"
             npc_lines.append(f"- {disp_name} ({rn}){rel_str}{p_str}" if disp_name != rn else f"- {rn}{rel_str}{p_str}")
         if npc_lines:
             tier_2_parts.append("Local NPCs in Current Scene:\n" + "\n".join(npc_lines))

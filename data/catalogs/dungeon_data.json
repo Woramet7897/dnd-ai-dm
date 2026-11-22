@@ -8,7 +8,7 @@
       "north": "forest_edge",
       "east": "old_bridge",
       "south": "drunken_dragon_tavern",
-      "west": null
+      "west": "town_jail"
     },
     "shops": ["general_store", "blacksmith", "alchemist"],
     "npcs": ["innkeeper_mira", "captain_valdis"],
@@ -199,8 +199,8 @@
     "exits": {
       "north": null,
       "south": null,
-      "east": null,
-      "west": "town_riverside"
+      "east": "town_riverside",
+      "west": null
     },
     "shops": [],
     "npcs": ["jailer_karr"],

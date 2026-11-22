@@ -1016,6 +1016,22 @@ def _render_actions_tab(player: Dict[str, Any], world: Dict[str, Any], current_r
         with col_soc_t:
             if all_social_targets:
                 soc_target = st.selectbox("🎯 คู่สนทนาในฉาก:", ["ทุกคนในบริเวณนี้"] + all_social_targets, key="soc_target_sel")
+                clean_sel = soc_target.replace("🧑 ", "").replace("🤝 ", "").strip()
+                npc_key = clean_sel.lower().replace(" ", "_")
+                npc_obj = state_manager.resolve_npc(npc_key, world) or state_manager.resolve_npc(clean_sel, world)
+                if isinstance(npc_obj, dict):
+                    n_role = npc_obj.get("role", "NPC")
+                    n_id = npc_obj.get("id", npc_key)
+                    rel_score = world.get("npc_relationships", {}).get(n_id, world.get("npc_relationships", {}).get(clean_sel, 0))
+                    comp_app = world.get("companions_approval", {}).get(n_id, {}).get("approval")
+                    rel_badge = f"Approval: {comp_app}/100" if comp_app is not None else f"ความสัมพันธ์: {rel_score:+d}"
+                    has_sec = bool(npc_obj.get("secret"))
+                    unlocked = (comp_app is not None and comp_app >= 65) or (rel_score >= 15)
+                    if has_sec:
+                        sec_badge = f"🔓 ความลับที่รู้: *{npc_obj['secret']}*" if unlocked else "🔒 มีความลับซ่อนอยู่ (ใช้ทักษะพูดคุย/เพิ่มความสัมพันธ์ถึง +15 เพื่อเปิดเผย)"
+                    else:
+                        sec_badge = "💬 พร้อมพูดคุยแลกเปลี่ยนข่าวสาร"
+                    st.caption(f"**{npc_obj.get('name', clean_sel)}** ({n_role}) &bull; `{rel_badge}`  \n{sec_badge}")
             else:
                 soc_target = "ผู้คนในบริเวณนี้"
                 st.caption("💬 สามารถพูดคุยกับสิ่งแวดล้อมหรือตัวละครในฉากได้อย่างอิสระ")

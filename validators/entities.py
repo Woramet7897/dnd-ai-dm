@@ -380,10 +380,10 @@ def validate_generated_npc(npc_data: Any, player_level: int = 1) -> Optional[Dic
         }]
 
     raw_approval = npc_data.get("approval", 50)
-    approval = int(raw_approval) if isinstance(raw_approval, (int, float)) else 50
+    approval = _safe_int(raw_approval, 50)
     approval = max(0, min(100, approval))
 
-    return {
+    npc_dict: Dict[str, Any] = {
         "name": name,
         "role": role,
         "persona_seed": persona_seed,
@@ -396,6 +396,10 @@ def validate_generated_npc(npc_data: Any, player_level: int = 1) -> Optional[Dic
         "side": "player",
         "death_saves": {"success": 0, "fail": 0},
     }
+    raw_secret = npc_data.get("secret")
+    if isinstance(raw_secret, str) and raw_secret.strip():
+        npc_dict["secret"] = sanitize_text(raw_secret, max_len=200)
+    return npc_dict
 
 
 def validate_generated_item(item_data: Any) -> Optional[Dict[str, Any]]:

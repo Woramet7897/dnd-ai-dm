@@ -10,7 +10,7 @@ import random
 from typing import Any, Dict, List, Optional
 
 from rules import _get_item_catalog, _inventory_item_info, get_modifier
-from combat.conditions import _get_condition_set, tick_conditions, tick_surface
+from combat.conditions import _get_condition_set, _get_stat_mod, tick_conditions, tick_surface
 
 logger = logging.getLogger("combat_manager")
 
@@ -382,24 +382,33 @@ def resolve_companion_turn(
             p_cur = p_hp.get("current", 10)
             p_max = max(1, p_hp.get("max", 10))
             if 0 < p_cur <= max(3, int(p_max * 0.30)):
-                companion["_emergency_heal_used"] = True
-                heal_amt = combat_manager.roll_dice("1d8+2")
-                p_hp["current"] = min(p_max, p_cur + heal_amt)
-                c_name = companion.get("name", "Companion")
-                p_name = player_c.get("name", "Player")
-                return {
-                    "action_type": "class_action",
-                    "attacker_id": companion["id"],
-                    "attacker_name": c_name,
-                    "target_id": "player",
-                    "target_name": p_name,
-                    "attack_name": "Healing Word",
-                    "hit": True,
-                    "damage": 0,
-                    "healed": heal_amt,
-                    "target_hp_after": p_hp["current"],
-                    "narration": f"{c_name} casts an emergency healing prayer on {p_name}, restoring {heal_amt} HP!",
-                }
+                c_slots = companion.setdefault("spell_slots", {"1": {"current": 1, "max": 1}})
+                slot_1 = c_slots.setdefault("1", {"current": 1, "max": 1})
+                if slot_1.get("current", 1) > 0:
+                    slot_1["current"] -= 1
+                    companion["_emergency_heal_used"] = True
+                    wis_mod = _get_stat_mod(companion, "WIS")
+                    cha_mod = _get_stat_mod(companion, "CHA")
+                    cast_mod = max(2, wis_mod, cha_mod)
+                    c_lvl = max(1, int(companion.get("level", player_c.get("level", 1))))
+                    heal_amt = combat_manager.roll_dice("1d8") + cast_mod + c_lvl
+                    p_hp["current"] = min(p_max, p_cur + heal_amt)
+                    c_name = companion.get("name", "Companion")
+                    p_name = player_c.get("name", "Player")
+                    return {
+                        "action_type": "class_action",
+                        "attacker_id": companion["id"],
+                        "attacker_name": c_name,
+                        "target_id": "player",
+                        "target_name": p_name,
+                        "attack_name": "Healing Word",
+                        "hit": True,
+                        "damage": 0,
+                        "healed": heal_amt,
+                        "slot_used": 1,
+                        "target_hp_after": p_hp["current"],
+                        "narration": f"{c_name} casts an emergency healing prayer on {p_name}, restoring {heal_amt} HP!",
+                    }
 
     living_enemies = [e for e in enemies if e.get("hp", {}).get("current", 0) > 0]
     if not living_enemies:

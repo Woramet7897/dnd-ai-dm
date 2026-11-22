@@ -777,6 +777,146 @@ class TestBG3ClassesAndSpells(unittest.TestCase):
             # Max crit: (12 + 4 + 3) + (12 + 4) = 35 (not 38)
             self.assertEqual(r_crit["damage"], 35)
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # 15. NPC SECRETS (STATIC & AGENTIC), COMPANION SLOT HEAL, ALL 14 ROOMS & APPTEST
+    # ══════════════════════════════════════════════════════════════════════════
+    def test_npc_secrets_companion_slot_heal_town_jail_exit_and_apptest_views(self):
+        from collections import deque
+        import copy
+        import dungeon_manager as dm
+        import llm_handler
+        import rules
+        import validation
+
+        # 1. Static & Agentic Dynamic NPC Secrets: locked vs unlocked in Tier 2 System Prompt
+        dyn_npc = validation.validate_generated_npc(
+            {
+                "name": "Vespera",
+                "role": "Shadow Broker",
+                "persona_seed": "Whispers behind a velvet mask.",
+                "secret": "The Baron's signet ring is hidden inside the clocktower pendulum.",
+                "hp": 20,
+                "ac": 14,
+            },
+            player_level=2,
+        )
+        self.assertIsNotNone(dyn_npc)
+        self.assertIn("clocktower pendulum", dyn_npc["secret"])
+
+        fighter = character_creator.create_character("Valeros", "Human", "Fighter", "Soldier", self.base_stats)
+        self.world["current_location"] = "drunken_dragon_tavern"
+        self.world["npc_relationships"] = {"innkeeper_mira": 0}
+
+        tiers_locked = llm_handler.build_system_prompt_tiers(fighter, self.world)
+        self.assertIn("HIDDEN SECRET", tiers_locked[2])
+        self.assertIn("silver ward-key", tiers_locked[2])
+
+        # Increase relationship with innkeeper_mira to +20 (>= 15 threshold) -> Secret unlocks!
+        sm.apply_npc_relationship_change({"npc_id": "innkeeper_mira", "delta": 20}, self.world)
+        tiers_unlocked = llm_handler.build_system_prompt_tiers(fighter, self.world)
+        self.assertIn("SECRET UNLOCKED — WILLING TO SHARE", tiers_unlocked[2])
+
+        # 2. Companion AI emergency heal consumes spell slot and scales with WIS/CHA mod + level
+        cleric_comp = {
+            "id": "comp_kyra",
+            "name": "Kyra",
+            "role": "Cleric",
+            "level": 3,
+            "side": "player",
+            "hp": {"current": 24, "max": 24},
+            "ac": 16,
+            "stats": {"STR": 12, "DEX": 10, "CON": 14, "INT": 10, "WIS": 16, "CHA": 12},
+            "spell_slots": {"1": {"current": 1, "max": 1}},
+            "attacks": [{"name": "Mace", "attack_bonus": 4, "damage": "1d6+2", "damage_type": "bludgeoning"}],
+        }
+        self.world["combat_state"] = None
+        cs = cm.start_combat(["goblin_scout"], fighter, self.world, companion_states=[cleric_comp])
+        cs["player_combatant"]["hp"]["current"] = 2
+        res_c_heal = cm.resolve_companion_turn(cs["companions"][0], cs["enemies"], combat_state=cs)
+        self.assertEqual(res_c_heal["attack_name"], "Healing Word")
+        # 1d8 (>=1) + WIS mod (3) + level (3) >= 7 HP healed!
+        self.assertGreaterEqual(res_c_heal["healed"], 7)
+        self.assertEqual(cleric_comp["spell_slots"]["1"]["current"], 0)
+        cm.end_combat(self.world)
+
+        # 3. Verify all 14 static rooms (including town_jail) are reachable via move_player from town_riverside
+        rules.reset_caches()
+        all_static_ids = set(dm._load_static_catalog().keys())
+        self.assertEqual(len(all_static_ids), 15)
+        self.assertIn("town_jail", all_static_ids)
+
+        reachable = {"town_riverside"}
+        queue = deque(["town_riverside"])
+        while queue:
+            curr = queue.popleft()
+            room_obj = dm._load_static_catalog()[curr]
+            for d_dir, target_id in room_obj.get("exits", {}).items():
+                if target_id and target_id not in reachable:
+                    w_step = {"current_location": curr, "visited_rooms": [curr], "dynamic_rooms": {}}
+                    ok_m, _, _ = dm.move_player(d_dir, w_step, fighter)
+                    self.assertTrue(ok_m, f"Failed to move {d_dir} from {curr} to {target_id}")
+                    reachable.add(target_id)
+                    queue.append(target_id)
+        self.assertEqual(reachable, all_static_ids)
+
+        # 4. Legacy 548a08f save compatibility + Streamlit AppTest for Landing, Playing, and Combat views
+        legacy_player = {
+            "schema_version": 4,
+            "name": "LegacyHero",
+            "race": "Human",
+            "class": "Fighter",
+            "background": "Soldier",
+            "level": 1,
+            "xp_current": 0,
+            "hp": {"current": 12, "max": 12},
+            "ac": 16,
+            "stats": {"STR": 16, "DEX": 12, "CON": 14, "INT": 10, "WIS": 10, "CHA": 10},
+            "proficiency_bonus": 2,
+            "proficient_skills": ["Athletics"],
+            "proficient_saves": ["STR", "CON"],
+            "inventory": [{"item_id": "longsword", "equipped": True, "quantity": 1}],
+            "gold": 15,
+            "status": "normal",
+            "death_saves": {"success": 0, "fail": 0},
+        }
+        legacy_world = {
+            "schema_version": 4,
+            "character_name": "LegacyHero",
+            "current_location": "town_riverside",
+            "visited_rooms": ["town_riverside"],
+            "cleared_rooms": [],
+            "collected_loot": [],
+            "dynamic_rooms": {},
+            "game_time": {"day": 1, "period": "morning", "steps_since_period_start": 0},
+            "quest_log": {"main": [], "side": []},
+            "combat_state": None,
+        }
+
+        from streamlit.testing.v1 import AppTest
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        app_path = os.path.join(project_root, "app.py")
+
+        # 4a. Landing view
+        at = AppTest.from_file(app_path, default_timeout=15)
+        at.run()
+        self.assertEqual(len(at.exception), 0, f"Landing view raised exception: {at.exception}")
+
+        # 4b. Playing / Exploration view with legacy 548a08f save state
+        at.session_state["player_state"] = copy.deepcopy(legacy_player)
+        at.session_state["world_state"] = copy.deepcopy(legacy_world)
+        at.session_state["narrative_log"] = [{"role": "assistant", "content": "ยินดีต้อนรับสู่ริเวอร์ไซด์"}]
+        at.run()
+        self.assertEqual(len(at.exception), 0, f"Playing view raised exception: {at.exception}")
+
+        # 4c. Active Combat view with legacy 548a08f save state
+        combat_world = copy.deepcopy(legacy_world)
+        combat_player = copy.deepcopy(legacy_player)
+        cm.start_combat(["goblin_scout"], combat_player, combat_world)
+        at.session_state["player_state"] = combat_player
+        at.session_state["world_state"] = combat_world
+        at.run()
+        self.assertEqual(len(at.exception), 0, f"Combat view raised exception: {at.exception}")
+
 
 if __name__ == "__main__":
     unittest.main()

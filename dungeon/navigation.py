@@ -363,11 +363,15 @@ def register_new_location(
         else:
             # If opposite direction is already occupied on target_room, try any free direction on target_room
             if room_id not in t_exits.values():
+                linked = False
                 for free_d in ("north", "east", "west", "south"):
                     if t_exits.get(free_d) is None:
                         t_exits[free_d] = room_id
+                        linked = True
                         logger.info(f"register_new_location: linked '{target_id}' free exit '{free_d}' -> '{room_id}'.")
                         break
+                if not linked:
+                    t_exits[opp_dir] = room_id
 
     logger.debug(f"register_new_location: registered new room '{room_id}' ({clean_room.get('name')})")
     return True, ""
