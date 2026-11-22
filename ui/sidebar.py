@@ -26,78 +26,58 @@ from ui.dialogs import (
 
 
 def render_sidebar():
-    """Render character sheet, stats, location, and time in the sidebar."""
+    """Render Social Radar (Scene NPCs & Companions), Active Conditions/Bounty, and AI Engine configuration in the sidebar."""
     player = st.session_state.get("player_state")
     world = st.session_state.get("world_state")
     if not player or not world:
         return
 
-    # ── Pinned Always-Visible Top Section ──────────────────────────────────────
-    p_name = player.get("name", "Adventurer")
-    p_lvl = player.get("level", 1)
-    p_race = player.get("race", "")
-    p_cls = player.get("class_name", player.get("class", ""))
-    p_sub = player.get("subclass_name") or (player.get("subclass", "").replace("_", " ").title() if player.get("subclass") else "")
-    sub_tag = f" ({p_sub})" if p_sub else ""
-    st.sidebar.markdown(f"### 🛡️ {p_name}")
-    st.sidebar.caption(f"Level {p_lvl} &bull; {p_race} {p_cls}{sub_tag}")
-
-    # HP & Vitals (Non-truncating compact view)
-    hp_info = player.get("hp", {"current": 10, "max": 10})
-    cur_hp = hp_info.get("current", 0)
-    max_hp = hp_info.get("max", 10)
-    hp_pct = max(0.0, min(1.0, cur_hp / max(1, max_hp)))
-    ac = player.get("ac", 10)
-    xp_cur = player.get("xp_current", 0)
-    next_xp = state_manager.LEVEL_THRESHOLDS.get(p_lvl + 1, "MAX")
-    insp = state_manager.get_inspiration(player)
-    max_insp = player.get("max_inspiration", state_manager.MAX_INSPIRATION)
-
-    st.sidebar.markdown(f"**❤️ HP:** `{cur_hp} / {max_hp}` &nbsp;&nbsp;|&nbsp;&nbsp; **🛡️ AC:** `{ac}`")
-    st.sidebar.progress(hp_pct)
-    st.sidebar.markdown(f"⭐ **XP:** `{xp_cur} / {next_xp}` &nbsp;&nbsp;|&nbsp;&nbsp; 💡 **Insp:** `{insp} / {max_insp}`")
-
-    # Time & Location
-    gt = world.get("game_time", {})
-    day = gt.get("day", 1)
-    period = gt.get("period", "morning").capitalize()
     current_room = dungeon_manager.get_current_room(world)
     room_name = current_room.get("name", "Unknown") if current_room else "Unknown"
-    room_type = current_room.get("type", "wilderness").capitalize() if current_room else ""
 
-    st.sidebar.markdown(f"📍 **{room_name}** `({room_type})`")
-    st.sidebar.caption(f"⏳ **Day {day}**, {period}")
+    st.sidebar.markdown("### 🎭 เรดาร์สังคม & ความสัมพันธ์")
+    st.sidebar.caption(f"📍 พื้นที่ปัจจุบัน: **{room_name}**")
 
-    # Coin Pouch & Provisions
-    curr = get_player_currency(player)
-    gp, sp, cp = curr.get("gp", 0), curr.get("sp", 0), curr.get("cp", 0)
-    rations = get_ration_count(player)
-    st.sidebar.markdown(
-        f"💰 **เงิน:** `{gp} GP` &nbsp; `{sp} SP` &nbsp; `{cp} CP`  \n"
-        f"🍖 **เสบียง:** `{rations}` ชุด"
-    )
+    if player.get("peacemaker_active") or world.get("peacemaker_title"):
+        pm_t = world.get("peacemaker_title", "🕊️ ผู้สร้างสันติลิ้นทองคำ")
+        st.sidebar.success(f"**{pm_t}**\n\nโบนัสถาวร `+2 Persuasion` จากชื่อเสียงสายสันติ")
 
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("##### 🧭 เมนูหลัก (Game Sheets)")
+    # Scene NPCs & Secrets
+    room_npcs = list(current_room.get("npcs", [])) if current_room else []
+    if room_npcs:
+        st.sidebar.markdown("##### 🧑 ผู้คนในฉากนี้ (Scene NPCs)")
+        for nid in room_npcs:
+            n_obj = state_manager.resolve_npc(nid, world) or {"id": nid, "name": nid.replace("_", " ").title(), "role": "NPC"}
+            n_name = n_obj.get("name", nid.replace("_", " ").title())
+            n_role = n_obj.get("role", "NPC")
+            rel = world.get("npc_relationships", {}).get(nid, world.get("npc_relationships", {}).get(n_name, 0))
+            sec = n_obj.get("secret")
+            sec_txt = f"🔓 *{sec}*" if (sec and rel >= 15) else ("🔒 *มีความลับซ่อนอยู่ (ความสัมพันธ์ 15+)*" if sec else "")
+            st.sidebar.markdown(
+                f"**{n_name}** *({n_role})* &bull; `{rel:+d}`"
+                + (f"  \n<span style='font-size:0.78rem;color:#cbd5e1;'>{sec_txt}</span>" if sec_txt else ""),
+                unsafe_allow_html=True,
+            )
+    else:
+        st.sidebar.caption("🍃 ไม่มี NPC ประจำอยู่ในฉากนี้")
 
-    if st.sidebar.button("👤 ข้อมูลตัวละคร (Character)", use_container_width=True, key="sb_btn_char"):
-        show_character_dialog()
-
-    inv_count = len(player.get("inventory", []))
-    if st.sidebar.button(f"🎒 กระเป๋าสัมภาระ ({inv_count} ชิ้น)", use_container_width=True, key="sb_btn_inv"):
-        show_inventory_dialog()
-
-    active_quests_cnt = get_active_quest_count(world)
-    if st.sidebar.button(f"📜 บันทึกภารกิจ ({active_quests_cnt} รายการ)", use_container_width=True, key="sb_btn_quests"):
-        show_quests_dialog()
-
-    spell_cnt = get_known_spell_count(player)
-    if st.sidebar.button(f"✨ คัมภีร์เวทมนตร์ ({spell_cnt})", use_container_width=True, key="sb_btn_spells"):
-        show_spells_dialog()
-
-    camp_status = "🏕️ ในแคมป์" if world.get("at_camp") else "⛺ พักผ่อน"
-    if st.sidebar.button(f"⛺ พักผ่อน & แคมป์ ({camp_status})", use_container_width=True, key="sb_btn_camp"):
-        show_camp_dialog()
+    # Party Companions & Bond Perks
+    companions = world.get("party", {}).get("companions", [])
+    if companions:
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("##### 🤝 สหายร่วมเดินทาง (Party)")
+        for comp in companions:
+            if not isinstance(comp, dict):
+                continue
+            cid = comp.get("id") or comp.get("name", "")
+            cname = comp.get("name", cid)
+            c_app = state_manager.get_companion_approval(world, cid)
+            app_val = c_app.get("approval", 50)
+            pending_talk = " ❗" if c_app.get("camp_dialogue_pending") else ""
+            perk = state_manager.get_companion_bond_perk(comp, app_val)
+            st.sidebar.markdown(f"**{cname}**{pending_talk} &bull; `{app_val}/100`")
+            if perk:
+                st.sidebar.caption(f"✨ {perk['name']}")
 
     # Active Conditions & Wanted Notice
     active_conds = player.get("active_conditions", [])
@@ -110,13 +90,13 @@ def render_sidebar():
                 c_name = c.get("name", c.get("condition", "unknown"))
                 dur = c.get("duration")
                 formatted_conds.append(f"{c_name} ({dur} rds)" if dur else c_name)
-        st.sidebar.warning(f"⚠️ Conditions: {', '.join(formatted_conds)}")
+        st.sidebar.warning(f"⚠️ สถานะบัฟ/ดีบัฟ: {', '.join(formatted_conds)}")
 
     if player.get("is_wanted") or player.get("bounty", 0) > 0:
         bounty_val = player.get("bounty", 0)
-        st.sidebar.error(f"🚨 **WANTED!** Bounty: **{bounty_val} GP**")
+        st.sidebar.error(f"🚨 **WANTED!** ค่าหัว: **{bounty_val} GP**")
         if current_room and current_room.get("type") == "town":
-            if st.sidebar.button(f"🏛️ Pay Off Bounty ({bounty_val} GP)", use_container_width=True):
+            if st.sidebar.button(f"🏛️ จ่ายค่าปรับล้างคดี ({bounty_val} GP)", use_container_width=True):
                 ok_b, msg_b = state_manager.pay_bounty(player)
                 if ok_b:
                     st.toast(msg_b)
@@ -128,6 +108,8 @@ def render_sidebar():
                     st.sidebar.error(msg_b)
                 auto_save()
                 st.rerun()
+
+    st.sidebar.markdown("---")
 
     # ── AI Engine & Model Settings ───────────────────────────────────────────
     active_engine = llm_handler.get_active_engine()
