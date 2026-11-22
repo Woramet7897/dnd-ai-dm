@@ -21,13 +21,17 @@ logger = logging.getLogger("combat_manager")
 
 def _extract_crit_dice_expr(damage_expr: str) -> str:
     """
-    Extract only the dice portion ('NdX') from a damage expression like '1d8+5'
+    Extract only the dice portion ('NdX', or multiple dice terms 'NdX+MdY')
+    from a damage expression like '1d8+5' or '2d6+1d4+3'
     so flat modifiers ('+M' / '-M') are not rolled twice on a critical hit.
     """
     s = str(damage_expr).strip().replace(" ", "")
     m = re.match(r"^(\d+d\d+)([+-]\d+)?$", s, re.IGNORECASE)
     if m:
         return m.group(1)
+    dice_terms = re.findall(r"\d+d\d+", s, re.IGNORECASE)
+    if dice_terms:
+        return "+".join(dice_terms)
     m2 = re.match(r"^(\d+)([+-]\d+)?$", s)
     if m2:
         return m2.group(1)
@@ -143,7 +147,13 @@ def resolve_attack(
     if "slowed" in target_conditions:
         target_ac -= 2
     if "shielded" in target_conditions:
-        target_ac += 5
+        shield_ac = 5
+        for c_entry in target.get("active_conditions", []):
+            if isinstance(c_entry, dict) and (c_entry.get("condition") == "shielded" or c_entry.get("name") == "shielded"):
+                if "ac_bonus" in c_entry:
+                    shield_ac = int(c_entry["ac_bonus"])
+                    break
+        target_ac += shield_ac
     if "hasted" in target_conditions:
         target_ac += 2
     if "mirror_image" in target_conditions:

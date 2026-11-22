@@ -249,7 +249,13 @@ def resolve_spell_attack(
     if "slowed" in target_conds:
         target_ac -= 2
     if "shielded" in target_conds:
-        target_ac += 5
+        shield_ac = 5
+        for c_entry in target.get("active_conditions", []):
+            if isinstance(c_entry, dict) and (c_entry.get("condition") == "shielded" or c_entry.get("name") == "shielded"):
+                if "ac_bonus" in c_entry:
+                    shield_ac = int(c_entry["ac_bonus"])
+                    break
+        target_ac += shield_ac
     if "hasted" in target_conds:
         target_ac += 2
     if "mirror_image" in target_conds:
@@ -527,6 +533,9 @@ def cast_spell(
 
     elif s_type == "buff":
         cond = eff.get("condition")
+        ac_bonus_val = int(eff["ac_bonus"]) if isinstance(eff.get("ac_bonus"), (int, float)) else 0
+        if not cond and ac_bonus_val > 0:
+            cond = "shielded"
         dur = eff.get("duration", eff.get("duration_rounds", 3))
         if target_type == "all_allies" and combat_state:
             buff_targets = [combat_state.get("player_combatant", caster)] + combat_state.get("companions", [])
@@ -542,8 +551,18 @@ def cast_spell(
                     combat_manager.apply_condition(bt, cond, dur)
                 else:
                     apply_condition_to_state(bt, cond, duration_rounds=dur)
-                if bt.get("id") == "player":
+                if ac_bonus_val > 0:
+                    for c_entry in bt.get("active_conditions", []):
+                        if isinstance(c_entry, dict) and (c_entry.get("condition") == cond or c_entry.get("name") == cond):
+                            c_entry["ac_bonus"] = ac_bonus_val
+                    bt["temp_ac_bonus"] = ac_bonus_val
+                if bt.get("id") == "player" or bt is character_state:
                     apply_condition_to_state(character_state, cond, duration_rounds=dur)
+                    if ac_bonus_val > 0:
+                        for c_entry in character_state.get("active_conditions", []):
+                            if isinstance(c_entry, dict) and (c_entry.get("condition") == cond or c_entry.get("name") == cond):
+                                c_entry["ac_bonus"] = ac_bonus_val
+                        character_state["temp_ac_bonus"] = ac_bonus_val
             if "temp_hp" in eff:
                 thp = eff["temp_hp"] + (level_diff * 5)
                 bt_hp = bt.setdefault("hp", {"current": 10, "max": 10})
@@ -564,6 +583,7 @@ def cast_spell(
             "spell_name":        spell.get("name", "Spell"),
             "attack_name":       spell.get("name", "Spell"),
             "condition_applied": cond,
+            "ac_bonus_applied":  ac_bonus_val,
             "effect":            eff,
             "success":           True,
         }

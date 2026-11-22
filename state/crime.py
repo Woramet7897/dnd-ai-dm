@@ -35,12 +35,23 @@ def attempt_pickpocket(
         npc_name = target_npc.get("name", "NPC")
         dc = target_npc.get("passive_perception", target_npc.get("dc", 13))
     else:
-        npc_name = str(target_npc)
-        dc = 13
+        from rules import resolve_npc
+        npc_info = resolve_npc(str(target_npc), world_state)
+        if isinstance(npc_info, dict):
+            npc_name = npc_info.get("name", str(target_npc))
+            dc = npc_info.get("passive_perception", npc_info.get("dc", 13))
+        else:
+            npc_name = str(target_npc)
+            dc = 13
 
     catalog = _get_item_catalog()
     if item_id == "gold":
-        item_val = target_npc.get("gold", 25) if isinstance(target_npc, dict) else 25
+        if isinstance(target_npc, dict):
+            item_val = target_npc.get("gold", 25)
+        else:
+            from rules import resolve_npc
+            npc_info = resolve_npc(str(target_npc), world_state)
+            item_val = npc_info.get("gold", 25) if isinstance(npc_info, dict) else 25
     else:
         info = catalog.get(item_id, {})
         if not info and world_state:

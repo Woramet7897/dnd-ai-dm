@@ -33,6 +33,7 @@ from rules import (
     SKILL_TO_STAT,
     STAT_NAMES,
     _get_item_catalog,
+    _get_npc_catalog,
     _get_shop_catalog,
     _get_spell_catalog,
     _inventory_item_info,
@@ -41,7 +42,9 @@ from rules import (
     get_modifier,
     get_spell_catalog,
     is_proficient,
+    reset_caches,
     resolve_item,
+    resolve_npc,
     resolve_spell,
 )
 
@@ -61,7 +64,7 @@ _CATALOG_DIR = paths.CATALOG_DIR
 
 
 def __getattr__(name: str) -> Any:
-    if name in ("_item_catalog", "_spell_catalog", "_shop_catalog"):
+    if name in ("_item_catalog", "_spell_catalog", "_shop_catalog", "_npc_catalog"):
         return getattr(rules, name)
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 

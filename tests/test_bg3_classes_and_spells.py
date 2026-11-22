@@ -671,6 +671,112 @@ class TestBG3ClassesAndSpells(unittest.TestCase):
         self.assertIn("🌟 Inspiration +1", labels)
         self.assertIn("💚 Shadowheart +10", labels)
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # 14. REVIEWER CHECKLIST: OFFLINE CSS, NPC CATALOG, LEGACY BACKLOG & SAVE COMPAT
+    # ══════════════════════════════════════════════════════════════════════════
+    def test_reviewer_feedback_offline_css_npc_catalog_legacy_items_and_save_compat(self):
+        from unittest.mock import patch
+        import rules
+        import validation
+        import dungeon_manager as dm
+        import llm_handler
+
+        # 1. Offline CSS: ui/styles.py must NOT contain external Google Fonts @import
+        styles_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui", "styles.py")
+        with open(styles_path, "r", encoding="utf-8") as f:
+            css_src = f.read()
+        self.assertNotIn("fonts.googleapis.com", css_src)
+        self.assertNotIn("@import", css_src)
+
+        # 2. Static NPC Catalog: Every NPC in every dungeon_data.json room must exist in npc_catalog.json
+        rules.reset_caches()
+        validation.reset_caches()
+        npc_cat = rules._get_npc_catalog()
+        rooms_cat = dm._load_static_catalog()
+        for r_id, r_data in rooms_cat.items():
+            for npc_id in r_data.get("npcs", []):
+                self.assertIn(npc_id, npc_cat, f"Room '{r_id}' references NPC '{npc_id}' missing from npc_catalog.json")
+                resolved = rules.resolve_npc(npc_id, self.world)
+                self.assertIsNotNone(resolved)
+                self.assertTrue(validation.validate_npc_id(npc_id, self.world))
+
+        # Verify pickpocketing a static room NPC by ID ("innkeeper_mira") uses catalog profile
+        rogue = character_creator.create_character("Merisiel", "Elf", "Rogue", "Criminal", self.base_stats)
+        pp_res = sm.attempt_pickpocket(rogue, "innkeeper_mira", "gold", roll_override=15, world_state=self.world)
+        self.assertTrue(pp_res["success"])
+        self.assertIn("Innkeeper Mira", pp_res["message"])
+
+        # Verify Tier 2 system prompt includes static NPC persona_seed when player is in their room
+        self.world["current_location"] = "drunken_dragon_tavern"
+        tiers = llm_handler.build_system_prompt_tiers(rogue, self.world)
+        self.assertIn("Innkeeper Mira", tiers[2])
+        self.assertIn("Tavern Hostess", tiers[2])
+
+        # 3. Cantrip heal promotion preserves valid heal formula (e.g. '1d4+2' not clamped to '1d4+3')
+        cantrip_heal = {
+            "name": "Minor Mend",
+            "level": 0,
+            "type": "heal",
+            "effect": {"heal": "1d4+2"},
+        }
+        cleaned_heal = validation.validate_generated_spell(cantrip_heal, player_level=1)
+        self.assertIsNotNone(cleaned_heal)
+        self.assertEqual(cleaned_heal["level"], 1)
+        self.assertEqual(cleaned_heal["effect"]["heal"], "1d4+2")
+
+        # 4. player_level = inf / nan does not crash monster, npc, or spell validators
+        valid_m_sample = {
+            "name": "Void Stalker",
+            "hp": 15,
+            "ac": 13,
+            "stats": self.base_stats,
+            "attacks": [{"name": "Bite", "attack_bonus": 3, "damage": "1d6+1", "damage_type": "piercing"}],
+        }
+        for weird_lvl in (float("inf"), float("-inf"), float("nan")):
+            self.assertIsNotNone(validation.validate_generated_monster(valid_m_sample, player_level=weird_lvl))
+            self.assertIsNotNone(validation.validate_generated_npc({"name": "Lyra", "hp": 15, "ac": 12}, player_level=weird_lvl))
+            self.assertIsNotNone(validation.validate_generated_spell(cantrip_heal, player_level=weird_lvl))
+
+        # 5. Dynamic buff spell (with ac_bonus and no explicit condition) + static 'shield' spell apply AC bonus in combat
+        dyn_buff = validation.validate_generated_spell(
+            {"name": "Aegis Ward", "level": 1, "type": "buff", "effect": {"ac_bonus": 3, "duration_rounds": 3}},
+            player_level=1,
+        )
+        self.world.setdefault("generated_spells", {})["gen_spell_aegis"] = dyn_buff
+        wizard = character_creator.create_character("Ezren", "Human", "Wizard", "Sage", self.base_stats)
+        base_wiz_ac = wizard["ac"]
+        cast_out = sm.cast_spell(wizard, wizard, "gen_spell_aegis", wizard, self.world)
+        self.assertTrue(cast_out["success"])
+        self.assertEqual(cast_out["condition_applied"], "shielded")
+        self.assertEqual(cast_out["ac_bonus_applied"], 3)
+
+        # Attack against wizard with Aegis Ward (+3 AC) checks against base_wiz_ac + 3
+        orc_attacker = {"id": "orc", "name": "Orc", "side": "enemy", "stats": self.base_stats}
+        atk_vs_ward = cm.resolve_attack(orc_attacker, wizard, {"name": "Club", "attack_bonus": 0, "damage": "1d6"})
+        self.assertEqual(atk_vs_ward["target_ac"], base_wiz_ac + 3)
+
+        # Verify all signature level-up spells exist in spell_catalog.json
+        from state.progression import SIGNATURE_LEVEL_UP_SPELLS
+        sp_cat = rules._get_spell_catalog()
+        for cls_k, lvl_map in SIGNATURE_LEVEL_UP_SPELLS.items():
+            for l_k, sp_list in lvl_map.items():
+                for sid in sp_list:
+                    self.assertIn(sid, sp_cat, f"Signature spell '{sid}' ({cls_k} Lv.{l_k}) missing from spell_catalog.json")
+
+        # 6. Multi-dice critical hit ('2d6+1d4+3'): rolls '2d6+1d4' extra on crit without doubling '+3'
+        compound_atk = {"name": "Flame Greatsword", "attack_bonus": 5, "damage": "2d6+1d4+3", "damage_type": "fire"}
+        dummy_target = {"id": "t1", "name": "Dummy", "side": "enemy", "hp": {"current": 200, "max": 200}, "ac": 10}
+        with patch("combat_manager.random.randint", side_effect=lambda a, b: b):
+            with patch.object(cm, "_roll_d20", return_value=15):
+                r_hit = cm.resolve_attack(wizard, dummy_target, compound_atk)
+            # Max of 2d6 (12) + 1d4 (4) + 3 = 19
+            self.assertEqual(r_hit["damage"], 19)
+
+            with patch.object(cm, "_roll_d20", return_value=20):
+                r_crit = cm.resolve_attack(wizard, dummy_target, compound_atk)
+            # Max crit: (12 + 4 + 3) + (12 + 4) = 35 (not 38)
+            self.assertEqual(r_crit["damage"], 35)
+
 
 if __name__ == "__main__":
     unittest.main()

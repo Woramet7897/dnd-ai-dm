@@ -51,7 +51,7 @@ def _roll_d20() -> int:
 
 
 def roll_dice(dice_str: str) -> int:
-    """Parse and roll a dice expression such as '1d6+2', '2d8', or '1d4-1'."""
+    """Parse and roll a dice expression such as '1d6+2', '2d8', '1d4-1', or '2d6+1d4+3'."""
     dice_str = dice_str.strip().replace(" ", "")
 
     m = re.match(r"^(\d+)d(\d+)([+-]\d+)?$", dice_str, re.IGNORECASE)
@@ -67,6 +67,19 @@ def roll_dice(dice_str: str) -> int:
         base = int(m2.group(1))
         modifier = int(m2.group(2)) if m2.group(2) else 0
         return max(1, base + modifier)
+
+    # Support multi-dice compound formulas like '2d6+1d4' or '2d6+1d4+3'
+    if re.match(r"^\d+d\d+(?:[+-](?:\d+d\d+|\d+))+$", dice_str, re.IGNORECASE):
+        total = 0
+        for token in re.findall(r"[+-]?\d+(?:d\d+)?", dice_str, re.IGNORECASE):
+            sign = -1 if token.startswith("-") else 1
+            clean_tok = token.lstrip("+-")
+            if "d" in clean_tok.lower():
+                nd, ds = clean_tok.lower().split("d", 1)
+                total += sign * sum(random.randint(1, int(ds)) for _ in range(int(nd)))
+            else:
+                total += sign * int(clean_tok)
+        return max(1, total)
 
     raise ValueError(f"Cannot parse dice expression: '{dice_str}'")
 

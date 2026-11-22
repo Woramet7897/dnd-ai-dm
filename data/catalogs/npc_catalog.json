@@ -1,0 +1,242 @@
+{
+  "captain_valdis": {
+    "id": "captain_valdis",
+    "name": "Captain Valdis",
+    "role": "Town Guard Captain",
+    "location_id": "town_riverside",
+    "persona_seed": "A stern, battle-hardened guard captain in polished chainmail who speaks directly and values law, discipline, and keeping Riverside Village safe from goblins and bandits.",
+    "passive_perception": 13,
+    "gold": 25,
+    "inventory": [
+      {"item_id": "healing_potion", "quantity": 1},
+      {"item_id": "longsword", "quantity": 1}
+    ],
+    "hp": {"current": 32, "max": 32},
+    "ac": 16,
+    "stats": {"STR": 16, "DEX": 12, "CON": 14, "INT": 11, "WIS": 14, "CHA": 13},
+    "attacks": [
+      {"name": "Captain's Longsword", "attack_bonus": 5, "damage": "1d8+3", "damage_type": "slashing"}
+    ],
+    "approval": 50
+  },
+  "old_herbalist": {
+    "id": "old_herbalist",
+    "name": "Old Herbalist",
+    "role": "Village Apothecary",
+    "location_id": "town_riverside",
+    "persona_seed": "A kindly, silver-haired elder smelling of dried lavender and bitter roots, always muttering old folk remedies and warnings about the forest.",
+    "passive_perception": 13,
+    "gold": 25,
+    "inventory": [
+      {"item_id": "healing_potion", "quantity": 2},
+      {"item_id": "antitoxin", "quantity": 1}
+    ],
+    "hp": {"current": 14, "max": 14},
+    "ac": 11,
+    "stats": {"STR": 8, "DEX": 12, "CON": 12, "INT": 15, "WIS": 16, "CHA": 12},
+    "attacks": [
+      {"name": "Walking Staff", "attack_bonus": 2, "damage": "1d6", "damage_type": "bludgeoning"}
+    ],
+    "approval": 55
+  },
+  "travelling_merchant": {
+    "id": "travelling_merchant",
+    "name": "Travelling Merchant",
+    "role": "Wandering Trader",
+    "location_id": "crossroads",
+    "persona_seed": "A shrewd, fast-talking peddler with a colorful wagon who loves a good bargain and hears every rumor along the eastern trade roads.",
+    "passive_perception": 13,
+    "gold": 25,
+    "inventory": [
+      {"item_id": "healing_potion", "quantity": 1},
+      {"item_id": "torch", "quantity": 2},
+      {"item_id": "rope", "quantity": 1}
+    ],
+    "hp": {"current": 18, "max": 18},
+    "ac": 12,
+    "stats": {"STR": 10, "DEX": 14, "CON": 12, "INT": 13, "WIS": 12, "CHA": 16},
+    "attacks": [
+      {"name": "Concealed Dagger", "attack_bonus": 4, "damage": "1d4+2", "damage_type": "piercing"}
+    ],
+    "approval": 50
+  },
+  "jailer_karr": {
+    "id": "jailer_karr",
+    "name": "Jailer Karr",
+    "role": "Town Prison Warden",
+    "location_id": "town_jail",
+    "persona_seed": "A gruff, heavy-set warden with a ring of iron keys who grumbles about troublemakers and keeps a watchful eye on the cell blocks.",
+    "passive_perception": 13,
+    "gold": 25,
+    "inventory": [
+      {"item_id": "mace", "quantity": 1},
+      {"item_id": "torch", "quantity": 1}
+    ],
+    "hp": {"current": 28, "max": 28},
+    "ac": 15,
+    "stats": {"STR": 15, "DEX": 10, "CON": 14, "INT": 10, "WIS": 13, "CHA": 9},
+    "attacks": [
+      {"name": "Warden's Mace", "attack_bonus": 4, "damage": "1d6+2", "damage_type": "bludgeoning"}
+    ],
+    "approval": 40
+  },
+  "innkeeper_mira": {
+    "id": "innkeeper_mira",
+    "name": "Innkeeper Mira",
+    "role": "Tavern Hostess",
+    "location_id": "drunken_dragon_tavern",
+    "persona_seed": "A warm yet sharp-witted tavern owner who pours spiced ale, knows every bounty on the notice board, and fiercely protects her patrons.",
+    "passive_perception": 13,
+    "gold": 25,
+    "inventory": [
+      {"item_id": "healing_potion", "quantity": 1},
+      {"item_id": "trail_rations", "quantity": 2}
+    ],
+    "hp": {"current": 20, "max": 20},
+    "ac": 12,
+    "stats": {"STR": 12, "DEX": 14, "CON": 14, "INT": 12, "WIS": 14, "CHA": 16},
+    "attacks": [
+      {"name": "Heavy Tankard", "attack_bonus": 3, "damage": "1d4+1", "damage_type": "bludgeoning"}
+    ],
+    "approval": 60
+  },
+  "bard_lorien": {
+    "id": "bard_lorien",
+    "name": "Bard Lorien",
+    "role": "Half-Elf Minstrel",
+    "location_id": "drunken_dragon_tavern",
+    "persona_seed": "A flamboyant, silver-tongued minstrel strumming a gilded lute by the tavern hearth, eager to trade ancient ballads and secret rumors.",
+    "passive_perception": 13,
+    "gold": 25,
+    "inventory": [
+      {"item_id": "rapier", "quantity": 1},
+      {"item_id": "healing_potion", "quantity": 1}
+    ],
+    "hp": {"current": 22, "max": 22},
+    "ac": 14,
+    "stats": {"STR": 10, "DEX": 16, "CON": 12, "INT": 13, "WIS": 12, "CHA": 17},
+    "attacks": [
+      {"name": "Dueling Rapier", "attack_bonus": 5, "damage": "1d8+3", "damage_type": "piercing"}
+    ],
+    "approval": 60
+  },
+  "hooded_stranger": {
+    "id": "hooded_stranger",
+    "name": "Hooded Stranger",
+    "role": "Shadowy Informant",
+    "location_id": "drunken_dragon_tavern",
+    "persona_seed": "A cloaked figure sitting in the darkest corner of the tavern, speaking in cryptic whispers about the cult beneath the ruined mill.",
+    "passive_perception": 13,
+    "gold": 25,
+    "inventory": [
+      {"item_id": "dagger", "quantity": 2},
+      {"item_id": "thieves_tools", "quantity": 1}
+    ],
+    "hp": {"current": 24, "max": 24},
+    "ac": 15,
+    "stats": {"STR": 11, "DEX": 16, "CON": 12, "INT": 14, "WIS": 14, "CHA": 13},
+    "attacks": [
+      {"name": "Shadow Dagger", "attack_bonus": 5, "damage": "1d4+3", "damage_type": "piercing"}
+    ],
+    "approval": 45
+  },
+  "druid_elowen": {
+    "id": "druid_elowen",
+    "name": "Druid Elowen",
+    "role": "Keeper of the Fey Grove",
+    "location_id": "whispering_grove",
+    "persona_seed": "A serene wood-elf druid crowned with silver willow leaves who speaks softly for the spirits of Thornwood Forest.",
+    "passive_perception": 13,
+    "gold": 25,
+    "inventory": [
+      {"item_id": "healing_potion", "quantity": 2},
+      {"item_id": "wild_vegetables", "quantity": 2}
+    ],
+    "hp": {"current": 26, "max": 26},
+    "ac": 14,
+    "stats": {"STR": 10, "DEX": 14, "CON": 14, "INT": 12, "WIS": 17, "CHA": 13},
+    "attacks": [
+      {"name": "Thorn Quarterstaff", "attack_bonus": 5, "damage": "1d8+3", "damage_type": "bludgeoning"}
+    ],
+    "approval": 55
+  },
+  "captured_merchant": {
+    "id": "captured_merchant",
+    "name": "Captured Merchant",
+    "role": "Hostage Trader",
+    "location_id": "bandit_outpost",
+    "persona_seed": "A bruised, desperate silk merchant tied near the bandit watchtower, promising generous rewards to anyone who rescues him.",
+    "passive_perception": 13,
+    "gold": 25,
+    "inventory": [
+      {"item_id": "healing_potion", "quantity": 1}
+    ],
+    "hp": {"current": 12, "max": 16},
+    "ac": 10,
+    "stats": {"STR": 9, "DEX": 11, "CON": 11, "INT": 13, "WIS": 12, "CHA": 14},
+    "attacks": [
+      {"name": "Improvised Strike", "attack_bonus": 1, "damage": "1d4", "damage_type": "bludgeoning"}
+    ],
+    "approval": 65
+  },
+  "forgemaster_thrain": {
+    "id": "forgemaster_thrain",
+    "name": "Forgemaster Thrain",
+    "role": "Master Dwarven Smith",
+    "location_id": "silverpeak_outpost",
+    "persona_seed": "A booming, soot-bearded dwarven blacksmith who judges adventurers by the quality of their steel and respects straightforward honesty.",
+    "passive_perception": 13,
+    "gold": 25,
+    "inventory": [
+      {"item_id": "warhammer", "quantity": 1},
+      {"item_id": "shield", "quantity": 1}
+    ],
+    "hp": {"current": 35, "max": 35},
+    "ac": 16,
+    "stats": {"STR": 17, "DEX": 10, "CON": 16, "INT": 12, "WIS": 13, "CHA": 12},
+    "attacks": [
+      {"name": "Forgemaster's Hammer", "attack_bonus": 5, "damage": "1d8+3", "damage_type": "bludgeoning"}
+    ],
+    "approval": 50
+  },
+  "scholar_vael": {
+    "id": "scholar_vael",
+    "name": "Scholar Vael",
+    "role": "Arcane Historian",
+    "location_id": "silverpeak_outpost",
+    "persona_seed": "An inquisitive elven loremaster surrounded by rubbing scrolls, fascinated by the sunken cult ruins and ancient runes.",
+    "passive_perception": 13,
+    "gold": 25,
+    "inventory": [
+      {"item_id": "quarterstaff", "quantity": 1},
+      {"item_id": "healing_potion", "quantity": 1}
+    ],
+    "hp": {"current": 18, "max": 18},
+    "ac": 12,
+    "stats": {"STR": 8, "DEX": 13, "CON": 12, "INT": 17, "WIS": 14, "CHA": 12},
+    "attacks": [
+      {"name": "Arcane Bolt", "attack_bonus": 5, "damage": "1d8+2", "damage_type": "force"}
+    ],
+    "approval": 55
+  },
+  "high_cultist_malakor": {
+    "id": "high_cultist_malakor",
+    "name": "High Cultist Malakor",
+    "role": "Herald of the Sunken Altar",
+    "location_id": "sunken_sanctum",
+    "persona_seed": "A fanatical, purple-robed cult leader who speaks with chilling theatricality, offering dark bargains before resorting to bloodshed.",
+    "passive_perception": 13,
+    "gold": 25,
+    "inventory": [
+      {"item_id": "dagger", "quantity": 1},
+      {"item_id": "ring_of_protection", "quantity": 1}
+    ],
+    "hp": {"current": 40, "max": 40},
+    "ac": 15,
+    "stats": {"STR": 11, "DEX": 14, "CON": 14, "INT": 15, "WIS": 16, "CHA": 16},
+    "attacks": [
+      {"name": "Void Ritual Blade", "attack_bonus": 5, "damage": "1d6+3", "damage_type": "necrotic"}
+    ],
+    "approval": 20
+  }
+}

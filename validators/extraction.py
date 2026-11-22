@@ -176,26 +176,31 @@ def validate_monster_ids(enemy_ids: Any, world_state: Optional[Dict] = None) -> 
 
 
 def validate_npc_id(npc_id: Any, world_state: Dict) -> bool:
-    """Return True if npc_id exists in npc_relationships, party.companions, or generated_npcs in world_state."""
+    """Return True if npc_id exists in npc_catalog.json, room npcs, npc_relationships, party.companions, or generated_npcs."""
     if not isinstance(npc_id, str):
         logger.debug(f"npc_id is not a string (got {type(npc_id).__name__}: {npc_id!r}) — invalid.")
         return False
 
-    npc_rels = world_state.get("npc_relationships", {})
+    import validation
+    npc_cat = validation._get_npc_catalog()
+    if npc_id in npc_cat:
+        return True
+
+    npc_rels = world_state.get("npc_relationships", {}) if isinstance(world_state, dict) else {}
     if npc_id in npc_rels:
         return True
 
-    party = world_state.get("party", {})
+    party = world_state.get("party", {}) if isinstance(world_state, dict) else {}
     companions = party.get("companions", [])
     companion_ids = {c.get("id") for c in companions if isinstance(c, dict)}
     if npc_id in companion_ids:
         return True
 
-    gen_npcs = world_state.get("generated_npcs", {})
+    gen_npcs = world_state.get("generated_npcs", {}) if isinstance(world_state, dict) else {}
     if npc_id in gen_npcs:
         return True
 
-    logger.debug(f"Unknown npc_id '{npc_id}' — not in npc_relationships, party.companions, or generated_npcs, dropped.")
+    logger.debug(f"Unknown npc_id '{npc_id}' — not in npc_catalog.json, npc_relationships, party.companions, or generated_npcs, dropped.")
     return False
 
 

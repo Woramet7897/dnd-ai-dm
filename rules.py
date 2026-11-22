@@ -45,6 +45,72 @@ _CATALOG_DIR: str = paths.CATALOG_DIR
 _item_catalog: Optional[Dict[str, Any]] = None
 _spell_catalog: Optional[Dict[str, Any]] = None
 _shop_catalog: Optional[Dict[str, Any]] = None
+_npc_catalog: Optional[Dict[str, Any]] = None
+
+
+def reset_caches() -> None:
+    """Clear all in-memory catalog caches so tests or reloads read fresh JSON from disk."""
+    global _item_catalog, _spell_catalog, _shop_catalog, _npc_catalog
+    _item_catalog = None
+    _spell_catalog = None
+    _shop_catalog = None
+    _npc_catalog = None
+    import sys
+    cm_mod = sys.modules.get("combat_manager")
+    if cm_mod is not None and hasattr(cm_mod, "_monster_catalog"):
+        cm_mod._monster_catalog = None
+    dm_mod = sys.modules.get("dungeon_manager")
+    if dm_mod is not None and hasattr(dm_mod, "_static_catalog"):
+        dm_mod._static_catalog = None
+    val_mod = sys.modules.get("validation")
+    if val_mod is not None:
+        for attr in ("_item_catalog", "_monster_catalog", "_spell_catalog", "_npc_catalog"):
+            if hasattr(val_mod, attr):
+                setattr(val_mod, attr, None)
+
+
+def _get_npc_catalog() -> Dict[str, Any]:
+    global _npc_catalog
+    if _npc_catalog is None:
+        try:
+            path = os.path.join(_CATALOG_DIR, "npc_catalog.json")
+            with open(path, "r", encoding="utf-8") as f:
+                _npc_catalog = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to load npc_catalog.json: {e}")
+            _npc_catalog = {}
+    return _npc_catalog
+
+
+def resolve_npc(
+    npc_id: str,
+    world_state: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Single source of truth for resolving NPC definitions.
+    Checks static npc_catalog.json first, falls back to world_state["generated_npcs"]
+    and world_state["party"]["companions"].
+    """
+    if not isinstance(npc_id, str) or not npc_id.strip():
+        return None
+    catalog = _get_npc_catalog()
+    if npc_id in catalog:
+        return catalog[npc_id]
+    low = npc_id.strip().lower()
+    if low in catalog:
+        return catalog[low]
+
+    if world_state and isinstance(world_state, dict):
+        gen_npcs = world_state.get("generated_npcs", {})
+        if npc_id in gen_npcs:
+            return gen_npcs[npc_id]
+        for k, v in gen_npcs.items():
+            if isinstance(v, dict) and (k.lower() == low or str(v.get("name", "")).lower() == low):
+                return v
+        for c in world_state.get("party", {}).get("companions", []):
+            if isinstance(c, dict) and (c.get("id") == npc_id or str(c.get("name", "")).lower() == low):
+                return c
+    return None
 
 
 def _get_item_catalog() -> Dict[str, Any]:

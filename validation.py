@@ -38,6 +38,31 @@ if not logger.handlers:
 _item_catalog: Optional[Dict] = None
 _monster_catalog: Optional[Dict] = None
 _spell_catalog: Optional[Dict] = None
+_npc_catalog: Optional[Dict] = None
+
+
+def reset_caches() -> None:
+    """Clear cached catalogs on validation module and rules module."""
+    global _item_catalog, _monster_catalog, _spell_catalog, _npc_catalog
+    _item_catalog = None
+    _monster_catalog = None
+    _spell_catalog = None
+    _npc_catalog = None
+    import rules
+    rules.reset_caches()
+
+
+def _get_npc_catalog() -> Dict:
+    global _npc_catalog
+    if _npc_catalog is None:
+        try:
+            path = os.path.join(_CATALOG_DIR, "npc_catalog.json")
+            with open(path, "r", encoding="utf-8") as f:
+                _npc_catalog = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to load npc_catalog.json: {e}")
+            _npc_catalog = {}
+    return _npc_catalog
 
 
 def _get_item_catalog() -> Dict:

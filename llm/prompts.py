@@ -177,14 +177,22 @@ def build_system_prompt_tiers(
                 pass
         npc_rels = world_state.get("npc_relationships", {})
         gen_npcs = world_state.get("generated_npcs", {})
+        try:
+            from rules import _get_npc_catalog
+            static_npcs = _get_npc_catalog()
+        except Exception:
+            static_npcs = {}
         npc_lines = []
         for rn in room_npcs:
             rel_val = npc_rels.get(rn, 0)
             rel_str = f", Attitude: {rel_val:+d}" if rel_val else ""
-            # Check if this NPC has a persona in generated_npcs
+            # Check if this NPC has a persona in generated_npcs or static npc_catalog.json
             g_info = next((v for k, v in gen_npcs.items() if isinstance(v, dict) and (k == rn or v.get("name") == rn)), None)
+            if not g_info and isinstance(static_npcs, dict):
+                g_info = static_npcs.get(rn) or next((v for k, v in static_npcs.items() if isinstance(v, dict) and v.get("name") == rn), None)
+            disp_name = g_info.get("name", rn) if isinstance(g_info, dict) else rn
             p_str = f" — {g_info.get('role', '')}: {g_info.get('persona_seed', '')}" if g_info else ""
-            npc_lines.append(f"- {rn}{rel_str}{p_str}")
+            npc_lines.append(f"- {disp_name} ({rn}){rel_str}{p_str}" if disp_name != rn else f"- {rn}{rel_str}{p_str}")
         if npc_lines:
             tier_2_parts.append("Local NPCs in Current Scene:\n" + "\n".join(npc_lines))
 

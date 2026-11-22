@@ -8,11 +8,9 @@ import streamlit as st
 
 
 def apply_custom_css():
-    """Inject Obsidian & Antique Gold Dark Fantasy RPG custom CSS styling."""
+    """Inject Obsidian & Antique Gold Dark Fantasy RPG custom CSS styling (100% offline-safe system font stacks)."""
     st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700&family=Prompt:wght@300;400;500;600;700&display=swap');
-
     :root {
         --hgw-bg-deep: #0a0b10;
         --hgw-bg-panel: #11141e;
@@ -29,7 +27,7 @@ def apply_custom_css():
     }
 
     html, body, [class*="css"] {
-        font-family: 'Prompt', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-family: 'Prompt', 'Leelawadee UI', 'Segoe UI', 'Tahoma', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
 
     .stApp {
@@ -38,7 +36,7 @@ def apply_custom_css():
     }
 
     h1, h2, h3 {
-        font-family: 'Cinzel', 'Prompt', serif !important;
+        font-family: 'Cinzel', 'Palatino Linotype', 'Book Antiqua', 'Georgia', 'Prompt', serif !important;
         letter-spacing: 0.03em;
         color: #f8fafc;
     }

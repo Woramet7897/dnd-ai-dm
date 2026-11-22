@@ -158,14 +158,14 @@ def validate_generated_monster(m_data: Any, player_level: int = 1) -> Optional[D
         logger.debug("validate_generated_monster: missing or empty monster name — dropped.")
         return None
 
-    lvl = max(1, min(5, int(player_level) if isinstance(player_level, (int, float)) else 1))
+    lvl = max(1, min(5, _safe_int(player_level, 1)))
     bounds = MONSTER_BOUNDS_BY_LEVEL[lvl]
 
     raw_hp = m_data.get("hp")
     if isinstance(raw_hp, dict):
         hp_val = raw_hp.get("max") or raw_hp.get("current")
-    elif isinstance(raw_hp, (int, float)):
-        hp_val = int(raw_hp)
+    elif isinstance(raw_hp, (int, float)) and not isinstance(raw_hp, bool):
+        hp_val = _safe_int(raw_hp, -1)
     else:
         logger.debug(f"validate_generated_monster: invalid hp spec ({raw_hp!r}) — dropped.")
         return None
@@ -304,14 +304,14 @@ def validate_generated_npc(npc_data: Any, player_level: int = 1) -> Optional[Dic
     raw_persona = npc_data.get("persona_seed", npc_data.get("personality", ""))
     persona_seed = sanitize_text(raw_persona, max_len=150) if raw_persona else f"A companion named {name}."
 
-    lvl = max(1, min(5, int(player_level) if isinstance(player_level, (int, float)) else 1))
+    lvl = max(1, min(5, _safe_int(player_level, 1)))
     bounds = NPC_BOUNDS_BY_LEVEL[lvl]
 
     raw_hp = npc_data.get("hp", 15)
     if isinstance(raw_hp, dict):
         hp_val = raw_hp.get("max") or raw_hp.get("current", 15)
-    elif isinstance(raw_hp, (int, float)):
-        hp_val = int(raw_hp)
+    elif isinstance(raw_hp, (int, float)) and not isinstance(raw_hp, bool):
+        hp_val = _safe_int(raw_hp, -1)
     else:
         logger.debug(f"validate_generated_npc: invalid hp spec ({raw_hp!r}) — dropped.")
         return None
@@ -592,10 +592,7 @@ def validate_generated_spell(spell_data: Any, player_level: int = 1) -> Optional
         return None
 
     raw_lvl = spell_data.get("level", 1)
-    if not isinstance(raw_lvl, (int, float)):
-        lvl = 1
-    else:
-        lvl = max(0, min(3, int(raw_lvl)))
+    lvl = max(0, min(3, _safe_int(raw_lvl, 1)))
 
     bounds = SPELL_BOUNDS_BY_LEVEL[lvl]
 
@@ -634,6 +631,7 @@ def validate_generated_spell(spell_data: Any, player_level: int = 1) -> Optional
         if lvl == 0:
             lvl = 1
             slot_cost = 1
+            bounds = SPELL_BOUNDS_BY_LEVEL[lvl]
         raw_heal = str(raw_effect.get("heal", "1d4+3")).strip().lower()
         avg_h = calculate_average_dice_damage(raw_heal)
         if avg_h <= 0.0 or avg_h > bounds["max_avg_heal"]:
@@ -641,10 +639,10 @@ def validate_generated_spell(spell_data: Any, player_level: int = 1) -> Optional
         clean_effect["heal"] = raw_heal
 
     elif stype == "buff":
-        ac_b = raw_effect.get("ac_bonus", 2)
-        ac_b = max(1, min(5, int(ac_b))) if isinstance(ac_b, (int, float)) else 2
-        dur = raw_effect.get("duration_rounds", 3)
-        dur = max(1, min(10, int(dur))) if isinstance(dur, (int, float)) else 3
+        ac_b = _safe_int(raw_effect.get("ac_bonus", 2), 2)
+        ac_b = max(1, min(5, ac_b))
+        dur = _safe_int(raw_effect.get("duration_rounds", 3), 3)
+        dur = max(1, min(10, dur))
         clean_effect["ac_bonus"] = ac_b
         clean_effect["duration_rounds"] = dur
 
